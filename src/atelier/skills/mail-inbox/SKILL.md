@@ -15,9 +15,10 @@ description: >-
 
 ## Steps
 
-1. List messages assigned to the agent:
-   - `bd list --label at:message --assignee <agent_id> [--label at:unread]`
-1. Parse frontmatter from each message description if needed.
+1. Use the inbox script:
+   - `python3 skills/mail-inbox/scripts/list_inbox.py --agent-id "<agent_id>" [--all] [--beads-dir "<beads_dir>"] [--repo-dir "<repo_dir>"]`
+1. The script reads through `atelier.store` message models and filters by the
+   agent runtime role.
 1. Treat assignee-based inbox delivery as compatibility-only routing:
    - durable work decisions should also be attached to an epic or changeset
      thread
@@ -26,4 +27,5 @@ description: >-
 
 ## Verification
 
-- Returned list includes only message beads for the agent.
+- Returned list includes only store-backed threaded messages for the agent
+  runtime role.

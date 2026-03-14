@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,123 +28,101 @@ def _load_script_module():
     return module
 
 
-def test_dispatch_message_delivers_to_active_worker() -> None:
+class _FakeStore:
+    def __init__(self, issue_id: str) -> None:
+        self.issue_id = issue_id
+        self.request = None
+
+    async def create_message(self, request):
+        self.request = request
+        return SimpleNamespace(id=self.issue_id)
+
+
+def test_dispatch_message_delivers_store_backed_worker_message() -> None:
     module = _load_script_module()
-    with (
-        patch.object(module.agent_home, "is_session_agent_active", return_value=True),
-        patch.object(
-            module.beads, "create_message_bead", return_value={"id": "at-msg-1"}
-        ) as create,
-    ):
-        result = module.dispatch_message(
-            subject="Need follow-up",
-            body="Please investigate.",
-            to="atelier/worker/codex/p101-t1",
-            from_agent="atelier/planner/codex/p202-t2",
-            thread="at-thread-1.1",
-            reply_to="at-msg-0",
-            beads_root=Path("/beads"),
-            cwd=Path("/repo"),
-        )
+    fake_store = _FakeStore("at-msg-1")
+    module.build_atelier_store = lambda **_kwargs: fake_store
+
+    result = module.dispatch_message(
+        subject="Need follow-up",
+        body="Please investigate.",
+        to="atelier/worker/codex/p101-t1",
+        from_agent="atelier/planner/codex/p202-t2",
+        thread="at-thread-1.1",
+        reply_to="at-msg-0",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
 
     assert result.decision == "delivered"
     assert result.issue_id == "at-msg-1"
-    call = create.call_args.kwargs
-    assert call["assignee"] == "atelier/worker/codex/p101-t1"
-    assert call["metadata"]["from"] == "atelier/planner/codex/p202-t2"
-    assert call["metadata"]["delivery"] == "work-threaded"
-    assert call["metadata"]["thread"] == "at-thread-1.1"
-    assert call["metadata"]["thread_kind"] == "changeset"
-    assert call["metadata"]["thread_target"] == "changeset"
-    assert call["metadata"]["audience"] == ["worker"]
-    assert call["metadata"]["audiences"] == ["worker"]
-    assert call["metadata"]["blocking_roles"] == ["worker"]
-    assert call["metadata"]["kind"] == "reply"
-    assert call["metadata"]["reply_to"] == "at-msg-0"
+    request = fake_store.request
+    assert request.title == "Need follow-up"
+    assert request.body == "Please investigate."
+    assert request.sender == "atelier/planner/codex/p202-t2"
+    assert request.thread_id == "at-thread-1.1"
+    assert request.thread_kind.value == "changeset"
+    assert request.audience == ("worker",)
+    assert request.kind == "reply"
+    assert request.reply_to == "at-msg-0"
+    assert request.blocking is True
 
 
 def test_dispatch_message_infers_epic_thread_kind_for_top_level_work_thread() -> None:
     module = _load_script_module()
-    with (
-        patch.object(module.agent_home, "is_session_agent_active", return_value=True),
-        patch.object(
-            module.beads, "create_message_bead", return_value={"id": "at-msg-1"}
-        ) as create,
-    ):
-        result = module.dispatch_message(
-            subject="Need follow-up",
-            body="Please investigate.",
-            to="atelier/worker/codex/p101-t1",
-            from_agent="atelier/planner/codex/p202-t2",
-            thread="at-ue6aj",
-            reply_to=None,
-            beads_root=Path("/beads"),
-            cwd=Path("/repo"),
-        )
+    fake_store = _FakeStore("at-msg-1")
+    module.build_atelier_store = lambda **_kwargs: fake_store
+
+    result = module.dispatch_message(
+        subject="Need follow-up",
+        body="Please investigate.",
+        to="atelier/worker/codex/p101-t1",
+        from_agent="atelier/planner/codex/p202-t2",
+        thread="at-ue6aj",
+        reply_to=None,
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
 
     assert result.decision == "delivered"
     assert result.issue_id == "at-msg-1"
-    assert create.call_args.kwargs["metadata"]["thread_kind"] == "epic"
-
-
-def test_dispatch_message_keeps_threaded_message_on_original_work_when_worker_inactive() -> None:
-    module = _load_script_module()
-    with (
-        patch.object(module.agent_home, "is_session_agent_active", return_value=False),
-        patch.object(
-            module.beads, "create_message_bead", return_value={"id": "at-msg-5"}
-        ) as create_message,
-    ):
-        result = module.dispatch_message(
-            subject="Fix failing check",
-            body="Please investigate CI logs.",
-            to="atelier/worker/codex/p303-t3",
-            from_agent="atelier/planner/codex/p202-t2",
-            thread="at-es93n.1",
-            reply_to=None,
-            beads_root=Path("/beads"),
-            cwd=Path("/repo"),
-        )
-
-    assert result.decision == "delivered"
-    assert result.issue_id == "at-msg-5"
-    call = create_message.call_args.kwargs
-    assert call["assignee"] == "atelier/worker/codex/p303-t3"
-    assert call["metadata"]["delivery"] == "work-threaded"
-    assert call["metadata"]["thread"] == "at-es93n.1"
-    assert call["metadata"]["thread_kind"] == "changeset"
-    assert call["metadata"]["thread_target"] == "changeset"
-    assert call["metadata"]["audience"] == ["worker"]
-    assert call["metadata"]["audiences"] == ["worker"]
-    assert call["metadata"]["blocking_roles"] == ["worker"]
+    assert fake_store.request.thread_kind.value == "epic"
 
 
 def test_inactive_worker_threaded_message_is_discoverable_by_later_worker() -> None:
     module = _load_script_module()
-    with (
-        patch.object(module.agent_home, "is_session_agent_active", return_value=False),
-        patch.object(
-            module.beads, "create_message_bead", return_value={"id": "at-msg-6"}
-        ) as create_message,
-    ):
-        result = module.dispatch_message(
-            subject="Resume blocked work",
-            body="Finish the pending review feedback before coding.",
-            to="atelier/worker/codex/p404-t4",
-            from_agent="atelier/planner/codex/p202-t2",
-            thread="at-es93n.1",
-            reply_to=None,
-            beads_root=Path("/beads"),
-            cwd=Path("/repo"),
-        )
+    fake_store = _FakeStore("at-msg-6")
+    module.build_atelier_store = lambda **_kwargs: fake_store
+
+    result = module.dispatch_message(
+        subject="Resume blocked work",
+        body="Finish the pending review feedback before coding.",
+        to="atelier/worker/codex/p404-t4",
+        from_agent="atelier/planner/codex/p202-t2",
+        thread="at-es93n.1",
+        reply_to=None,
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
 
     assert result.decision == "delivered"
-    call = create_message.call_args.kwargs
+    request = fake_store.request
     issue = {
         "id": result.issue_id,
-        "title": "Resume blocked work",
-        "assignee": call["assignee"],
-        "description": messages.render_message(call["metadata"], call["body"]),
+        "title": request.title,
+        "description": messages.render_message(
+            {
+                "from": request.sender,
+                "delivery": "work-threaded",
+                "thread": request.thread_id,
+                "thread_kind": request.thread_kind.value,
+                "audience": list(request.audience),
+                "kind": request.kind,
+                "blocking": request.blocking,
+                "reply_to": request.reply_to,
+            },
+            request.body,
+        ),
     }
 
     assert messages.message_blocks_runtime(
@@ -157,12 +135,8 @@ def test_inactive_worker_threaded_message_is_discoverable_by_later_worker() -> N
 
 def test_dispatch_message_without_thread_fails_closed() -> None:
     module = _load_script_module()
-    with (
-        patch.object(
-            module.beads, "create_message_bead", return_value={"id": "at-msg-2"}
-        ) as create,
-        pytest.raises(RuntimeError, match="mail-send requires --thread"),
-    ):
+
+    with pytest.raises(RuntimeError, match="mail-send requires --thread"):
         module.dispatch_message(
             subject="Heads up",
             body="FYI",
@@ -174,32 +148,26 @@ def test_dispatch_message_without_thread_fails_closed() -> None:
             cwd=Path("/repo"),
         )
 
-    create.assert_not_called()
-
 
 def test_dispatch_message_threaded_needs_decision_to_planner_sets_explicit_routing() -> None:
     module = _load_script_module()
-    with patch.object(
-        module.beads, "create_message_bead", return_value={"id": "at-msg-3"}
-    ) as create:
-        result = module.dispatch_message(
-            subject="NEEDS-DECISION: Publish incomplete (at-epic.1)",
-            body="Pick the next publish action.",
-            to="atelier/planner/codex/p202-t2",
-            from_agent="atelier/worker/codex/p101-t1",
-            thread="at-epic.1",
-            reply_to=None,
-            beads_root=Path("/beads"),
-            cwd=Path("/repo"),
-        )
+    fake_store = _FakeStore("at-msg-3")
+    module.build_atelier_store = lambda **_kwargs: fake_store
+
+    result = module.dispatch_message(
+        subject="NEEDS-DECISION: Publish incomplete (at-epic.1)",
+        body="Pick the next publish action.",
+        to="atelier/planner/codex/p202-t2",
+        from_agent="atelier/worker/codex/p101-t1",
+        thread="at-epic.1",
+        reply_to=None,
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
 
     assert result.decision == "delivered"
-    call = create.call_args.kwargs
-    assert call["metadata"]["delivery"] == "work-threaded"
-    assert call["metadata"]["thread_target"] == "changeset"
-    assert call["metadata"]["thread_kind"] == "changeset"
-    assert call["metadata"]["audience"] == ["planner"]
-    assert call["metadata"]["audiences"] == ["planner"]
-    assert call["metadata"]["blocking"] is True
-    assert call["metadata"]["blocking_roles"] == ["planner"]
-    assert call["metadata"]["kind"] == "needs-decision"
+    request = fake_store.request
+    assert request.thread_kind.value == "changeset"
+    assert request.audience == ("planner",)
+    assert request.blocking is True
+    assert request.kind == "needs-decision"

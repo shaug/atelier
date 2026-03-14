@@ -17,16 +17,12 @@ description: >-
 
 ## Steps
 
-1. Show the message bead:
-   - `bd show <message_id>`
-1. Parse YAML frontmatter and verify `queue` matches (if provided).
-1. If `claimed_by` is already set, stop and report the current claimant.
-1. Set:
-   - `claimed_by: <agent-id>`
-   - `claimed_at: <rfc3339>`
-1. Write the updated description with
-   `bd update <message_id> --body-file <path>`.
+1. Run the queue-claim script:
+   - `python3 skills/mail-queue-claim/scripts/claim_message.py <message_id> [--queue "<queue>"] [--claimed-by "<agent_id>"] [--beads-dir "<beads_dir>"] [--repo-dir "<repo_dir>"]`
+1. The script validates queue identity, enforces claim ownership, and persists
+   claim metadata through `atelier.store`.
 
 ## Verification
 
-- The message frontmatter includes `claimed_by` and `claimed_at`.
+- The claimed message includes `claimed_by` and `claimed_at`, and later unread
+  queue reads show it as claimed.

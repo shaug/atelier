@@ -119,6 +119,13 @@ class ClaimMessageRequest(StoreModel):
 
     message_id: Identifier
     claimed_by: Identifier
+    queue: Identifier | None = None
+
+
+class MarkMessageReadRequest(StoreModel):
+    """Mutation request for marking one message as read."""
+
+    message_id: Identifier
 
 
 class SetHookRequest(StoreModel):
@@ -162,6 +169,7 @@ __all__ = [
     "DependencyMutation",
     "EpicQuery",
     "LifecycleTransitionRequest",
+    "MarkMessageReadRequest",
     "MessageQuery",
     "ReadyChangesetQuery",
     "SetHookRequest",

@@ -3,20 +3,25 @@
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Callable
+import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import cast
 
 from atelier import beads as beads_metadata
 from atelier import changesets, lifecycle, messages
 from atelier.lib.beads import (
     BeadError,
     Beads,
+    BeadsCommandRequest,
+    BeadsCommandResult,
     CloseIssueRequest,
     CreateIssueRequest,
     DependencyMutationRequest,
     IssueRecord,
     ListIssuesRequest,
     ShowIssueRequest,
+    SupportedOperation,
     UpdateIssueRequest,
 )
 
@@ -29,6 +34,7 @@ from .contract import (
     DependencyMutation,
     EpicQuery,
     LifecycleTransitionRequest,
+    MarkMessageReadRequest,
     MessageQuery,
     ReadyChangesetQuery,
     SetHookRequest,
@@ -84,6 +90,39 @@ def _normalized_labels(values: tuple[str, ...]) -> set[str]:
 
 def _has_contract_label(labels: set[str], label_name: str) -> bool:
     return label_name in labels or lifecycle.has_namespaced_label(labels, label_name)
+
+
+async def _read_issue_slots(beads: Beads, issue_id: str) -> dict[str, str]:
+    issue_store = getattr(beads, "_issue_store", None)
+    if issue_store is not None and hasattr(issue_store, "show_slots"):
+        try:
+            slots = issue_store.show_slots(issue_id)
+        except Exception:
+            slots = {}
+        return dict(slots) if isinstance(slots, dict) else {}
+    execute = getattr(beads, "execute", None)
+    if not callable(execute):
+        return {}
+    execute_command = cast(Callable[[BeadsCommandRequest], Awaitable[object]], execute)
+    try:
+        raw_result = await execute_command(
+            BeadsCommandRequest(
+                operation=SupportedOperation.SHOW,
+                argv=("slot", "show", issue_id),
+                expects_json=True,
+            )
+        )
+    except Exception:
+        return {}
+    result = cast(BeadsCommandResult, raw_result)
+    if result.returncode != 0:
+        return {}
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError:
+        return {}
+    slots = payload.get("slots")
+    return dict(slots) if isinstance(slots, dict) else {}
 
 
 def _parent_id(issue: IssueRecord) -> str | None:
@@ -488,6 +527,10 @@ class AtelierStore:
         issue = await self._find_agent_issue(agent_id, state=state)
         if issue is None:
             return None
+        slots = await _read_issue_slots(self._beads, issue.id)
+        slot_hook = _clean_text(slots.get("hook"))
+        if slot_hook is not None:
+            return HookRecord(agent_id=agent_id, epic_id=slot_hook)
         fields = beads_metadata.parse_description_fields(issue.description or "")
         hooked_epic = _normalize_description_field_value(fields.get("hook_bead"))
         return None if hooked_epic is None else HookRecord(agent_id=agent_id, epic_id=hooked_epic)
@@ -583,6 +626,8 @@ class AtelierStore:
             raise LookupError(f"message not found: {request.message_id}")
         if record.queue is None:
             raise ValueError(f"message {request.message_id} is not in a queue")
+        if request.queue is not None and record.queue != request.queue:
+            raise ValueError(f"message {request.message_id} is not in queue {request.queue!r}")
         if record.claimed_by not in {None, request.claimed_by}:
             raise ValueError(f"message {request.message_id} already claimed by {record.claimed_by}")
         if issue.assignee not in {None, "", request.claimed_by}:
@@ -596,6 +641,8 @@ class AtelierStore:
                 raise LookupError(f"message not found: {request.message_id}")
             if current_record.queue is None:
                 raise ValueError(f"message {request.message_id} is not in a queue")
+            if request.queue is not None and current_record.queue != request.queue:
+                raise ValueError(f"message {request.message_id} is not in queue {request.queue!r}")
             if current_record.claimed_by not in {None, request.claimed_by}:
                 raise ValueError(
                     f"message {request.message_id} already claimed by {current_record.claimed_by}"
@@ -633,6 +680,40 @@ class AtelierStore:
         if record is None:
             raise RuntimeError(f"message claim verification failed for {request.message_id}")
         return record
+
+    async def mark_message_read(self, request: MarkMessageReadRequest) -> MessageRecord:
+        issue = await self._show_issue(request.message_id)
+        record = self._message_record(issue)
+        if record is None:
+            raise LookupError(f"message not found: {request.message_id}")
+        labels = _normalized_labels(issue.labels)
+        if not _has_contract_label(labels, "unread"):
+            return record
+
+        def build_request(current: IssueRecord) -> UpdateIssueRequest:
+            current_record = self._message_record(current)
+            if current_record is None:
+                raise LookupError(f"message not found: {request.message_id}")
+            desired_labels = tuple(
+                label
+                for label in current.labels
+                if not _has_contract_label({_clean_text(label) or ""}, "unread")
+            )
+            return UpdateIssueRequest(issue_id=current.id, labels=desired_labels)
+
+        def verify(updated: IssueRecord) -> bool:
+            return not _has_contract_label(_normalized_labels(updated.labels), "unread")
+
+        updated = await self._update_issue_until_verified(
+            request.message_id,
+            build_request=build_request,
+            verify=verify,
+            failure_message=f"message read update could not be verified for {request.message_id}",
+        )
+        updated_record = self._message_record(updated)
+        if updated_record is None:
+            raise RuntimeError(f"message read verification failed for {request.message_id}")
+        return updated_record
 
     async def set_agent_hook(self, request: SetHookRequest) -> HookRecord:
         state = _ReadState(self)
@@ -959,7 +1040,8 @@ class AtelierStore:
             blocking=contract.blocking,
             reply_to=contract.reply_to,
             queue=queue_name,
-            claimed_by=_clean_text(contract.metadata.get("claimed_by")),
+            claimed_by=_clean_text(contract.metadata.get("claimed_by"))
+            or _clean_text(issue.assignee),
             claimed_at=_clean_text(contract.metadata.get("claimed_at")),
         )
 

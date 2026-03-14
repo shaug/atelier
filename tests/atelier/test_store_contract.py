@@ -33,6 +33,7 @@ from atelier.store import (
     HookRecord,
     LifecycleStatus,
     LifecycleTransitionRequest,
+    MarkMessageReadRequest,
     MessageDelivery,
     MessageQuery,
     MessageRecord,
@@ -74,6 +75,7 @@ _STORE_METHOD_NAMES = (
     "create_message",
     "append_notes",
     "claim_message",
+    "mark_message_read",
     "set_agent_hook",
     "clear_agent_hook",
     "update_review",
@@ -481,9 +483,11 @@ def _mutation_snapshot(backend: str) -> dict[str, object]:
             ClaimMessageRequest(
                 message_id="msg-queue",
                 claimed_by="atelier/planner/codex/p200",
+                queue="planner",
             )
         )
     )
+    marked_read = _RUN(store.mark_message_read(MarkMessageReadRequest(message_id="msg-queue")))
     hooked = _RUN(
         store.set_agent_hook(SetHookRequest(agent_id="atelier/worker/agent", epic_id="at-epic"))
     )
@@ -507,6 +511,12 @@ def _mutation_snapshot(backend: str) -> dict[str, object]:
             "claimed_by": claimed.claimed_by,
             "queue": claimed.queue,
             "status": claimed.status.value if claimed.status else None,
+        },
+        "marked_read": {
+            "id": marked_read.id,
+            "unread_messages": tuple(
+                message.id for message in _RUN(store.list_messages(MessageQuery(unread_only=True)))
+            ),
         },
         "hooked": hooked.model_dump(mode="json"),
         "cleared": cleared.model_dump(mode="json") if cleared else None,
@@ -627,6 +637,10 @@ def test_store_dual_backend_mutation_snapshot_matches_expected_contract(backend:
             "claimed_by": "atelier/planner/codex/p200",
             "queue": "planner",
             "status": "open",
+        },
+        "marked_read": {
+            "id": "msg-queue",
+            "unread_messages": ("at-1",),
         },
         "hooked": {
             "agent_id": "atelier/worker/agent",
@@ -904,6 +918,7 @@ def test_beads_store_fails_closed() -> None:
                 ClaimMessageRequest(
                     message_id="msg-queue",
                     claimed_by="atelier/planner/codex/p200",
+                    queue="planner",
                 )
             )
         )
@@ -919,7 +934,6 @@ def test_beads_store_fails_closed() -> None:
         )
     with pytest.raises(UnsupportedOperationError, match="dep-add"):
         _RUN(store.add_dependency(DependencyMutation(issue_id="at-change", depends_on_id="at-dep")))
-
 
 def test_beads_store_public_message_listing_skips_compatibility_routing() -> None:
     store = _store_for(
@@ -944,3 +958,23 @@ def test_beads_store_public_message_listing_skips_compatibility_routing() -> Non
     messages = _RUN(store.list_messages(MessageQuery(unread_only=True)))
 
     assert messages == ()
+
+
+def test_store_get_agent_hook_prefers_slot_value_when_available() -> None:
+    client, issue_store = build_in_memory_beads_client(
+        issues=(
+            BUILDER.issue(
+                "at-agent",
+                title="atelier/worker/agent",
+                issue_type="agent",
+                labels=("at:agent",),
+                description="agent_id: atelier/worker/agent\nhook_bead: at-description\n",
+            ),
+        )
+    )
+    issue_store.set_slot("at-agent", "hook", "at-slot")
+    store = build_atelier_store(beads=client)
+
+    hook = _RUN(store.get_agent_hook("atelier/worker/agent"))
+
+    assert hook == HookRecord(agent_id="atelier/worker/agent", epic_id="at-slot")

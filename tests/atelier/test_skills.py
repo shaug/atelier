@@ -150,10 +150,14 @@ def test_install_workspace_skills_serializes_concurrent_writers(
 def test_packaged_planning_skills_include_scripts() -> None:
     definitions = skills.load_packaged_skills()
     assert "scripts/check_issue_ownership.py" in definitions["beads"].files
+    assert "scripts/hook_status.py" in definitions["hook-status"].files
     assert "scripts/create_changeset.py" in definitions["plan-changesets"].files
     assert "scripts/create_epic.py" in definitions["plan-create-epic"].files
     assert "scripts/refresh_overview.py" in definitions["planner-startup-check"].files
     assert "scripts/import_legacy_tickets.py" in definitions["import-legacy-tickets"].files
+    assert "scripts/list_inbox.py" in definitions["mail-inbox"].files
+    assert "scripts/mark_read.py" in definitions["mail-mark-read"].files
+    assert "scripts/claim_message.py" in definitions["mail-queue-claim"].files
     assert "scripts/send_message.py" in definitions["mail-send"].files
 
 

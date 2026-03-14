@@ -13,9 +13,9 @@ description: >-
 
 ## Steps
 
-1. Show the agent bead slots:
-   - `bd slot show <agent_bead_id>`
-1. Read the `hook` slot (fallback to `hook_bead` in description if empty).
+1. Run the hook-status script:
+   - `python3 skills/hook-status/scripts/hook_status.py <agent_bead_id> [--beads-dir "<beads_dir>"] [--repo-dir "<repo_dir>"]`
+1. Read the current hook through the `atelier.store` hook model.
 
 ## Verification
 

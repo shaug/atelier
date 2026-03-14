@@ -4,6 +4,11 @@ import importlib.util
 import json
 from pathlib import Path
 
+from atelier.store import build_atelier_store
+from atelier.testing.beads import IssueFixtureBuilder, build_in_memory_beads_client
+
+BUILDER = IssueFixtureBuilder()
+
 
 def _load_script():
     scripts_dir = Path(__file__).resolve().parents[3] / "src/atelier/skills/beads/scripts"
@@ -111,3 +116,45 @@ def test_main_json_emits_summary_payload(monkeypatch, capsys, tmp_path: Path) ->
     assert payload["issue_id"] == "at-9"
     assert payload["execution_policy_key"] == "assignee"
     assert payload["assignee_role"] == "worker"
+
+
+def test_load_issue_uses_store_changeset_shape(monkeypatch) -> None:
+    module = _load_script()
+    client, _store = build_in_memory_beads_client(
+        issues=(
+            BUILDER.issue(
+                "at-epic",
+                title="Epic",
+                issue_type="epic",
+                labels=("at:epic",),
+                status="open",
+            ),
+            BUILDER.issue(
+                "at-epic.1",
+                title="Changeset",
+                parent="at-epic",
+                status="in_progress",
+                assignee="atelier/worker/codex/p100",
+            ),
+        )
+    )
+    monkeypatch.setattr(
+        module,
+        "build_atelier_store",
+        lambda **_kwargs: build_atelier_store(beads=client),
+    )
+
+    issue = module._load_issue(
+        issue_id="at-epic.1",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert issue == {
+        "id": "at-epic.1",
+        "title": "Changeset",
+        "status": "in_progress",
+        "labels": [],
+        "assignee": "atelier/worker/codex/p100",
+        "parent_id": "at-epic",
+    }
