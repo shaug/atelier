@@ -112,7 +112,7 @@ def test_store_message_contract_only_exposes_durable_threaded_path() -> None:
     assert tuple(item.value for item in MessageThreadKind) == ("changeset", "epic")
 
 
-class _StoreAdapterStub:
+class _StoreAdapterStub(AtelierStore):
     def __init__(self, backend: object) -> None:
         self.backend = backend
 
@@ -226,7 +226,7 @@ class _StoreAdapterStub:
         )
 
 
-def test_store_protocol_is_backend_neutral() -> None:
+def test_store_base_class_is_backend_neutral() -> None:
     process_backed = _StoreAdapterStub(
         SubprocessBeadsClient(
             transport=RecordingBeadsTransport(),

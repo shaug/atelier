@@ -1,8 +1,8 @@
-"""Async-first Atelier store protocol above the Beads client contract."""
+"""Async-first Atelier store contract above the Beads client contract."""
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from abc import ABC, abstractmethod
 
 from pydantic import Field, field_validator, model_validator
 
@@ -141,51 +141,206 @@ class LifecycleTransitionRequest(StoreModel):
     reason: Identifier | None = None
 
 
-@runtime_checkable
-class AtelierStore(Protocol):
-    """Backend-neutral async store contract for Atelier planning state."""
+class AtelierStore(ABC):
+    """Abstract async store facade for Atelier planning state.
 
-    async def get_epic(self, epic_id: str) -> EpicRecord: ...
+    Downstream planner, worker, and publish code should depend on this single
+    store boundary. Backend choice remains an adapter construction concern below
+    this class via the injected Beads implementation, not via multiple peer
+    store contracts. Implementations should fail closed: if a backend cannot
+    answer or persist one of these requests without lossy inference, it should
+    raise instead of silently approximating the result.
+    """
 
-    async def list_epics(self, query: EpicQuery = EpicQuery()) -> tuple[EpicRecord, ...]: ...
+    @abstractmethod
+    async def get_epic(self, epic_id: str) -> EpicRecord:
+        """Load one epic record by stable Atelier id.
 
-    async def get_changeset(self, changeset_id: str) -> ChangesetRecord: ...
+        Args:
+            epic_id: Stable Atelier epic identifier.
 
+        Returns:
+            The hydrated epic record for the requested id.
+
+        Raises:
+            LookupError: If no matching epic exists.
+        """
+
+    @abstractmethod
+    async def list_epics(
+        self,
+        query: EpicQuery = EpicQuery(),
+    ) -> tuple[EpicRecord, ...]:
+        """List epics that satisfy one store-native query.
+
+        Args:
+            query: Optional assignee/closed-state filters.
+
+        Returns:
+            Matching epic records in backend-defined stable order.
+        """
+
+    @abstractmethod
+    async def get_changeset(self, changeset_id: str) -> ChangesetRecord:
+        """Load one changeset record by stable Atelier id.
+
+        Args:
+            changeset_id: Stable Atelier changeset identifier.
+
+        Returns:
+            The hydrated changeset record for the requested id.
+
+        Raises:
+            LookupError: If no matching changeset exists.
+        """
+
+    @abstractmethod
     async def list_changesets(
         self,
         query: ChangesetQuery = ChangesetQuery(),
-    ) -> tuple[ChangesetRecord, ...]: ...
+    ) -> tuple[ChangesetRecord, ...]:
+        """List changesets that satisfy one store-native query.
 
+        Args:
+            query: Optional epic, assignee, lifecycle, and closed-state filters.
+
+        Returns:
+            Matching changeset records in backend-defined stable order.
+        """
+
+    @abstractmethod
     async def list_ready_changesets(
         self,
         query: ReadyChangesetQuery = ReadyChangesetQuery(),
-    ) -> tuple[ChangesetRecord, ...]: ...
+    ) -> tuple[ChangesetRecord, ...]:
+        """List unblocked changesets ready for execution.
 
+        Args:
+            query: Optional epic scope for readiness-aware discovery.
+
+        Returns:
+            Changesets that the backend can prove are ready without widening
+            Atelier readiness semantics.
+        """
+
+    @abstractmethod
     async def list_messages(
         self,
         query: MessageQuery = MessageQuery(),
-    ) -> tuple[MessageRecord, ...]: ...
+    ) -> tuple[MessageRecord, ...]:
+        """List durable coordination messages through store-owned filters.
 
-    async def get_agent_hook(self, agent_id: str) -> HookRecord | None: ...
+        Args:
+            query: Optional assignee, thread, queue, and unread filters.
 
-    async def add_dependency(self, mutation: DependencyMutation) -> DependencyRecord: ...
+        Returns:
+            Matching durable message records in backend-defined stable order.
+        """
 
-    async def remove_dependency(self, mutation: DependencyMutation) -> DependencyRecord | None: ...
+    @abstractmethod
+    async def get_agent_hook(self, agent_id: str) -> HookRecord | None:
+        """Load the current epic hook, if any, for one agent.
 
-    async def create_message(self, request: CreateMessageRequest) -> MessageRecord: ...
+        Args:
+            agent_id: Stable Atelier agent identifier.
 
-    async def claim_message(self, request: ClaimMessageRequest) -> MessageRecord: ...
+        Returns:
+            The current hook binding, or `None` when the agent is unhooked.
+        """
 
-    async def set_agent_hook(self, request: SetHookRequest) -> HookRecord: ...
+    @abstractmethod
+    async def add_dependency(self, mutation: DependencyMutation) -> DependencyRecord:
+        """Persist one dependency edge as an Atelier-owned mutation.
 
-    async def clear_agent_hook(self, request: ClearHookRequest) -> HookRecord | None: ...
+        Args:
+            mutation: Dependency edge to add.
 
-    async def update_review(self, request: UpdateReviewRequest) -> ChangesetRecord: ...
+        Returns:
+            The persisted dependency record.
+        """
 
+    @abstractmethod
+    async def remove_dependency(
+        self,
+        mutation: DependencyMutation,
+    ) -> DependencyRecord | None:
+        """Remove one dependency edge if it exists.
+
+        Args:
+            mutation: Dependency edge to remove.
+
+        Returns:
+            The removed dependency record, or `None` when no such edge existed.
+        """
+
+    @abstractmethod
+    async def create_message(self, request: CreateMessageRequest) -> MessageRecord:
+        """Persist one durable work-threaded coordination message.
+
+        Args:
+            request: Message payload and routing metadata to persist.
+
+        Returns:
+            The persisted message record on its epic or changeset thread.
+        """
+
+    @abstractmethod
+    async def claim_message(self, request: ClaimMessageRequest) -> MessageRecord:
+        """Persist queue-claim metadata for one durable message.
+
+        Args:
+            request: Message id plus claiming agent identity.
+
+        Returns:
+            The updated message record after the claim mutation.
+        """
+
+    @abstractmethod
+    async def set_agent_hook(self, request: SetHookRequest) -> HookRecord:
+        """Bind one agent to one epic hook.
+
+        Args:
+            request: Hook identity plus optional compare-and-swap expectation.
+
+        Returns:
+            The persisted hook record after the binding succeeds.
+        """
+
+    @abstractmethod
+    async def clear_agent_hook(self, request: ClearHookRequest) -> HookRecord | None:
+        """Clear one agent hook when the current binding matches expectations.
+
+        Args:
+            request: Agent identity plus optional expected epic id.
+
+        Returns:
+            The cleared hook record, or `None` when nothing was cleared.
+        """
+
+    @abstractmethod
+    async def update_review(self, request: UpdateReviewRequest) -> ChangesetRecord:
+        """Replace or merge review metadata for one changeset.
+
+        Args:
+            request: Review payload plus merge behavior for existing metadata.
+
+        Returns:
+            The updated changeset record after review metadata persists.
+        """
+
+    @abstractmethod
     async def transition_lifecycle(
         self,
         request: LifecycleTransitionRequest,
-    ) -> LifecycleTransition: ...
+    ) -> LifecycleTransition:
+        """Apply one canonical lifecycle transition.
+
+        Args:
+            request: Target lifecycle state plus optional current-state guard.
+
+        Returns:
+            The applied lifecycle transition record.
+        """
 
 
 AsyncAtelierStore = AtelierStore
