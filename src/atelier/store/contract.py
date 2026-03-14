@@ -5,15 +5,9 @@ from __future__ import annotations
 from pydantic import field_validator, model_validator
 
 from .models import (
-    ChangesetRecord,
-    DependencyRecord,
-    EpicRecord,
-    HookRecord,
     Identifier,
     LifecycleStatus,
-    LifecycleTransition,
     MessageDelivery,
-    MessageRecord,
     MessageThreadKind,
     ReviewMetadata,
     StoreModel,
@@ -98,6 +92,28 @@ class CreateMessageRequest(StoreModel):
         return self
 
 
+class AppendNotesRequest(StoreModel):
+    """Mutation request for appending durable notes to one work item."""
+
+    issue_id: Identifier
+    notes: tuple[str, ...]
+
+    @field_validator("notes")
+    @classmethod
+    def _normalize_notes(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for note in value:
+            cleaned = note.strip()
+            if not cleaned or cleaned in seen:
+                continue
+            seen.add(cleaned)
+            normalized.append(cleaned)
+        if not normalized:
+            raise ValueError("append notes requires at least one non-empty note")
+        return tuple(normalized)
+
+
 class ClaimMessageRequest(StoreModel):
     """Mutation request for claiming a queued message."""
 
@@ -138,6 +154,7 @@ class LifecycleTransitionRequest(StoreModel):
 
 
 __all__ = [
+    "AppendNotesRequest",
     "ChangesetQuery",
     "ClaimMessageRequest",
     "ClearHookRequest",
