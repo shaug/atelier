@@ -37,9 +37,9 @@ Async store service:
 - `AtelierStore`
 
 `AtelierStore` is the single async store boundary for downstream Atelier code.
-Backend swapping happens beneath that concrete facade through the injected Beads
-implementation rather than through multiple peer store contracts or
-subclass-specific store types.
+Concrete adapters land in later changesets and should implement that protocol on
+top of the reusable Beads client contract rather than exposing backend-specific
+construction or transport details here.
 
 The contract is intentionally backend-neutral. It does not expose `bd` commands,
 `BEADS_DIR`, Dolt layout, filesystem probes, transport details, or startup
