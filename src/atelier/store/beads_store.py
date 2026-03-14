@@ -115,7 +115,7 @@ def _changeset_branches(issue: IssueRecord) -> ChangesetBranches | None:
 
 @dataclass
 class _ReadState:
-    store: "BeadsAtelierStore"
+    store: "_BeadsBackedAtelierStore"
     issue_cache: dict[str, IssueRecord] = field(default_factory=dict)
     child_cache: dict[tuple[str, bool], tuple[IssueRecord, ...]] = field(default_factory=dict)
     scan_cache: dict[bool, tuple[IssueRecord, ...]] = field(default_factory=dict)
@@ -177,7 +177,7 @@ class _ReadState:
         )
 
 
-class BeadsAtelierStore(AtelierStore):
+class _BeadsBackedAtelierStore(AtelierStore):
     """Concrete `AtelierStore` backed by the typed async Beads client.
 
     Args:
@@ -570,10 +570,10 @@ class BeadsAtelierStore(AtelierStore):
         )
 
 
-def build_atelier_store(*, beads: Beads) -> BeadsAtelierStore:
+def build_atelier_store(*, beads: Beads) -> AtelierStore:
     """Build the published Atelier store on top of one Beads backend."""
 
-    return BeadsAtelierStore(beads=beads)
+    return _BeadsBackedAtelierStore(beads=beads)
 
 
-__all__ = ["BeadsAtelierStore", "build_atelier_store"]
+__all__ = ["build_atelier_store"]

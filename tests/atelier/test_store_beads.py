@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from typing import get_type_hints
 
 from atelier.messages import render_message
 from atelier.store import (
+    AtelierStore,
     ChangesetQuery,
     LifecycleStatus,
     MessageDelivery,
@@ -24,6 +26,12 @@ def _run(coro):
 
 def _store_for(*issues: dict[str, object]):
     return build_atelier_store(beads=build_in_memory_beads_client(issues=issues)[0])
+
+
+def test_store_builder_returns_public_store_boundary() -> None:
+    hints = get_type_hints(build_atelier_store)
+
+    assert hints["return"] is AtelierStore
 
 
 def test_beads_store_reads_graphs_and_ready_changesets() -> None:
