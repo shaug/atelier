@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
+import asyncio
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -23,61 +23,12 @@ _BOOTSTRAP_REPO_ROOT = bootstrap_projected_atelier_script(
     require_runtime_health=__name__ == "__main__",
 )
 
-from atelier import auto_export, beads  # noqa: E402
+from atelier import auto_export  # noqa: E402
 from atelier.beads_context import resolve_runtime_repo_dir_hint  # noqa: E402
 from atelier.executable_work_validation import (  # noqa: E402
     compact_excerpt,
     validate_executable_work_payload,
 )
-
-_STATUS_UPDATE_ATTEMPTS = 2
-_FAIL_CLOSED_REASON = "automatic fail-closed: unable to set deferred status after create"
-
-
-def _command_detail(result: subprocess.CompletedProcess[str]) -> str:
-    stderr = (result.stderr or "").strip()
-    if stderr:
-        return stderr
-    return (result.stdout or "").strip()
-
-
-def _set_deferred_with_fail_closed(*, issue_id: str, beads_root: Path, cwd: Path) -> None:
-    failure_detail = ""
-    for _ in range(_STATUS_UPDATE_ATTEMPTS):
-        status_result = beads.run_bd_command(
-            ["update", issue_id, "--status", "deferred"],
-            beads_root=beads_root,
-            cwd=cwd,
-            allow_failure=True,
-        )
-        if status_result.returncode == 0:
-            return
-        failure_detail = _command_detail(status_result)
-
-    close_result = beads.run_bd_command(
-        ["close", issue_id, "--reason", _FAIL_CLOSED_REASON],
-        beads_root=beads_root,
-        cwd=cwd,
-        allow_failure=True,
-    )
-    detail = failure_detail or "status update failed"
-    if close_result.returncode == 0:
-        print(
-            f"error: created epic {issue_id} but failed to set status=deferred "
-            f"after {_STATUS_UPDATE_ATTEMPTS} attempts; auto-closed to fail closed "
-            f"({detail})",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-
-    close_detail = _command_detail(close_result) or "close command failed"
-    print(
-        f"error: created epic {issue_id} but failed to set status=deferred "
-        f"after {_STATUS_UPDATE_ATTEMPTS} attempts; auto-close failed ({detail}; "
-        f"{close_detail})",
-        file=sys.stderr,
-    )
-    raise SystemExit(1)
 
 
 def _description(scope: str, changeset_strategy: str | None) -> str:
@@ -118,6 +69,18 @@ def _fail_invalid_payload(*, title: str, scope: str) -> None:
         file=sys.stderr,
     )
     raise SystemExit(1)
+
+
+def _build_store(*, beads_root: Path, repo_root: Path):
+    from atelier.lib.beads import SubprocessBeadsClient
+    from atelier.store import build_atelier_store
+
+    client = SubprocessBeadsClient(
+        cwd=repo_root,
+        beads_root=beads_root,
+        env={"BEADS_DIR": str(beads_root)},
+    )
+    return build_atelier_store(beads=client)
 
 
 def main() -> None:
@@ -161,41 +124,28 @@ def main() -> None:
     if beads_dir:
         context = replace(context, beads_root=Path(beads_dir))
 
-    create_args = [
-        "create",
-        "--type",
-        "epic",
-        "--label",
-        "at:epic",
-        "--title",
-        args.title,
-        "--acceptance",
-        args.acceptance,
-        "--silent",
-    ]
     description = _description(args.scope, args.changeset_strategy)
-    if description:
-        create_args.extend(["--description", description])
-    if args.design:
-        create_args.extend(["--design", args.design])
-    if args.no_export:
-        create_args.extend(["--label", "ext:no-export"])
+    store = _build_store(beads_root=context.beads_root, repo_root=context.project_dir)
+    from atelier.store import CreateEpicRequest, LifecycleStatus
 
-    result = beads.run_bd_command(
-        create_args,
-        beads_root=context.beads_root,
-        cwd=context.project_dir,
-    )
-    issue_id = (result.stdout or "").strip()
-    if not issue_id:
-        print("error: failed to create epic bead", file=sys.stderr)
-        raise SystemExit(1)
+    try:
+        epic = asyncio.run(
+            store.create_epic(
+                CreateEpicRequest(
+                    title=args.title,
+                    description=description or None,
+                    acceptance_criteria=args.acceptance,
+                    design=args.design,
+                    labels=("ext:no-export",) if args.no_export else (),
+                    initial_status=LifecycleStatus.DEFERRED,
+                )
+            )
+        )
+    except Exception as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
 
-    _set_deferred_with_fail_closed(
-        issue_id=issue_id,
-        beads_root=context.beads_root,
-        cwd=context.project_dir,
-    )
+    issue_id = epic.id
 
     print(issue_id)
 

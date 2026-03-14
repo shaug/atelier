@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,36 +28,24 @@ def _load_script_module():
 
 def test_create_epic_defaults_to_deferred_status(monkeypatch, tmp_path: Path) -> None:
     module = _load_script_module()
-    commands: list[list[str]] = []
+    captured: dict[str, object] = {}
     context = SimpleNamespace(
         project_dir=tmp_path / "project",
         beads_root=tmp_path / ".beads",
     )
 
     monkeypatch.setattr(
-        module.auto_export, "resolve_auto_export_context", lambda **_kwargs: context
+        module.auto_export,
+        "resolve_auto_export_context",
+        lambda **_kwargs: context,
     )
 
-    def fake_run_bd(
-        args: list[str],
-        *,
-        beads_root: Path,
-        cwd: Path,
-        allow_failure: bool = False,
-    ) -> subprocess.CompletedProcess[str]:
-        commands.append(args)
-        assert beads_root == context.beads_root
-        assert cwd == context.project_dir
-        if args and args[0] == "create":
-            return subprocess.CompletedProcess(
-                args=args,
-                returncode=0,
-                stdout="at-epic-1\n",
-                stderr="",
-            )
-        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+    class FakeStore:
+        async def create_epic(self, request):
+            captured["request"] = request
+            return SimpleNamespace(id="at-epic-1")
 
-    monkeypatch.setattr(module.beads, "run_bd_command", fake_run_bd)
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
     monkeypatch.setattr(
         module.auto_export,
         "auto_export_issue",
@@ -80,25 +67,35 @@ def test_create_epic_defaults_to_deferred_status(monkeypatch, tmp_path: Path) ->
             "Move readiness semantics to deferred/open statuses.",
             "--acceptance",
             "Planner transitions use status-only lifecycle.",
+            "--changeset-strategy",
+            "Keep review scope under 400 LOC.",
+            "--design",
+            "Document the promotion invariants.",
+            "--no-export",
         ],
     )
 
     module.main()
 
-    assert commands[0][0] == "create"
-    assert "--type" in commands[0]
-    assert commands[0][commands[0].index("--type") + 1] == "epic"
-    assert "--label" in commands[0]
-    assert "at:epic" in commands[0]
-    assert commands[1] == ["update", "at-epic-1", "--status", "deferred"]
+    request = captured["request"]
+    assert request.title == "Lifecycle migration"
+    assert request.description == (
+        "Move readiness semantics to deferred/open statuses.\n\n"
+        "Changeset strategy:\n"
+        "Keep review scope under 400 LOC."
+    )
+    assert request.acceptance_criteria == "Planner transitions use status-only lifecycle."
+    assert request.design == "Document the promotion invariants."
+    assert request.labels == ("ext:no-export",)
+    assert request.initial_status.value == "deferred"
 
 
-def test_create_epic_fails_closed_when_deferred_update_fails(
+def test_create_epic_surfaces_store_fail_closed_error(
     monkeypatch,
+    capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
     module = _load_script_module()
-    commands: list[list[str]] = []
     export_calls: list[str] = []
     context = SimpleNamespace(
         project_dir=tmp_path / "project",
@@ -106,45 +103,20 @@ def test_create_epic_fails_closed_when_deferred_update_fails(
     )
 
     monkeypatch.setattr(
-        module.auto_export, "resolve_auto_export_context", lambda **_kwargs: context
+        module.auto_export,
+        "resolve_auto_export_context",
+        lambda **_kwargs: context,
     )
 
-    def fake_run_bd(
-        args: list[str],
-        *,
-        beads_root: Path,
-        cwd: Path,
-        allow_failure: bool = False,
-    ) -> subprocess.CompletedProcess[str]:
-        commands.append(args)
-        assert beads_root == context.beads_root
-        assert cwd == context.project_dir
-        if args and args[0] == "create":
-            return subprocess.CompletedProcess(
-                args=args,
-                returncode=0,
-                stdout="at-epic-1\n",
-                stderr="",
+    class FakeStore:
+        async def create_epic(self, request):
+            del request
+            raise RuntimeError(
+                "created epic at-epic-1 but failed to set status=deferred after 5 "
+                "attempts; auto-closed to fail closed (simulated update failure)"
             )
-        if args[:3] == ["update", "at-epic-1", "--status"]:
-            assert allow_failure is True
-            return subprocess.CompletedProcess(
-                args=args,
-                returncode=1,
-                stdout="",
-                stderr="simulated update failure",
-            )
-        if args[:2] == ["close", "at-epic-1"]:
-            assert allow_failure is True
-            return subprocess.CompletedProcess(
-                args=args,
-                returncode=0,
-                stdout="closed",
-                stderr="",
-            )
-        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(module.beads, "run_bd_command", fake_run_bd)
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
     monkeypatch.setattr(
         module.auto_export,
         "auto_export_issue",
@@ -167,16 +139,9 @@ def test_create_epic_fails_closed_when_deferred_update_fails(
     with pytest.raises(SystemExit) as excinfo:
         module.main()
 
+    captured = capsys.readouterr()
     assert excinfo.value.code == 1
-    assert commands[0][0] == "create"
-    assert commands[1] == ["update", "at-epic-1", "--status", "deferred"]
-    assert commands[2] == ["update", "at-epic-1", "--status", "deferred"]
-    assert commands[3] == [
-        "close",
-        "at-epic-1",
-        "--reason",
-        "automatic fail-closed: unable to set deferred status after create",
-    ]
+    assert "auto-closed to fail closed" in captured.err
     assert export_calls == []
 
 
@@ -186,27 +151,23 @@ def test_create_epic_rejects_low_information_payload(
     tmp_path: Path,
 ) -> None:
     module = _load_script_module()
-    commands: list[list[str]] = []
     context = SimpleNamespace(
         project_dir=tmp_path / "project",
         beads_root=tmp_path / ".beads",
     )
 
     monkeypatch.setattr(
-        module.auto_export, "resolve_auto_export_context", lambda **_kwargs: context
+        module.auto_export,
+        "resolve_auto_export_context",
+        lambda **_kwargs: context,
     )
-
-    def fake_run_bd(
-        args: list[str],
-        *,
-        beads_root: Path,
-        cwd: Path,
-        allow_failure: bool = False,
-    ) -> subprocess.CompletedProcess[str]:
-        commands.append(args)
-        raise AssertionError("bd create must not run when payload validation fails")
-
-    monkeypatch.setattr(module.beads, "run_bd_command", fake_run_bd)
+    monkeypatch.setattr(
+        module,
+        "_build_store",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("store create must not run when payload validation fails")
+        ),
+    )
     monkeypatch.setattr(
         sys,
         "argv",
@@ -230,4 +191,3 @@ def test_create_epic_rejects_low_information_payload(
     assert "- title: [placeholder_value]" in captured.err
     assert "- scope: [placeholder_value]" in captured.err
     assert "planner-context: NEEDS-DECISION" in captured.err
-    assert commands == []

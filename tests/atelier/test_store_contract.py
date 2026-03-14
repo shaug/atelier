@@ -26,6 +26,8 @@ from atelier.store import (
     ChangesetRecord,
     ClaimMessageRequest,
     ClearHookRequest,
+    CreateChangesetRequest,
+    CreateEpicRequest,
     CreateMessageRequest,
     DependencyMutation,
     DependencyRecord,
@@ -72,6 +74,8 @@ _STORE_METHOD_NAMES = (
     "get_agent_hook",
     "add_dependency",
     "remove_dependency",
+    "create_epic",
+    "create_changeset",
     "create_message",
     "append_notes",
     "claim_message",
@@ -160,6 +164,7 @@ def test_append_notes_request_requires_non_empty_deduped_notes() -> None:
 def test_store_message_query_and_request_do_not_expose_assignee_routing() -> None:
     assert "assignee" not in MessageQuery.model_fields
     assert "assignee" not in CreateMessageRequest.model_fields
+    assert "recipient" not in CreateMessageRequest.model_fields
 
 
 def test_message_record_enforces_store_message_contract() -> None:
@@ -433,6 +438,29 @@ def _read_snapshot(backend: str) -> dict[str, object]:
 
 def _mutation_snapshot(backend: str) -> dict[str, object]:
     store = _store_for_backend(backend)
+    created_epic = _RUN(
+        store.create_epic(
+            CreateEpicRequest(
+                title="Planner authoring epic",
+                description="Scope the planner store migration.",
+                acceptance_criteria="Planner authoring uses AtelierStore.",
+                design="Keep the create path deterministic.",
+                labels=("ext:no-export",),
+            )
+        )
+    )
+    created_changeset = _RUN(
+        store.create_changeset(
+            CreateChangesetRequest(
+                epic_id=created_epic.id,
+                title="Planner authoring slice",
+                acceptance_criteria="Planner changeset authoring uses AtelierStore.",
+                description="Keep scope under 300 LOC.",
+                notes=("changeset_note: preserve auto-export hooks",),
+                labels=("ext:no-export",),
+            )
+        )
+    )
     review = _RUN(
         store.update_review(
             UpdateReviewRequest(
@@ -496,8 +524,27 @@ def _mutation_snapshot(backend: str) -> dict[str, object]:
             ClearHookRequest(agent_id="atelier/worker/agent", expected_epic_id="at-epic")
         )
     )
+    created_epic_issue = _RUN(store._show_issue(created_epic.id))
+    created_changeset_issue = _RUN(store._show_issue(created_changeset.id))
     refreshed = _RUN(store._show_issue("at-change"))
     return {
+        "created_epic": {
+            "id": created_epic.id,
+            "lifecycle": created_epic.lifecycle.value,
+            "labels": created_epic.labels,
+            "raw_acceptance": created_epic_issue.acceptance_criteria,
+            "raw_design": created_epic_issue.design,
+        },
+        "created_changeset": {
+            "id": created_changeset.id,
+            "epic_id": created_changeset.epic_id,
+            "lifecycle": created_changeset.lifecycle.value,
+            "labels": created_changeset.labels,
+            "raw_description_tail": tuple(
+                (created_changeset_issue.description or "").rstrip("\n").splitlines()[-1:]
+            ),
+            "raw_acceptance": created_changeset_issue.acceptance_criteria,
+        },
         "review": review.review.model_dump(mode="json"),
         "transition": transition.model_dump(mode="json"),
         "created_message": {
@@ -612,6 +659,21 @@ def test_store_epic_discovery_parity_reports_missing_identity(backend: str) -> N
 @pytest.mark.parametrize("backend", _BACKENDS)
 def test_store_dual_backend_mutation_snapshot_matches_expected_contract(backend: str) -> None:
     assert _mutation_snapshot(backend) == {
+        "created_epic": {
+            "id": "at-1",
+            "lifecycle": "deferred",
+            "labels": ("at:epic", "ext:no-export"),
+            "raw_acceptance": "Planner authoring uses AtelierStore.",
+            "raw_design": "Keep the create path deterministic.",
+        },
+        "created_changeset": {
+            "id": "at-2",
+            "epic_id": "at-1",
+            "lifecycle": "deferred",
+            "labels": ("ext:no-export",),
+            "raw_description_tail": ("changeset_note: preserve auto-export hooks",),
+            "raw_acceptance": "Planner changeset authoring uses AtelierStore.",
+        },
         "review": {
             "pr_url": "https://example.invalid/pr/41",
             "pr_number": 41,
@@ -678,6 +740,38 @@ def test_beads_store_mutation_paths(operation: str) -> None:
             description="agent_id: atelier/worker/agent\nhook_bead: null\n",
         ),
         _queue_message(),
+    )
+    created_epic = _RUN(
+        store.create_epic(
+            CreateEpicRequest(
+                title="Planner authoring epic",
+                description="Scope the planner store migration.",
+                acceptance_criteria="Planner authoring uses AtelierStore.",
+                design="Keep the create path deterministic.",
+                labels=("ext:no-export",),
+            )
+        )
+    )
+    assert created_epic.lifecycle is LifecycleStatus.DEFERRED
+    created_changeset = _RUN(
+        store.create_changeset(
+            CreateChangesetRequest(
+                epic_id=created_epic.id,
+                title="Planner authoring slice",
+                acceptance_criteria="Planner changeset authoring uses AtelierStore.",
+                description="Keep scope under 300 LOC.",
+                notes=("changeset_note: preserve auto-export hooks",),
+                labels=("ext:no-export",),
+            )
+        )
+    )
+    assert created_changeset.lifecycle is LifecycleStatus.DEFERRED
+    created_issue = _RUN(store._show_issue(created_changeset.id))
+    assert created_issue.acceptance_criteria == "Planner changeset authoring uses AtelierStore."
+    assert (
+        (created_issue.description or "")
+        .rstrip("\n")
+        .endswith("changeset_note: preserve auto-export hooks")
     )
     review = _RUN(
         store.update_review(
@@ -754,10 +848,14 @@ def test_beads_store_mutation_paths(operation: str) -> None:
                 ClaimMessageRequest(
                     message_id="msg-queue",
                     claimed_by="atelier/planner/codex/p200",
+                    queue="planner",
                 )
             )
         ).claimed_by
         == "atelier/planner/codex/p200"
+    )
+    assert _RUN(store.mark_message_read(MarkMessageReadRequest(message_id="msg-queue"))).id == (
+        "msg-queue"
     )
     assert (
         _RUN(
@@ -979,3 +1077,46 @@ def test_store_get_agent_hook_prefers_slot_value_when_available() -> None:
     hook = _RUN(store.get_agent_hook("atelier/worker/agent"))
 
     assert hook == HookRecord(agent_id="atelier/worker/agent", epic_id="at-slot")
+
+
+def test_create_epic_fails_closed_when_deferred_transition_fails(monkeypatch) -> None:
+    store = _store_for()
+
+    async def fail_transition(*_args, **_kwargs):
+        raise RuntimeError("simulated update failure")
+
+    monkeypatch.setattr(store, "transition_lifecycle", fail_transition)
+
+    with pytest.raises(RuntimeError, match="auto-closed to fail closed"):
+        _RUN(
+            store.create_epic(
+                CreateEpicRequest(
+                    title="Planner authoring epic",
+                    acceptance_criteria="Planner authoring uses AtelierStore.",
+                )
+            )
+        )
+
+    assert _RUN(store._show_issue("at-1")).status == "closed"
+
+
+def test_create_changeset_fails_closed_when_deferred_transition_fails(monkeypatch) -> None:
+    store = _store_for(BUILDER.issue("at-epic", issue_type="epic", labels=("at:epic",)))
+
+    async def fail_transition(*_args, **_kwargs):
+        raise RuntimeError("simulated update failure")
+
+    monkeypatch.setattr(store, "transition_lifecycle", fail_transition)
+
+    with pytest.raises(RuntimeError, match="auto-closed to fail closed"):
+        _RUN(
+            store.create_changeset(
+                CreateChangesetRequest(
+                    epic_id="at-epic",
+                    title="Planner authoring slice",
+                    acceptance_criteria="Planner changeset authoring uses AtelierStore.",
+                )
+            )
+        )
+
+    assert _RUN(store._show_issue("at-1")).status == "closed"
