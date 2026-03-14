@@ -6,18 +6,26 @@ import importlib
 import os
 import shutil
 import sys
+import sysconfig
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
 _WARNING_SAMPLE_LIMIT = 6
 _PROJECTED_RUNTIME_SELECTED_ENV = "ATELIER_PROJECTED_RUNTIME_SELECTED"
 _PROJECTED_RUNTIME_DEPENDENCY = "pydantic_core._pydantic_core"
+_PROJECTED_RUNTIME_PROVENANCE_MODULES: tuple[str, ...] = (
+    "pydantic",
+    "pydantic_core",
+    _PROJECTED_RUNTIME_DEPENDENCY,
+)
 _INSTALLED_TOOL_RUNTIME_MARKERS: tuple[str, ...] = (
     "/.local/share/uv/tools/atelier/",
     "/Library/Application Support/uv/tools/atelier/",
     "/site-packages/atelier/",
 )
+_PYTHONPATH_ENV = "PYTHONPATH"
 
 USER_DEFAULT_ENV_KEYS: frozenset[str] = frozenset(
     {
@@ -33,6 +41,13 @@ USER_DEFAULT_ENV_KEYS: frozenset[str] = frozenset(
         "ATELIER_STARTUP_DEFERRED_EPIC_SCAN_LIMIT",
     }
 )
+
+
+@dataclass(frozen=True)
+class _ProjectedRuntimeProvenanceIssue:
+    module_name: str
+    module_path: str
+    expected_roots: tuple[str, ...]
 
 
 def sanitize_subprocess_environment(
@@ -89,6 +104,54 @@ def format_ambient_env_warning(removed_keys: Iterable[str]) -> str | None:
         f"({sample}{suffix}). "
         "Use explicit launch context (for example --repo-dir or the local "
         "./worktree link) instead of ambient ATELIER_* routing state."
+    )
+
+
+def sanitize_pythonpath_environment(
+    *,
+    base_env: Mapping[str, str] | None = None,
+) -> tuple[dict[str, str], tuple[str, ...]]:
+    """Return an environment without inherited ``PYTHONPATH`` entries.
+
+    Atelier-managed agent and projected-skill runtimes do not inherit ambient
+    ``PYTHONPATH`` because it can mix a selected interpreter with third-party
+    packages from another distribution tree.
+
+    Args:
+        base_env: Optional source environment map. When omitted, current process
+            environment is used.
+
+    Returns:
+        Tuple of ``(sanitized_env, removed_entries)`` where ``removed_entries``
+        are the inherited ``PYTHONPATH`` entries that were dropped.
+    """
+    env = dict(os.environ if base_env is None else base_env)
+    removed_entries = _pythonpath_entries(env.get(_PYTHONPATH_ENV))
+    env.pop(_PYTHONPATH_ENV, None)
+    return env, removed_entries
+
+
+def format_ambient_pythonpath_warning(removed_entries: Iterable[str]) -> str | None:
+    """Build a warning for dropped inherited ``PYTHONPATH`` entries.
+
+    Args:
+        removed_entries: Iterable of dropped ``PYTHONPATH`` entries.
+
+    Returns:
+        User-facing warning text when entries were removed; otherwise ``None``.
+    """
+    unique = sorted({entry for entry in removed_entries if entry})
+    if not unique:
+        return None
+    sample = ", ".join(unique[:_WARNING_SAMPLE_LIMIT])
+    suffix = ""
+    if len(unique) > _WARNING_SAMPLE_LIMIT:
+        suffix = f", +{len(unique) - _WARNING_SAMPLE_LIMIT} more"
+    return (
+        "Warning: ignored inherited PYTHONPATH entries "
+        f"({sample}{suffix}). "
+        "Atelier-managed runtimes rebuild Python imports from the selected "
+        "repo runtime instead of mixing in ambient site-packages."
     )
 
 
@@ -209,10 +272,67 @@ def ensure_projected_runtime_dependency(
             interpreter.
     """
     try:
-        importlib.import_module(dependency)
-        return
+        imported_modules = tuple(
+            (module_name, importlib.import_module(module_name))
+            for module_name in _projected_runtime_dependency_modules(dependency)
+        )
     except Exception as exc:
         dependency_error = exc
+    else:
+        provenance_issues = _projected_runtime_provenance_issues(imported_modules)
+        if not provenance_issues:
+            return
+        provenance_issue = provenance_issues[0]
+        command = (
+            projected_repo_python_command(
+                repo_root=repo_root,
+                base_env=base_env,
+                current_executable=current_executable or sys.executable,
+            )
+            if repo_root is not None
+            else None
+        )
+        runtime_label = _projected_runtime_label(
+            current_executable=str(current_executable or sys.executable or "").strip(),
+            script_path=script_path,
+        )
+        repo_display = str(repo_root) if repo_root is not None else "(unresolved)"
+        print(
+            "error: planner helper runtime provenance is mixed before importing atelier modules.",
+            file=sys.stderr,
+        )
+        print(
+            "boundary: repo-source bootstrap is separate; this is a dependency "
+            "provenance contradiction, not another src-path-ordering regression.",
+            file=sys.stderr,
+        )
+        print(f"script: {script_path}", file=sys.stderr)
+        print(
+            f"interpreter: {str(current_executable or sys.executable or '').strip() or '(unknown)'}",
+            file=sys.stderr,
+        )
+        print(f"runtime: {runtime_label}", file=sys.stderr)
+        print(f"repo_root: {repo_display}", file=sys.stderr)
+        print(f"module: {provenance_issue.module_name}", file=sys.stderr)
+        print(f"module_path: {provenance_issue.module_path}", file=sys.stderr)
+        print(
+            "expected_roots: " + ", ".join(provenance_issue.expected_roots or ("(unresolved)",)),
+            file=sys.stderr,
+        )
+        ambient_pythonpath = str(os.environ.get(_PYTHONPATH_ENV, "")).strip()
+        if ambient_pythonpath:
+            print(f"ambient_pythonpath: {ambient_pythonpath}", file=sys.stderr)
+        print(
+            "action: "
+            + _projected_runtime_recovery_guidance(
+                repo_root=repo_root,
+                script_path=script_path,
+                runtime_label=runtime_label,
+                command=command,
+            ),
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
     env = dict(os.environ if base_env is None else base_env)
     current = str(current_executable or sys.executable or "").strip()
@@ -318,3 +438,99 @@ def _projected_runtime_recovery_guidance(
         "repair the selected Python runtime so it can import compiled "
         "dependencies, then rerun the helper."
     )
+
+
+def _pythonpath_entries(raw_pythonpath: str | None) -> tuple[str, ...]:
+    raw = str(raw_pythonpath or "").strip()
+    if not raw:
+        return ()
+    return tuple(entry for entry in raw.split(os.pathsep) if entry)
+
+
+def reset_current_process_pythonpath(
+    entries: Iterable[str],
+    *,
+    preserve_paths: Iterable[str] = (),
+) -> None:
+    """Remove inherited ``PYTHONPATH`` entries from the active process state.
+
+    Args:
+        entries: ``PYTHONPATH`` entries to drop from ``sys.path``.
+        preserve_paths: Explicit paths that must remain in ``sys.path`` even if
+            they also appeared in ``entries``.
+    """
+    os.environ.pop(_PYTHONPATH_ENV, None)
+    removed = {entry for entry in entries if entry}
+    if not removed:
+        return
+    preserved = {entry for entry in preserve_paths if entry}
+    sys.path[:] = [entry for entry in sys.path if entry not in removed or entry in preserved]
+
+
+def _projected_runtime_dependency_modules(dependency: str) -> tuple[str, ...]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for module_name in (*_PROJECTED_RUNTIME_PROVENANCE_MODULES, dependency):
+        normalized = str(module_name).strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        names.append(normalized)
+    return tuple(names)
+
+
+def _projected_runtime_provenance_issues(
+    imported_modules: Sequence[tuple[str, object]],
+) -> tuple[_ProjectedRuntimeProvenanceIssue, ...]:
+    allowed_roots = _current_runtime_dependency_roots()
+    expected_roots = tuple(str(root) for root in allowed_roots)
+    issues: list[_ProjectedRuntimeProvenanceIssue] = []
+    for module_name, module in imported_modules:
+        module_path = _module_origin_path(module)
+        if module_path is None:
+            continue
+        if _path_within_roots(module_path, allowed_roots):
+            continue
+        issues.append(
+            _ProjectedRuntimeProvenanceIssue(
+                module_name=module_name,
+                module_path=str(module_path),
+                expected_roots=expected_roots,
+            )
+        )
+    return tuple(issues)
+
+
+def _current_runtime_dependency_roots() -> tuple[Path, ...]:
+    roots: list[Path] = []
+    for key in ("purelib", "platlib"):
+        raw_path = str(sysconfig.get_path(key) or "").strip()
+        if not raw_path:
+            continue
+        resolved = Path(raw_path).resolve()
+        if resolved not in roots:
+            roots.append(resolved)
+    return tuple(roots)
+
+
+def _module_origin_path(module: object) -> Path | None:
+    raw_path = getattr(module, "__file__", None)
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        spec = getattr(module, "__spec__", None)
+        raw_path = getattr(spec, "origin", None)
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        return None
+    try:
+        return Path(raw_path).resolve()
+    except OSError:
+        return Path(raw_path)
+
+
+def _path_within_roots(path: Path, roots: Sequence[Path]) -> bool:
+    for root in roots:
+        try:
+            path.relative_to(root)
+        except ValueError:
+            continue
+        return True
+    return False

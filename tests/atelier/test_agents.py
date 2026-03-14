@@ -281,14 +281,14 @@ class TestAgentSpec:
         assert env["BEADS_AGENT_NAME"] == "planner/test-session"
         assert env["PYTHONPATH"].split(os.pathsep)[0] == expected_root
 
-    def test_agent_environment_preserves_existing_pythonpath_entries(self) -> None:
+    def test_agent_environment_replaces_inherited_pythonpath_entries(self) -> None:
         expected_root = str(Path(agents.__file__).resolve().parent.parent)
         existing = ["/tmp/one", expected_root, "/tmp/two", "/tmp/one"]
         env = agents.agent_environment(
             "planner/test-session",
             base_env={"PYTHONPATH": os.pathsep.join(existing)},
         )
-        assert env["PYTHONPATH"].split(os.pathsep) == [expected_root, "/tmp/one", "/tmp/two"]
+        assert env["PYTHONPATH"].split(os.pathsep) == [expected_root]
 
     def test_agent_environment_drops_inherited_runtime_routing_keys(self) -> None:
         env = agents.agent_environment(
@@ -314,6 +314,21 @@ class TestAgentSpec:
         assert len(warnings) == 1
         assert "ATELIER_PROJECT" in warnings[0]
         assert "--repo-dir" in warnings[0]
+
+    def test_agent_environment_warns_when_inherited_pythonpath_is_sanitized(self) -> None:
+        warnings: list[str] = []
+        env = agents.agent_environment(
+            "planner/test-session",
+            base_env={"PYTHONPATH": "/tmp/foreign/site-packages"},
+            warn=warnings.append,
+        )
+
+        assert len(warnings) == 1
+        assert "PYTHONPATH" in warnings[0]
+        assert "/tmp/foreign/site-packages" in warnings[0]
+        assert env["PYTHONPATH"].split(os.pathsep)[0] == str(
+            Path(agents.__file__).resolve().parent.parent
+        )
 
     def test_agent_environment_does_not_warn_for_self_scoped_agent_id(self) -> None:
         warnings: list[str] = []
