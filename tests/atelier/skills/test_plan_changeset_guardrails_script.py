@@ -286,6 +286,43 @@ def test_evaluate_guardrails_accepts_broad_redesign_resplit_trigger_wording() ->
     assert not any("missing explicit re-split triggers" in item for item in report.violations)
 
 
+def test_evaluate_guardrails_accepts_underscored_resplit_header_with_tilde_threshold() -> None:
+    module = _load_script_module()
+    epic = {
+        "id": "at-epic",
+        "labels": ["at:epic"],
+        "title": "Align guardrail checker with authored planner notes",
+        "description": _planner_contract_text(),
+        "notes": (
+            "LOC estimate: 320\n"
+            "Invariant impact map:\n"
+            "- mutation entry points\n"
+            "- recovery paths\n"
+            "- external side-effect adapters\n"
+            "re_split_triggers:\n"
+            "- threshold crossing: split if any active changeset trends above ~400 LOC\n"
+            "- threshold crossing: split if review expands a changeset beyond its "
+            "declared planner concern domain\n"
+            "- new concern domain discovered during review: split if provider-boundary "
+            "work or a new store semantic appears\n"
+            "planner_action_on_resplit: create deferred follow-on changesets or stack "
+            "extensions immediately and keep the active slice scoped.\n"
+            "review_scope_growth_guidance: if review feedback uncovers a new planner "
+            "concern domain, capture it as deferred follow-on work instead of widening "
+            "the active changeset."
+        ),
+        "acceptance_criteria": "Done when authored re_split trigger notes no longer fail.",
+    }
+
+    report = module._evaluate_guardrails(
+        epic_issue=epic,
+        child_changesets=[],
+        target_changesets=[epic],
+    )
+
+    assert not any("missing explicit re-split triggers" in item for item in report.violations)
+
+
 def test_evaluate_guardrails_flags_cross_cutting_guardrail_gaps() -> None:
     module = _load_script_module()
     epic = {
