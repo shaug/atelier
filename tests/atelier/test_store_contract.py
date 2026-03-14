@@ -11,6 +11,7 @@ from pydantic import ValidationError
 import atelier.store as public_store
 from atelier.lib.beads import (
     Beads,
+    BeadsCommandRequest,
     BeadsCommandResult,
     RecordingBeadsTransport,
     ScriptedBeadsTransport,
@@ -44,7 +45,11 @@ from atelier.store import (
     WorkRef,
     build_atelier_store,
 )
-from atelier.testing.beads import IssueFixtureBuilder, build_in_memory_beads_client
+from atelier.testing.beads import (
+    InMemoryBeadsBackend,
+    IssueFixtureBuilder,
+    build_in_memory_beads_client,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STORE_CONTRACT_DOC_PATH = REPO_ROOT / "docs" / "atelier-store-contract.md"
@@ -53,6 +58,7 @@ ADOPTION_GUIDE_PATH = REPO_ROOT / "docs" / "beads-adoption-guide.md"
 BUILDER = IssueFixtureBuilder()
 _RUN = asyncio.run
 _HELP = "Flags:\n  -h, --help   help for command\n      --json  Output in JSON format"
+_BACKENDS = ("in-memory", "subprocess")
 
 _STORE_METHOD_NAMES = (
     "get_epic",
@@ -221,12 +227,19 @@ def test_store_contract_docs_record_invariants_and_deferred_work() -> None:
     assert "adapter-local compatibility state" in store_doc
     assert "implement `AtelierStore` itself" in store_doc
     assert "`atelier.lib.beads.Beads` remains the swappable boundary" in store_doc
+    assert "Dual-Backend Proof" in store_doc
+    assert "Downstream Migration Contract" in store_doc
+    assert "Known Contract Gaps" in store_doc
+    assert "dependency add/remove is not yet proven in the shared dual-backend suite" in store_doc
+    assert "Planner, worker, and publish migrations should depend on `atelier.store`" in store_doc
     assert "implementing `AtelierStore` graph and discovery methods" in store_doc
     assert "GitHub issue #644" in store_doc
     assert "GitHub issue #645" in store_doc
     assert "GitHub issue #646" in store_doc
     assert "[Atelier Store Contract]" in beads_doc
     assert "[Atelier Store Contract]" in adoption_guide
+    assert "Downstream migrations should import `atelier.store`" in adoption_guide
+    assert "process-backed coverage only" in adoption_guide
 
 
 def test_epic_and_work_refs_are_store_native_models() -> None:
@@ -272,6 +285,295 @@ def _queue_message(
         assignee=assignee,
         description=render_message(metadata, "Need a decision."),
     )
+
+
+class _InMemorySubprocessTransport:
+    """Drive ``SubprocessBeadsClient`` from the in-memory command backend."""
+
+    def __init__(self, backend: InMemoryBeadsBackend) -> None:
+        self._backend = backend
+
+    async def execute(self, request: BeadsCommandRequest) -> BeadsCommandResult:
+        if request.argv in {
+            ("bd", "dep", "add", "--help"),
+            ("bd", "dep", "remove", "--help"),
+        }:
+            return BeadsCommandResult(argv=request.argv, returncode=0, stdout=_HELP)
+        completed = self._backend.run(request.argv, cwd=request.cwd, env=request.env)
+        return BeadsCommandResult(
+            argv=request.argv,
+            returncode=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        )
+
+
+def _parity_seed_issues() -> tuple[dict[str, object], ...]:
+    return (
+        BUILDER.issue("at-epic", title="Epic", issue_type="epic", labels=("at:epic", "atelier")),
+        BUILDER.issue(
+            "at-change",
+            title="Change",
+            parent="at-epic",
+            dependencies=("at-dep",),
+            description=(
+                "changeset.root_branch: root/store\n"
+                "changeset.parent_branch: main\n"
+                "changeset.work_branch: root/store-at-change\n"
+                "changeset.root_base: abc1234\n"
+                "changeset.parent_base: def5678\n"
+                "pr_url: https://example.invalid/pr/41\n"
+                "pr_number: 41\n"
+                "pr_state: draft-pr\n"
+                "review_owner: reviewer-a\n"
+            ),
+            labels=("atelier",),
+        ),
+        BUILDER.issue(
+            "at-dep",
+            title="Dependency",
+            parent="at-epic",
+            status="closed",
+            description="pr_state: merged\n",
+            labels=("atelier",),
+        ),
+        BUILDER.issue(
+            "at-blocked",
+            title="Blocked",
+            parent="at-epic",
+            status="blocked",
+            labels=("atelier",),
+        ),
+        BUILDER.issue(
+            "at-agent",
+            title="atelier/worker/agent",
+            issue_type="agent",
+            labels=("at:agent",),
+            description="agent_id: atelier/worker/agent\nhook_bead: null\n",
+        ),
+        _queue_message(),
+    )
+
+
+def _store_for_backend(backend: str) -> AtelierStore:
+    issues = _parity_seed_issues()
+    if backend == "in-memory":
+        client, _ = build_in_memory_beads_client(issues=issues)
+        return build_atelier_store(beads=client)
+    if backend == "subprocess":
+        command_backend = InMemoryBeadsBackend(seeded_issues=issues)
+        client = SubprocessBeadsClient(transport=_InMemorySubprocessTransport(command_backend))
+        return build_atelier_store(beads=client)
+    raise AssertionError(f"unexpected backend: {backend}")
+
+
+def _read_snapshot(backend: str) -> dict[str, object]:
+    store = _store_for_backend(backend)
+    epic = _RUN(store.get_epic("at-epic"))
+    changeset = _RUN(store.get_changeset("at-change"))
+    listed_changesets = _RUN(store.list_changesets())
+    ready_changesets = _RUN(store.list_ready_changesets())
+    message = _RUN(store.list_messages(MessageQuery(unread_only=True)))[0]
+    hook = _RUN(store.get_agent_hook("atelier/worker/agent"))
+    return {
+        "epics": tuple(epic_record.id for epic_record in _RUN(store.list_epics())),
+        "epic_changesets": tuple(work_ref.id for work_ref in epic.changesets),
+        "changeset": {
+            "id": changeset.id,
+            "epic_id": changeset.epic_id,
+            "lifecycle": changeset.lifecycle.value,
+            "branches": changeset.branches.model_dump() if changeset.branches else None,
+            "review": changeset.review.model_dump(mode="json"),
+            "dependencies": tuple(
+                (
+                    dependency.depends_on_id,
+                    dependency.satisfied,
+                    dependency.requires_integrated_state,
+                )
+                for dependency in changeset.dependencies
+            ),
+        },
+        "listed_changesets": tuple(record.id for record in listed_changesets),
+        "ready_changesets": tuple(record.id for record in ready_changesets),
+        "message": {
+            "id": message.id,
+            "thread_id": message.thread_id,
+            "thread_kind": message.thread_kind.value,
+            "queue": message.queue,
+            "audience": message.audience,
+            "claimed_by": message.claimed_by,
+        },
+        "hook": hook.model_dump(mode="json") if hook else None,
+    }
+
+
+def _mutation_snapshot(backend: str) -> dict[str, object]:
+    store = _store_for_backend(backend)
+    review = _RUN(
+        store.update_review(
+            UpdateReviewRequest(
+                changeset_id="at-change",
+                review=ReviewMetadata(
+                    pr_state=ReviewState.IN_REVIEW,
+                    review_owner="reviewer-b",
+                    integrated_sha="abc1234",
+                ),
+                preserve_existing=True,
+            )
+        )
+    )
+    appended = _RUN(
+        store.append_notes(
+            AppendNotesRequest(
+                issue_id="at-change",
+                notes=("worker_update: preserved lifecycle mutation parity",),
+            )
+        )
+    )
+    transition = _RUN(
+        store.transition_lifecycle(
+            LifecycleTransitionRequest(
+                issue_id="at-change",
+                target_status=LifecycleStatus.IN_PROGRESS,
+                expected_current=LifecycleStatus.OPEN,
+            )
+        )
+    )
+    created_message = _RUN(
+        store.create_message(
+            CreateMessageRequest(
+                title="NEEDS-DECISION: pick one",
+                body="Choose one migration path.",
+                sender="atelier/worker/codex/p100",
+                thread_id="at-change",
+                thread_kind=MessageThreadKind.CHANGESET,
+                audience=("planner",),
+                queue="planner",
+                kind="needs-decision",
+                blocking=True,
+            )
+        )
+    )
+    claimed = _RUN(
+        store.claim_message(
+            ClaimMessageRequest(
+                message_id="msg-queue",
+                claimed_by="atelier/planner/codex/p200",
+            )
+        )
+    )
+    hooked = _RUN(
+        store.set_agent_hook(SetHookRequest(agent_id="atelier/worker/agent", epic_id="at-epic"))
+    )
+    cleared = _RUN(
+        store.clear_agent_hook(
+            ClearHookRequest(agent_id="atelier/worker/agent", expected_epic_id="at-epic")
+        )
+    )
+    refreshed = _RUN(store._show_issue("at-change"))
+    return {
+        "review": review.review.model_dump(mode="json"),
+        "transition": transition.model_dump(mode="json"),
+        "created_message": {
+            "thread_id": created_message.thread_id,
+            "thread_kind": created_message.thread_kind.value,
+            "queue": created_message.queue,
+            "audience": created_message.audience,
+            "blocking": created_message.blocking,
+        },
+        "claimed": {
+            "claimed_by": claimed.claimed_by,
+            "queue": claimed.queue,
+            "status": claimed.status.value if claimed.status else None,
+        },
+        "hooked": hooked.model_dump(mode="json"),
+        "cleared": cleared.model_dump(mode="json") if cleared else None,
+        "appended_tail": tuple((refreshed.description or "").rstrip("\n").splitlines()[-1:]),
+        "appended_issue_lifecycle": appended.lifecycle.value,
+        "refreshed_assignee": refreshed.assignee,
+    }
+
+
+@pytest.mark.parametrize("backend", _BACKENDS)
+def test_store_dual_backend_read_snapshot_matches_expected_contract(backend: str) -> None:
+    assert _read_snapshot(backend) == {
+        "epics": ("at-epic",),
+        "epic_changesets": ("at-change", "at-dep", "at-blocked"),
+        "changeset": {
+            "id": "at-change",
+            "epic_id": "at-epic",
+            "lifecycle": "open",
+            "branches": {
+                "root_branch": "root/store",
+                "parent_branch": "main",
+                "work_branch": "root/store-at-change",
+                "root_base": "abc1234",
+                "parent_base": "def5678",
+            },
+            "review": {
+                "pr_url": "https://example.invalid/pr/41",
+                "pr_number": 41,
+                "pr_state": "draft-pr",
+                "review_owner": "reviewer-a",
+                "integrated_sha": None,
+            },
+            "dependencies": (("at-dep", True, True),),
+        },
+        "listed_changesets": ("at-change", "at-blocked"),
+        "ready_changesets": ("at-change",),
+        "message": {
+            "id": "msg-queue",
+            "thread_id": "at-change",
+            "thread_kind": "changeset",
+            "queue": "planner",
+            "audience": ("planner",),
+            "claimed_by": None,
+        },
+        "hook": None,
+    }
+
+
+@pytest.mark.parametrize("backend", _BACKENDS)
+def test_store_dual_backend_mutation_snapshot_matches_expected_contract(backend: str) -> None:
+    assert _mutation_snapshot(backend) == {
+        "review": {
+            "pr_url": "https://example.invalid/pr/41",
+            "pr_number": 41,
+            "pr_state": "in-review",
+            "review_owner": "reviewer-b",
+            "integrated_sha": "abc1234",
+        },
+        "transition": {
+            "issue_id": "at-change",
+            "issue_kind": "changeset",
+            "from_status": "open",
+            "to_status": "in_progress",
+            "reason": None,
+        },
+        "created_message": {
+            "thread_id": "at-change",
+            "thread_kind": "changeset",
+            "queue": "planner",
+            "audience": ("planner",),
+            "blocking": True,
+        },
+        "claimed": {
+            "claimed_by": "atelier/planner/codex/p200",
+            "queue": "planner",
+            "status": "open",
+        },
+        "hooked": {
+            "agent_id": "atelier/worker/agent",
+            "epic_id": "at-epic",
+        },
+        "cleared": {
+            "agent_id": "atelier/worker/agent",
+            "epic_id": "at-epic",
+        },
+        "appended_tail": ("worker_update: preserved lifecycle mutation parity",),
+        "appended_issue_lifecycle": "open",
+        "refreshed_assignee": None,
+    }
 
 
 @pytest.mark.parametrize("operation", ["add", "remove"])

@@ -87,6 +87,60 @@ implementation is backed by Beads:
 The eventual `AtelierStore` implementation may use those lower-level details
 internally, but they are not part of the Atelier store contract.
 
+## Dual-Backend Proof
+
+The store contract is now proven against both supported `Beads` backends:
+
+- `InMemoryBeadsClient` for deterministic semantic fixtures
+- `SubprocessBeadsClient` for the process-backed command contract
+
+The shared proof runs the same `AtelierStore` read and mutation flows over both
+backends. Representative read coverage includes epic discovery, changeset
+listing and ready discovery, message listing, hook lookup, branch metadata, and
+review/dependency state decoding. Representative mutation coverage includes
+review updates, note appends, lifecycle transitions, message create/claim, and
+agent hook set/clear.
+
+This proof freezes one architecture shape: a single Atelier-owned store boundary
+implemented on top of multiple `Beads` backends. Future backend additions must
+extend the same `AtelierStore` contract rather than introducing a new public
+store surface for planner or worker code.
+
+## Downstream Migration Contract
+
+Planner, worker, and publish migrations should depend on `atelier.store` and its
+typed models/requests, not on raw Beads issue payloads.
+
+Downstream code should consume:
+
+- `AtelierStore`
+- `EpicRecord`, `ChangesetRecord`, `MessageRecord`, `HookRecord`
+- `ReviewMetadata`, `DependencyRecord`, `LifecycleTransition`
+- the request/query models in `atelier.store.contract`
+
+Downstream code should not:
+
+- parse description fields directly for review, branch, hook, or message state
+- infer lifecycle from raw labels or issue types when `atelier.store` already
+  publishes the decision
+- construct `bd` argv or depend on `BEADS_DIR`, cwd, Dolt layout, or subprocess
+  capability probing from planner/worker/publish policy modules
+
+Direct `atelier.lib.beads` usage remains appropriate only in boundary adapters
+that own transport, startup diagnostics, or other Beads-client-specific
+concerns.
+
+## Known Contract Gaps
+
+- dependency add/remove is not yet proven in the shared dual-backend suite
+  because `InMemoryBeadsClient` still treats dependency mutation as outside Tier
+  0 scope
+- dependency mutation remains covered through explicit process-backed store
+  tests until the in-memory backend grows the same semantic support
+- if downstream migrations need new store semantics, add them to `atelier.store`
+  first and extend both backend suites before moving business logic onto the new
+  field or operation
+
 ## Deferred Work
 
 This contract-definition slice does not include the following work:

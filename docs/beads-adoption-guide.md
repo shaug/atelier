@@ -121,6 +121,15 @@ The migration exposed real gaps cleanly:
 
 ## Follow-On Work
 
+- Downstream migrations should import `atelier.store` once they cross from
+  transport concerns into planner/worker/publish policy. Use
+  [Atelier Store Contract] as the durable store vocabulary instead of reusing
+  `IssueRecord`, description-field parsing, or direct `Beads` client
+  construction in business-logic modules.
+- The current dual-backend store proof covers representative reads plus
+  review/notes/lifecycle/message/hook mutations. dependency add/remove remains
+  process-backed coverage only until the in-memory backend exposes that semantic
+  contract too.
 - [GitHub issue #574] should define the Atelier-owned store abstraction for
   planner and worker business logic so direct `Beads` usage stays limited to
   boundary code.
