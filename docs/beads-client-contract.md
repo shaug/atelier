@@ -93,7 +93,8 @@ Downstream code should treat the protocol plus the shared request/response
 models and typed errors as the integration boundary.
 
 For contributor-facing adoption guidance, anti-guidance, and lessons from the
-initial runtime/test migrations, see [Beads Adoption Guide][beads-adoption-guide].
+initial runtime/test migrations, see
+[Beads Adoption Guide][beads-adoption-guide].
 
 ### `at-s1vc`: alternative implementation contract
 
