@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+from typing import NoReturn
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import field_validator, model_validator
 
 from .models import (
     ChangesetRecord,
@@ -141,18 +141,33 @@ class LifecycleTransitionRequest(StoreModel):
     reason: Identifier | None = None
 
 
-class AtelierStore(ABC):
-    """Abstract async store facade for Atelier planning state.
+class AtelierStore:
+    """Concrete async store facade for Atelier planning state.
 
     Downstream planner, worker, and publish code should depend on this single
-    store boundary. Backend choice remains an adapter construction concern below
+    store service. Backend choice remains an adapter construction concern below
     this class via the injected Beads implementation, not via multiple peer
-    store contracts. Implementations should fail closed: if a backend cannot
-    answer or persist one of these requests without lossy inference, it should
-    raise instead of silently approximating the result.
+    store contracts or subclasses. Follow-on adapter changesets should fill in
+    these method bodies on this same facade. Until then, every operation fails
+    closed: if the adapter cannot answer or persist one of these requests
+    without lossy inference, it must raise instead of silently approximating
+    the result.
     """
 
-    @abstractmethod
+    def __init__(self, beads_backend: object) -> None:
+        self._beads_backend = beads_backend
+
+    @property
+    def beads_backend(self) -> object:
+        """Return the injected Beads backend used by this store service."""
+
+        return self._beads_backend
+
+    def _raise_deferred(self, operation: str) -> NoReturn:
+        raise NotImplementedError(
+            f"AtelierStore.{operation} is deferred to the follow-on store adapter changesets"
+        )
+
     async def get_epic(self, epic_id: str) -> EpicRecord:
         """Load one epic record by stable Atelier id.
 
@@ -165,8 +180,9 @@ class AtelierStore(ABC):
         Raises:
             LookupError: If no matching epic exists.
         """
+        del epic_id
+        self._raise_deferred("get_epic")
 
-    @abstractmethod
     async def list_epics(
         self,
         query: EpicQuery = EpicQuery(),
@@ -179,8 +195,9 @@ class AtelierStore(ABC):
         Returns:
             Matching epic records in backend-defined stable order.
         """
+        del query
+        self._raise_deferred("list_epics")
 
-    @abstractmethod
     async def get_changeset(self, changeset_id: str) -> ChangesetRecord:
         """Load one changeset record by stable Atelier id.
 
@@ -193,8 +210,9 @@ class AtelierStore(ABC):
         Raises:
             LookupError: If no matching changeset exists.
         """
+        del changeset_id
+        self._raise_deferred("get_changeset")
 
-    @abstractmethod
     async def list_changesets(
         self,
         query: ChangesetQuery = ChangesetQuery(),
@@ -207,8 +225,9 @@ class AtelierStore(ABC):
         Returns:
             Matching changeset records in backend-defined stable order.
         """
+        del query
+        self._raise_deferred("list_changesets")
 
-    @abstractmethod
     async def list_ready_changesets(
         self,
         query: ReadyChangesetQuery = ReadyChangesetQuery(),
@@ -222,8 +241,9 @@ class AtelierStore(ABC):
             Changesets that the backend can prove are ready without widening
             Atelier readiness semantics.
         """
+        del query
+        self._raise_deferred("list_ready_changesets")
 
-    @abstractmethod
     async def list_messages(
         self,
         query: MessageQuery = MessageQuery(),
@@ -236,8 +256,9 @@ class AtelierStore(ABC):
         Returns:
             Matching durable message records in backend-defined stable order.
         """
+        del query
+        self._raise_deferred("list_messages")
 
-    @abstractmethod
     async def get_agent_hook(self, agent_id: str) -> HookRecord | None:
         """Load the current epic hook, if any, for one agent.
 
@@ -247,8 +268,9 @@ class AtelierStore(ABC):
         Returns:
             The current hook binding, or `None` when the agent is unhooked.
         """
+        del agent_id
+        self._raise_deferred("get_agent_hook")
 
-    @abstractmethod
     async def add_dependency(self, mutation: DependencyMutation) -> DependencyRecord:
         """Persist one dependency edge as an Atelier-owned mutation.
 
@@ -258,8 +280,9 @@ class AtelierStore(ABC):
         Returns:
             The persisted dependency record.
         """
+        del mutation
+        self._raise_deferred("add_dependency")
 
-    @abstractmethod
     async def remove_dependency(
         self,
         mutation: DependencyMutation,
@@ -272,8 +295,9 @@ class AtelierStore(ABC):
         Returns:
             The removed dependency record, or `None` when no such edge existed.
         """
+        del mutation
+        self._raise_deferred("remove_dependency")
 
-    @abstractmethod
     async def create_message(self, request: CreateMessageRequest) -> MessageRecord:
         """Persist one durable work-threaded coordination message.
 
@@ -283,8 +307,9 @@ class AtelierStore(ABC):
         Returns:
             The persisted message record on its epic or changeset thread.
         """
+        del request
+        self._raise_deferred("create_message")
 
-    @abstractmethod
     async def claim_message(self, request: ClaimMessageRequest) -> MessageRecord:
         """Persist queue-claim metadata for one durable message.
 
@@ -294,8 +319,9 @@ class AtelierStore(ABC):
         Returns:
             The updated message record after the claim mutation.
         """
+        del request
+        self._raise_deferred("claim_message")
 
-    @abstractmethod
     async def set_agent_hook(self, request: SetHookRequest) -> HookRecord:
         """Bind one agent to one epic hook.
 
@@ -305,8 +331,9 @@ class AtelierStore(ABC):
         Returns:
             The persisted hook record after the binding succeeds.
         """
+        del request
+        self._raise_deferred("set_agent_hook")
 
-    @abstractmethod
     async def clear_agent_hook(self, request: ClearHookRequest) -> HookRecord | None:
         """Clear one agent hook when the current binding matches expectations.
 
@@ -316,8 +343,9 @@ class AtelierStore(ABC):
         Returns:
             The cleared hook record, or `None` when nothing was cleared.
         """
+        del request
+        self._raise_deferred("clear_agent_hook")
 
-    @abstractmethod
     async def update_review(self, request: UpdateReviewRequest) -> ChangesetRecord:
         """Replace or merge review metadata for one changeset.
 
@@ -327,8 +355,9 @@ class AtelierStore(ABC):
         Returns:
             The updated changeset record after review metadata persists.
         """
+        del request
+        self._raise_deferred("update_review")
 
-    @abstractmethod
     async def transition_lifecycle(
         self,
         request: LifecycleTransitionRequest,
@@ -341,6 +370,8 @@ class AtelierStore(ABC):
         Returns:
             The applied lifecycle transition record.
         """
+        del request
+        self._raise_deferred("transition_lifecycle")
 
 
 AsyncAtelierStore = AtelierStore

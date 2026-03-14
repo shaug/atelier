@@ -32,13 +32,14 @@ Typed request/query models:
 - `UpdateReviewRequest`
 - `LifecycleTransitionRequest`
 
-Async store base class:
+Async store service:
 
 - `AtelierStore`
 
 `AtelierStore` is the single async store boundary for downstream Atelier code.
-Backend swapping happens beneath that facade through the injected Beads
-implementation rather than through multiple peer store contracts.
+Backend swapping happens beneath that concrete facade through the injected Beads
+implementation rather than through multiple peer store contracts or
+subclass-specific store types.
 
 The contract is intentionally backend-neutral. It does not expose `bd` commands,
 `BEADS_DIR`, Dolt layout, filesystem probes, transport details, or startup

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -9,28 +10,16 @@ from atelier.lib.beads import RecordingBeadsTransport, SubprocessBeadsClient
 from atelier.store import (
     AtelierStore,
     ChangesetBranches,
-    ChangesetQuery,
     ChangesetRecord,
-    ClaimMessageRequest,
-    ClearHookRequest,
     CreateMessageRequest,
-    DependencyMutation,
     DependencyRecord,
-    EpicQuery,
     EpicRecord,
-    HookRecord,
     LifecycleStatus,
-    LifecycleTransition,
-    LifecycleTransitionRequest,
     MessageDelivery,
-    MessageQuery,
     MessageRecord,
     MessageThreadKind,
-    ReadyChangesetQuery,
     ReviewMetadata,
     ReviewState,
-    SetHookRequest,
-    UpdateReviewRequest,
     WorkItemKind,
     WorkRef,
 )
@@ -112,122 +101,8 @@ def test_store_message_contract_only_exposes_durable_threaded_path() -> None:
     assert tuple(item.value for item in MessageThreadKind) == ("changeset", "epic")
 
 
-class _StoreAdapterStub(AtelierStore):
-    def __init__(self, backend: object) -> None:
-        self.backend = backend
-
-    async def get_epic(self, epic_id: str) -> EpicRecord:
-        return EpicRecord(id=epic_id, title="Epic", lifecycle=LifecycleStatus.OPEN)
-
-    async def list_epics(self, query: EpicQuery = EpicQuery()) -> tuple[EpicRecord, ...]:
-        del query
-        return (EpicRecord(id="at-epic", title="Epic", lifecycle=LifecycleStatus.OPEN),)
-
-    async def get_changeset(self, changeset_id: str) -> ChangesetRecord:
-        return ChangesetRecord(
-            id=changeset_id,
-            title="Changeset",
-            lifecycle=LifecycleStatus.OPEN,
-        )
-
-    async def list_changesets(
-        self,
-        query: ChangesetQuery = ChangesetQuery(),
-    ) -> tuple[ChangesetRecord, ...]:
-        del query
-        return (
-            ChangesetRecord(
-                id="at-1",
-                title="Changeset",
-                lifecycle=LifecycleStatus.OPEN,
-            ),
-        )
-
-    async def list_ready_changesets(
-        self,
-        query: ReadyChangesetQuery = ReadyChangesetQuery(),
-    ) -> tuple[ChangesetRecord, ...]:
-        del query
-        return ()
-
-    async def list_messages(
-        self, query: MessageQuery = MessageQuery()
-    ) -> tuple[MessageRecord, ...]:
-        del query
-        return ()
-
-    async def get_agent_hook(self, agent_id: str) -> HookRecord | None:
-        return HookRecord(agent_id=agent_id, epic_id="at-epic")
-
-    async def add_dependency(self, mutation: DependencyMutation) -> DependencyRecord:
-        return DependencyRecord(
-            issue_id=mutation.issue_id,
-            depends_on_id=mutation.depends_on_id,
-            requires_integrated_state=mutation.requires_integrated_state,
-        )
-
-    async def remove_dependency(
-        self,
-        mutation: DependencyMutation,
-    ) -> DependencyRecord | None:
-        return DependencyRecord(
-            issue_id=mutation.issue_id,
-            depends_on_id=mutation.depends_on_id,
-            requires_integrated_state=mutation.requires_integrated_state,
-        )
-
-    async def create_message(self, request: CreateMessageRequest) -> MessageRecord:
-        return MessageRecord(
-            id="msg-1",
-            title=request.title,
-            body=request.body,
-            delivery=request.delivery,
-            thread_id=request.thread_id,
-            thread_kind=request.thread_kind,
-            audience=request.audience,
-        )
-
-    async def claim_message(self, request: ClaimMessageRequest) -> MessageRecord:
-        return MessageRecord(
-            id=request.message_id,
-            title="Claimed",
-            delivery=MessageDelivery.WORK_THREADED,
-            thread_id="at-epic",
-            thread_kind=MessageThreadKind.EPIC,
-            claimed_by=request.claimed_by,
-        )
-
-    async def set_agent_hook(self, request: SetHookRequest) -> HookRecord:
-        return HookRecord(agent_id=request.agent_id, epic_id=request.epic_id)
-
-    async def clear_agent_hook(self, request: ClearHookRequest) -> HookRecord | None:
-        if request.expected_epic_id is None:
-            return None
-        return HookRecord(agent_id=request.agent_id, epic_id=request.expected_epic_id)
-
-    async def update_review(self, request: UpdateReviewRequest) -> ChangesetRecord:
-        return ChangesetRecord(
-            id=request.changeset_id,
-            title="Changeset",
-            lifecycle=LifecycleStatus.OPEN,
-            review=request.review,
-        )
-
-    async def transition_lifecycle(
-        self,
-        request: LifecycleTransitionRequest,
-    ) -> LifecycleTransition:
-        return LifecycleTransition(
-            issue_id=request.issue_id,
-            issue_kind=WorkItemKind.CHANGESET,
-            from_status=request.expected_current,
-            to_status=request.target_status,
-            reason=request.reason,
-        )
-
-
-def test_store_base_class_is_backend_neutral() -> None:
-    process_backed = _StoreAdapterStub(
+def test_store_service_is_backend_neutral_and_fail_closed() -> None:
+    process_backed = AtelierStore(
         SubprocessBeadsClient(
             transport=RecordingBeadsTransport(),
             cwd=Path("."),
@@ -236,10 +111,16 @@ def test_store_base_class_is_backend_neutral() -> None:
         )
     )
     in_memory_client, _store = build_in_memory_beads_client()
-    in_memory = _StoreAdapterStub(in_memory_client)
+    in_memory = AtelierStore(in_memory_client)
 
-    assert isinstance(process_backed, AtelierStore)
-    assert isinstance(in_memory, AtelierStore)
+    assert process_backed.beads_backend is not None
+    assert in_memory.beads_backend is in_memory_client
+
+    with pytest.raises(
+        NotImplementedError,
+        match="AtelierStore.get_epic is deferred to the follow-on store adapter changesets",
+    ):
+        asyncio.run(process_backed.get_epic("at-epic"))
 
 
 def test_store_contract_docs_record_invariants_and_deferred_work() -> None:
