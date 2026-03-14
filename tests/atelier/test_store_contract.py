@@ -6,6 +6,7 @@ from typing import get_args, get_origin, get_type_hints
 import pytest
 from pydantic import ValidationError
 
+import atelier.store as public_store
 from atelier.lib.beads import Beads, RecordingBeadsTransport, SubprocessBeadsClient
 from atelier.store import (
     AtelierStore,
@@ -169,6 +170,19 @@ def test_store_contract_stays_above_the_beads_client_layer() -> None:
         ), method_name
 
 
+def test_public_store_is_concrete_beads_backed_type() -> None:
+    in_memory_client, _ = build_in_memory_beads_client()
+
+    store = AtelierStore(beads=in_memory_client)
+
+    assert isinstance(store, AtelierStore)
+
+
+def test_public_store_module_exports_single_store_surface() -> None:
+    assert "AsyncAtelierStore" not in public_store.__all__
+    assert not hasattr(public_store, "AsyncAtelierStore")
+
+
 def test_store_contract_docs_record_invariants_and_deferred_work() -> None:
     store_doc = STORE_CONTRACT_DOC_PATH.read_text(encoding="utf-8")
     beads_doc = BEADS_CONTRACT_DOC_PATH.read_text(encoding="utf-8")
@@ -178,6 +192,8 @@ def test_store_contract_docs_record_invariants_and_deferred_work() -> None:
     assert "Atelier-Owned Invariants" in store_doc
     assert "Beads-Client Responsibilities" in store_doc
     assert "Deferred Work" in store_doc
+    assert "single async store boundary" in store_doc
+    assert "not part of `atelier.store`" in store_doc
     assert "adapter-local compatibility state" in store_doc
     assert "implement `AtelierStore` itself" in store_doc
     assert "`atelier.lib.beads.Beads` remains the swappable boundary" in store_doc

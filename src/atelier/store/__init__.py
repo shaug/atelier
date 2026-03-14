@@ -1,8 +1,7 @@
 """Public Atelier-owned planning store contract."""
 
+from .beads_store import AtelierStore, build_atelier_store
 from .contract import (
-    AsyncAtelierStore,
-    AtelierStore,
     ChangesetQuery,
     ClaimMessageRequest,
     ClearHookRequest,
@@ -33,7 +32,6 @@ from .models import (
 )
 
 __all__ = [
-    "AsyncAtelierStore",
     "AtelierStore",
     "ChangesetBranches",
     "ChangesetQuery",
@@ -60,4 +58,5 @@ __all__ = [
     "UpdateReviewRequest",
     "WorkItemKind",
     "WorkRef",
+    "build_atelier_store",
 ]

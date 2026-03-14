@@ -40,7 +40,9 @@ Async store service:
 Later changesets should implement `AtelierStore` itself on top of the reusable
 Beads client contract. `atelier.lib.beads.Beads` remains the swappable boundary
 underneath, while backend-specific construction and transport details stay out
-of this published surface.
+of this published surface. Internal structural typing aids may still exist
+inside adapter modules, but they are not part of `atelier.store` and downstream
+code should not target them as an alternate public contract.
 
 The contract is intentionally backend-neutral. It does not expose `bd` commands,
 `BEADS_DIR`, Dolt layout, filesystem probes, transport details, or startup
