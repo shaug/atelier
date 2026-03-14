@@ -111,10 +111,10 @@ The in-memory implementation planned in `at-s1vc` should implement the same
 - Answer `inspect_startup_state()` semantically rather than recreating the
   process-backed filesystem probes in higher-level callers.
 
-### `at-njpt4`: higher-level Atelier store contract
+### [GitHub issue #574]: higher-level Atelier store contract
 
-The Atelier-owned store abstraction planned in `at-njpt4` should build on the
-reusable Beads client instead of reconstructing `bd` subprocess glue.
+The Atelier-owned store abstraction planned in [GitHub issue #574] should build
+on the reusable Beads client instead of reconstructing `bd` subprocess glue.
 
 The published contract-definition slice now lives in [Atelier Store Contract].
 
@@ -143,3 +143,4 @@ top-level README keep the published contract visible to downstream consumers.
 
 [atelier store contract]: ./atelier-store-contract.md
 [beads adoption guide]: ./beads-adoption-guide.md
+[github issue #574]: https://github.com/shaug/atelier/issues/574

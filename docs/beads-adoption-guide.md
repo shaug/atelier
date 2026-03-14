@@ -3,7 +3,7 @@
 This guide records the current adoption boundary for `atelier.lib.beads` and
 `atelier.testing.beads`. It is intentionally narrow. The goal is to use the new
 Beads APIs where they pay off today without turning them into an accidental
-store abstraction before `at-njpt4` lands.
+store abstraction before [GitHub issue #574] lands.
 
 ## Decision Rule
 
@@ -20,10 +20,10 @@ Use `atelier.testing.beads` when the code under test already depends on
 `atelier.lib.beads` and the test only needs Beads semantics, not a real `bd`
 subprocess.
 
-Wait for `at-njpt4` when the work wants to define or consume an Atelier-owned
-store concept rather than a low-level Beads boundary. The current contract
-definition for that layer lives in [Atelier Store Contract], but the concrete
-adapters and planner/worker migrations remain deferred.
+Wait for [GitHub issue #574] when the work wants to define or consume an
+Atelier-owned store concept rather than a low-level Beads boundary. The current
+contract definition for that layer lives in [Atelier Store Contract], but the
+concrete adapters and planner/worker migrations remain deferred.
 
 ## Where Direct Client Use Is In Bounds Today
 
@@ -77,7 +77,7 @@ Do not:
 - use broad CLI monkeypatching in tests when `atelier.testing.beads` can model
   the same issue semantics deterministically
 - treat the current client surface as a permanent substitute for the
-  higher-level store abstraction planned in `at-njpt4`
+  higher-level store abstraction planned in [GitHub issue #574]
 
 ## Lessons From The Adoption Slices
 
@@ -121,8 +121,9 @@ The migration exposed real gaps cleanly:
 
 ## Follow-On Work
 
-- `at-njpt4` should define the Atelier-owned store abstraction for planner and
-  worker business logic so direct `Beads` usage stays limited to boundary code.
+- [GitHub issue #574] should define the Atelier-owned store abstraction for
+  planner and worker business logic so direct `Beads` usage stays limited to
+  boundary code.
 - Extend `atelier.testing.beads` with dependency mutation semantics when a test
   truly needs them; until then keep those assertions in explicit subprocess
   coverage.
@@ -133,3 +134,4 @@ The migration exposed real gaps cleanly:
 <!-- inline reference link definitions. please keep alphabetized -->
 
 [atelier store contract]: ./atelier-store-contract.md
+[github issue #574]: https://github.com/shaug/atelier/issues/574

@@ -6,7 +6,7 @@ must verify an external integration boundary or production code that still
 crosses the legacy subprocess seam directly.
 
 For the broader boundary between direct `atelier.lib.beads` adoption, test-only
-adoption, and work that should wait for `at-njpt4`, see
+adoption, and work that should wait for [GitHub issue #574], see
 [`docs/beads-adoption-guide.md`](docs/beads-adoption-guide.md).
 
 ### Backend Selection Rule
@@ -111,7 +111,7 @@ The same migration also reinforced a boundary rule: if a test only needs issue
 semantics, seed the in-memory backend only after the code under test already
 depends on `atelier.lib.beads`, then keep the suite local. Do not take that as
 permission to move higher-level planner or worker policy modules directly onto
-`Beads`; that layer still belongs to `at-njpt4`.
+`Beads`; that layer still belongs to [GitHub issue #574].
 
 ### Runtime And Reliability Impact
 
@@ -124,3 +124,7 @@ The warm runtime stayed effectively flat while adding two backend-backed tests.
 The practical gain is reliability: these planner-worker suites no longer depend
 on a local `bd` binary, Dolt state, or CLI monkeypatch scaffolding to exercise
 startup and lifecycle behavior.
+
+<!-- inline reference link definitions. please keep alphabetized -->
+
+[github issue #574]: https://github.com/shaug/atelier/issues/574
