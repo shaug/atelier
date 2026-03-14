@@ -54,7 +54,8 @@ backed by Beads:
 - Dependency satisfaction is an Atelier decision. Adapters may persist raw
   dependency edges, but whether a dependency counts as satisfied is owned by
   Atelier lifecycle policy.
-- Message routing is an Atelier contract: `delivery`, `thread_id`,
+- Durable message routing is an Atelier contract: store-level messages are
+  `work-threaded` on `epic|changeset` threads, and `thread_id`,
   `thread_kind`, `audience`, `blocking`, `reply_to`, and queue claim metadata
   are stable store concepts.
 - Hook ownership is an Atelier contract binding one agent to one epic.
@@ -81,14 +82,22 @@ part of the Atelier store contract.
 This contract-definition slice does not include the following work:
 
 - concrete graph and discovery adapters from `AtelierStore` to the Beads client;
-  that belongs to `at-njpt4.2`
+  that belongs to [GitHub issue #644][issue-644]
 - lifecycle, review, message, hook, and dependency mutation adapters; that
-  belongs to `at-njpt4.3`
+  belongs to [GitHub issue #645][issue-645]
 - dual-backend proof over both the process-backed and in-memory Beads clients;
-  that belongs to `at-njpt4.4`
+  that belongs to [GitHub issue #646][issue-646]
 - planner, worker, and publish migrations onto this store surface; that remains
-  deferred to the later migration epics
+  deferred to [GitHub issue #582][issue-582], [GitHub issue #583][issue-583],
+  and [GitHub issue #584][issue-584]
 
 The immediate review goal for this slice is narrower: downstream work should be
 able to implement adapters against `atelier.store` without redesigning the core
 vocabulary during review.
+
+[issue-582]: https://github.com/shaug/atelier/issues/582
+[issue-583]: https://github.com/shaug/atelier/issues/583
+[issue-584]: https://github.com/shaug/atelier/issues/584
+[issue-644]: https://github.com/shaug/atelier/issues/644
+[issue-645]: https://github.com/shaug/atelier/issues/645
+[issue-646]: https://github.com/shaug/atelier/issues/646

@@ -61,7 +61,6 @@ class MessageDelivery(str, Enum):
     """Delivery modes for coordination messages."""
 
     WORK_THREADED = "work-threaded"
-    AGENT_ADDRESSED = "agent-addressed"
 
 
 class MessageThreadKind(str, Enum):
@@ -69,7 +68,6 @@ class MessageThreadKind(str, Enum):
 
     CHANGESET = "changeset"
     EPIC = "epic"
-    WORK = "work"
 
 
 class WorkRef(StoreModel):
@@ -175,8 +173,8 @@ class MessageRecord(StoreModel):
     def _validate_thread_contract(self) -> "MessageRecord":
         if self.delivery == MessageDelivery.WORK_THREADED and self.thread_id is None:
             raise ValueError("work-threaded messages require thread_id")
-        if self.thread_id is None and self.thread_kind is not None:
-            raise ValueError("thread_kind requires thread_id")
+        if self.delivery == MessageDelivery.WORK_THREADED and self.thread_kind is None:
+            raise ValueError("work-threaded messages require thread_kind")
         return self
 
 

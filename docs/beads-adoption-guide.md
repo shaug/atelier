@@ -22,9 +22,8 @@ subprocess.
 
 Wait for `at-njpt4` when the work wants to define or consume an Atelier-owned
 store concept rather than a low-level Beads boundary. The current contract
-definition for that layer lives in
-[`docs/atelier-store-contract.md`](docs/atelier-store-contract.md), but the
-concrete adapters and planner/worker migrations remain deferred.
+definition for that layer lives in [Atelier Store Contract][atelier-store-contract],
+but the concrete adapters and planner/worker migrations remain deferred.
 
 ## Where Direct Client Use Is In Bounds Today
 
@@ -130,3 +129,5 @@ The migration exposed real gaps cleanly:
 - Keep future direct-client adoption review-sized. If a change starts moving
   planner/worker policy onto `Beads`, split or defer it instead of expanding the
   low-level boundary.
+
+[atelier-store-contract]: ./atelier-store-contract.md

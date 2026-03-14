@@ -79,6 +79,9 @@ def test_work_threaded_messages_require_thread_identity() -> None:
     with pytest.raises(ValidationError, match="thread_id"):
         CreateMessageRequest(title="Need a decision")
 
+    with pytest.raises(ValidationError, match="thread_kind"):
+        CreateMessageRequest(title="Need a decision", thread_id="at-123")
+
     request = CreateMessageRequest(
         title="Need a decision",
         body="Choose one of the migration paths.",
@@ -102,6 +105,11 @@ def test_message_record_enforces_store_message_contract() -> None:
     )
 
     assert record.audience == ("worker", "planner")
+
+
+def test_store_message_contract_only_exposes_durable_threaded_path() -> None:
+    assert tuple(item.value for item in MessageDelivery) == ("work-threaded",)
+    assert tuple(item.value for item in MessageThreadKind) == ("changeset", "epic")
 
 
 class _StoreAdapterStub:
@@ -183,7 +191,9 @@ class _StoreAdapterStub:
         return MessageRecord(
             id=request.message_id,
             title="Claimed",
-            delivery=MessageDelivery.AGENT_ADDRESSED,
+            delivery=MessageDelivery.WORK_THREADED,
+            thread_id="at-epic",
+            thread_kind=MessageThreadKind.EPIC,
             claimed_by=request.claimed_by,
         )
 
@@ -241,11 +251,11 @@ def test_store_contract_docs_record_invariants_and_deferred_work() -> None:
     assert "Atelier-Owned Invariants" in store_doc
     assert "Beads-Client Responsibilities" in store_doc
     assert "Deferred Work" in store_doc
-    assert "at-njpt4.2" in store_doc
-    assert "at-njpt4.3" in store_doc
-    assert "at-njpt4.4" in store_doc
-    assert "docs/atelier-store-contract.md" in beads_doc
-    assert "docs/atelier-store-contract.md" in adoption_guide
+    assert "GitHub issue #644" in store_doc
+    assert "GitHub issue #645" in store_doc
+    assert "GitHub issue #646" in store_doc
+    assert "[Atelier Store Contract][atelier-store-contract]" in beads_doc
+    assert "[Atelier Store Contract][atelier-store-contract]" in adoption_guide
 
 
 def test_epic_and_work_refs_are_store_native_models() -> None:

@@ -93,8 +93,7 @@ Downstream code should treat the protocol plus the shared request/response
 models and typed errors as the integration boundary.
 
 For contributor-facing adoption guidance, anti-guidance, and lessons from the
-initial runtime/test migrations, see
-[`docs/beads-adoption-guide.md`](docs/beads-adoption-guide.md).
+initial runtime/test migrations, see [Beads Adoption Guide][beads-adoption-guide].
 
 ### `at-s1vc`: alternative implementation contract
 
@@ -118,7 +117,7 @@ The Atelier-owned store abstraction planned in `at-njpt4` should build on the
 reusable Beads client instead of reconstructing `bd` subprocess glue.
 
 The published contract-definition slice now lives in
-[`docs/atelier-store-contract.md`](docs/atelier-store-contract.md).
+[Atelier Store Contract][atelier-store-contract].
 
 - Depend on the `Beads` protocol, not directly on `SubprocessBeadsClient`.
 - Consume typed `IssueRecord` and request models instead of parsing `bd` stdout
@@ -140,3 +139,6 @@ The published v1 contract is backed by a structured fixture and tests:
 Those tests fail when the documented inventory or version policy drifts from
 `DEFAULT_COMPATIBILITY_POLICY`, and they also verify that this document and the
 top-level README keep the published contract visible to downstream consumers.
+
+[atelier-store-contract]: ./atelier-store-contract.md
+[beads-adoption-guide]: ./beads-adoption-guide.md
