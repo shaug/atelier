@@ -15,7 +15,6 @@ from atelier.lib.beads import (
 )
 
 from .contract import (
-    AsyncAtelierStore,
     ChangesetQuery,
     ClaimMessageRequest,
     ClearHookRequest,
@@ -177,7 +176,7 @@ class _ReadState:
         )
 
 
-class AtelierStore(AsyncAtelierStore):
+class AtelierStore:
     """Concrete Atelier planning store backed by the typed async Beads client.
 
     Args:

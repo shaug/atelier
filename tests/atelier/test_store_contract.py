@@ -6,9 +6,9 @@ from typing import get_args, get_origin, get_type_hints
 import pytest
 from pydantic import ValidationError
 
+import atelier.store as public_store
 from atelier.lib.beads import Beads, RecordingBeadsTransport, SubprocessBeadsClient
 from atelier.store import (
-    AsyncAtelierStore,
     AtelierStore,
     ChangesetBranches,
     ChangesetQuery,
@@ -159,11 +159,11 @@ def test_store_contract_stays_above_the_beads_client_layer() -> None:
 
     assert isinstance(process_backend, Beads)
     assert isinstance(in_memory_client, Beads)
-    assert not isinstance(process_backend, AsyncAtelierStore)
-    assert not isinstance(in_memory_client, AsyncAtelierStore)
+    assert not isinstance(process_backend, AtelierStore)
+    assert not isinstance(in_memory_client, AtelierStore)
 
     for method_name in _STORE_METHOD_NAMES:
-        hints = get_type_hints(getattr(AsyncAtelierStore, method_name))
+        hints = get_type_hints(getattr(AtelierStore, method_name))
         assert hints, method_name
         assert not any(
             _annotation_leaks_beads_contract(annotation) for annotation in hints.values()
@@ -175,7 +175,12 @@ def test_public_store_is_concrete_beads_backed_type() -> None:
 
     store = AtelierStore(beads=in_memory_client)
 
-    assert isinstance(store, AsyncAtelierStore)
+    assert isinstance(store, AtelierStore)
+
+
+def test_public_store_module_exports_single_store_surface() -> None:
+    assert "AsyncAtelierStore" not in public_store.__all__
+    assert not hasattr(public_store, "AsyncAtelierStore")
 
 
 def test_store_contract_docs_record_invariants_and_deferred_work() -> None:
@@ -187,6 +192,8 @@ def test_store_contract_docs_record_invariants_and_deferred_work() -> None:
     assert "Atelier-Owned Invariants" in store_doc
     assert "Beads-Client Responsibilities" in store_doc
     assert "Deferred Work" in store_doc
+    assert "single async store boundary" in store_doc
+    assert "not part of `atelier.store`" in store_doc
     assert "adapter-local compatibility state" in store_doc
     assert "implement `AtelierStore` itself" in store_doc
     assert "`atelier.lib.beads.Beads` remains the swappable boundary" in store_doc

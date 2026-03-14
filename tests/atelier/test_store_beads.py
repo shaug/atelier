@@ -5,7 +5,6 @@ from typing import get_type_hints
 
 from atelier.messages import render_message
 from atelier.store import (
-    AsyncAtelierStore,
     AtelierStore,
     ChangesetQuery,
     LifecycleStatus,
@@ -34,7 +33,7 @@ def test_public_store_is_constructible_without_factory_indirection() -> None:
     store = AtelierStore(beads=client)
     hints = get_type_hints(build_atelier_store)
 
-    assert isinstance(store, AsyncAtelierStore)
+    assert isinstance(store, AtelierStore)
     assert hints["return"] is AtelierStore
     assert isinstance(build_atelier_store(beads=client), AtelierStore)
 
