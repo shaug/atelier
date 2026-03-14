@@ -15,7 +15,7 @@ from atelier.lib.beads import (
 )
 
 from .contract import (
-    AtelierStore,
+    AsyncAtelierStore,
     ChangesetQuery,
     ClaimMessageRequest,
     ClearHookRequest,
@@ -115,7 +115,7 @@ def _changeset_branches(issue: IssueRecord) -> ChangesetBranches | None:
 
 @dataclass
 class _ReadState:
-    store: "_BeadsBackedAtelierStore"
+    store: "AtelierStore"
     issue_cache: dict[str, IssueRecord] = field(default_factory=dict)
     child_cache: dict[tuple[str, bool], tuple[IssueRecord, ...]] = field(default_factory=dict)
     scan_cache: dict[bool, tuple[IssueRecord, ...]] = field(default_factory=dict)
@@ -177,8 +177,8 @@ class _ReadState:
         )
 
 
-class _BeadsBackedAtelierStore(AtelierStore):
-    """Concrete `AtelierStore` backed by the typed async Beads client.
+class AtelierStore(AsyncAtelierStore):
+    """Concrete Atelier planning store backed by the typed async Beads client.
 
     Args:
         beads: Typed Beads client used as the only backend boundary.
@@ -573,7 +573,7 @@ class _BeadsBackedAtelierStore(AtelierStore):
 def build_atelier_store(*, beads: Beads) -> AtelierStore:
     """Build the published Atelier store on top of one Beads backend."""
 
-    return _BeadsBackedAtelierStore(beads=beads)
+    return AtelierStore(beads=beads)
 
 
-__all__ = ["build_atelier_store"]
+__all__ = ["AtelierStore", "build_atelier_store"]

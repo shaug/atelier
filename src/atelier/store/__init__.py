@@ -1,9 +1,8 @@
 """Public Atelier-owned planning store contract."""
 
-from .beads_store import build_atelier_store
+from .beads_store import AtelierStore, build_atelier_store
 from .contract import (
     AsyncAtelierStore,
-    AtelierStore,
     ChangesetQuery,
     ClaimMessageRequest,
     ClearHookRequest,

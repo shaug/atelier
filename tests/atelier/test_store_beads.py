@@ -5,6 +5,7 @@ from typing import get_type_hints
 
 from atelier.messages import render_message
 from atelier.store import (
+    AsyncAtelierStore,
     AtelierStore,
     ChangesetQuery,
     LifecycleStatus,
@@ -25,13 +26,17 @@ def _run(coro):
 
 
 def _store_for(*issues: dict[str, object]):
-    return build_atelier_store(beads=build_in_memory_beads_client(issues=issues)[0])
+    return AtelierStore(beads=build_in_memory_beads_client(issues=issues)[0])
 
 
-def test_store_builder_returns_public_store_boundary() -> None:
+def test_public_store_is_constructible_without_factory_indirection() -> None:
+    client, _ = build_in_memory_beads_client()
+    store = AtelierStore(beads=client)
     hints = get_type_hints(build_atelier_store)
 
+    assert isinstance(store, AsyncAtelierStore)
     assert hints["return"] is AtelierStore
+    assert isinstance(build_atelier_store(beads=client), AtelierStore)
 
 
 def test_beads_store_reads_graphs_and_ready_changesets() -> None:

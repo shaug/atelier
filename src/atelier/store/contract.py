@@ -140,7 +140,7 @@ class LifecycleTransitionRequest(StoreModel):
 
 
 @runtime_checkable
-class AtelierStore(Protocol):
+class AsyncAtelierStore(Protocol):
     """Async protocol for Atelier planning state above the Beads client.
 
     Downstream planner, worker, and publish code should depend on this single
@@ -341,11 +341,8 @@ class AtelierStore(Protocol):
         ...
 
 
-AsyncAtelierStore = AtelierStore
-
 __all__ = [
     "AsyncAtelierStore",
-    "AtelierStore",
     "ChangesetQuery",
     "ClaimMessageRequest",
     "ClearHookRequest",
