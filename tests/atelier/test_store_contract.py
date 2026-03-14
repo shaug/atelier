@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from pathlib import Path
 from typing import get_args, get_origin, get_type_hints
 
@@ -7,41 +9,49 @@ import pytest
 from pydantic import ValidationError
 
 import atelier.store as public_store
-from atelier.lib.beads import Beads, RecordingBeadsTransport, SubprocessBeadsClient
+from atelier.lib.beads import (
+    Beads,
+    BeadsCommandResult,
+    RecordingBeadsTransport,
+    ScriptedBeadsTransport,
+    SubprocessBeadsClient,
+    UnsupportedOperationError,
+)
+from atelier.messages import render_message
 from atelier.store import (
     AtelierStore,
     ChangesetBranches,
-    ChangesetQuery,
     ChangesetRecord,
     ClaimMessageRequest,
     ClearHookRequest,
     CreateMessageRequest,
     DependencyMutation,
     DependencyRecord,
-    EpicQuery,
     EpicRecord,
     HookRecord,
     LifecycleStatus,
-    LifecycleTransition,
     LifecycleTransitionRequest,
     MessageDelivery,
     MessageQuery,
     MessageRecord,
     MessageThreadKind,
-    ReadyChangesetQuery,
     ReviewMetadata,
     ReviewState,
     SetHookRequest,
     UpdateReviewRequest,
     WorkItemKind,
     WorkRef,
+    build_atelier_store,
 )
-from atelier.testing.beads import build_in_memory_beads_client
+from atelier.testing.beads import IssueFixtureBuilder, build_in_memory_beads_client
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STORE_CONTRACT_DOC_PATH = REPO_ROOT / "docs" / "atelier-store-contract.md"
 BEADS_CONTRACT_DOC_PATH = REPO_ROOT / "docs" / "beads-client-contract.md"
 ADOPTION_GUIDE_PATH = REPO_ROOT / "docs" / "beads-adoption-guide.md"
+BUILDER = IssueFixtureBuilder()
+_RUN = asyncio.run
+_HELP = "Flags:\n  -h, --help   help for command\n      --json  Output in JSON format"
 
 _STORE_METHOD_NAMES = (
     "get_epic",
@@ -215,3 +225,281 @@ def test_epic_and_work_refs_are_store_native_models() -> None:
 
     assert epic.kind is WorkItemKind.EPIC
     assert epic.changesets[0].kind is WorkItemKind.CHANGESET
+
+
+def _store_for(*issues: dict[str, object]):
+    client, _ = build_in_memory_beads_client(issues=issues)
+    return build_atelier_store(beads=client)
+
+
+def _ok(*argv: str, stdout: str = "") -> BeadsCommandResult:
+    return BeadsCommandResult(argv=argv, returncode=0, stdout=stdout)
+
+
+def _issue_json(**payload: object) -> str:
+    return json.dumps([payload], separators=(",", ":"))
+
+
+def _queue_message(
+    *, claimed_by: str | None = None, assignee: str | None = None
+) -> dict[str, object]:
+    metadata = {
+        "delivery": "work-threaded",
+        "thread": "at-change",
+        "thread_kind": "changeset",
+        "queue": "planner",
+        "audience": ["planner"],
+    }
+    if claimed_by is not None:
+        metadata["claimed_by"] = claimed_by
+    return BUILDER.issue(
+        "msg-queue",
+        labels=("at:message", "at:unread"),
+        assignee=assignee,
+        description=render_message(metadata, "Need a decision."),
+    )
+
+
+@pytest.mark.parametrize("operation", ["add", "remove"])
+def test_beads_store_mutation_paths(operation: str) -> None:
+    store = _store_for(
+        BUILDER.issue("at-epic", issue_type="epic", labels=("at:epic",)),
+        BUILDER.issue(
+            "at-change",
+            parent="at-epic",
+            description=(
+                "pr_url: https://example.invalid/pr/41\n"
+                "pr_number: 41\n"
+                "pr_state: draft-pr\n"
+                "review_owner: reviewer-a\n"
+            ),
+        ),
+        BUILDER.issue(
+            "at-agent",
+            title="atelier/worker/agent",
+            issue_type="agent",
+            labels=("at:agent",),
+            description="agent_id: atelier/worker/agent\nhook_bead: null\n",
+        ),
+        _queue_message(),
+    )
+    review = _RUN(
+        store.update_review(
+            UpdateReviewRequest(
+                changeset_id="at-change",
+                review=ReviewMetadata(
+                    pr_state=ReviewState.IN_REVIEW,
+                    review_owner="reviewer-b",
+                    integrated_sha="abc1234",
+                ),
+                preserve_existing=True,
+            )
+        )
+    )
+
+    assert (review.review.pr_url, review.review.pr_number, review.review.integrated_sha) == (
+        "https://example.invalid/pr/41",
+        41,
+        "abc1234",
+    )
+    assert (
+        _RUN(
+            store.transition_lifecycle(
+                LifecycleTransitionRequest(
+                    issue_id="at-change",
+                    target_status=LifecycleStatus.IN_PROGRESS,
+                    expected_current=LifecycleStatus.OPEN,
+                )
+            )
+        ).to_status
+        is LifecycleStatus.IN_PROGRESS
+    )
+    assert (
+        _RUN(
+            store.create_message(
+                CreateMessageRequest(
+                    title="NEEDS-DECISION: pick one",
+                    body="Choose one migration path.",
+                    sender="atelier/worker/codex/p100",
+                    thread_id="at-change",
+                    thread_kind=MessageThreadKind.CHANGESET,
+                    audience=("planner",),
+                    queue="planner",
+                    kind="needs-decision",
+                    blocking=True,
+                )
+            )
+        ).queue
+        == "planner"
+    )
+    assert (
+        _RUN(
+            store.claim_message(
+                ClaimMessageRequest(
+                    message_id="msg-queue",
+                    claimed_by="atelier/planner/codex/p200",
+                )
+            )
+        ).claimed_by
+        == "atelier/planner/codex/p200"
+    )
+    assert (
+        _RUN(
+            store.set_agent_hook(SetHookRequest(agent_id="atelier/worker/agent", epic_id="at-epic"))
+        ).epic_id
+        == "at-epic"
+    )
+    assert _RUN(
+        store.clear_agent_hook(
+            ClearHookRequest(agent_id="atelier/worker/agent", expected_epic_id="at-epic")
+        )
+    ) == HookRecord(agent_id="atelier/worker/agent", epic_id="at-epic")
+
+    probe = {
+        ("bd", "--version"): _ok("bd", "--version", stdout="bd version 0.56.1 (dev)"),
+        ("bd", "show", "--help"): _ok("bd", "show", "--help", stdout=_HELP),
+        ("bd", "list", "--help"): _ok("bd", "list", "--help", stdout=_HELP),
+        ("bd", "create", "--help"): _ok("bd", "create", "--help", stdout=_HELP),
+        ("bd", "update", "--help"): _ok("bd", "update", "--help", stdout=_HELP),
+        ("bd", "close", "--help"): _ok("bd", "close", "--help", stdout=_HELP),
+        ("bd", "dep", "add", "--help"): _ok("bd", "dep", "add", "--help", stdout=_HELP),
+        ("bd", "dep", "remove", "--help"): _ok("bd", "dep", "remove", "--help", stdout=_HELP),
+        ("bd", "ready", "--help"): _ok("bd", "ready", "--help", stdout=_HELP),
+        ("bd", "list", "--json", "--parent", "at-change", "--all", "--limit", "10000"): _ok(
+            "bd",
+            "list",
+            "--json",
+            "--parent",
+            "at-change",
+            "--all",
+            "--limit",
+            "10000",
+            stdout="[]",
+        ),
+        ("bd", "list", "--json", "--parent", "at-dep", "--all", "--limit", "10000"): _ok(
+            "bd",
+            "list",
+            "--json",
+            "--parent",
+            "at-dep",
+            "--all",
+            "--limit",
+            "10000",
+            stdout="[]",
+        ),
+        ("bd", "show", "at-change", "--json"): (
+            _ok(
+                "bd",
+                "show",
+                "at-change",
+                "--json",
+                stdout=_issue_json(
+                    id="at-change",
+                    issue_type="task",
+                    **({"dependencies": ["at-dep"]} if operation == "remove" else {}),
+                ),
+            ),
+            _ok(
+                "bd",
+                "show",
+                "at-change",
+                "--json",
+                stdout=_issue_json(
+                    id="at-change",
+                    issue_type="task",
+                    **({"dependencies": ["at-dep"]} if operation == "add" else {}),
+                ),
+            ),
+        ),
+        ("bd", "show", "at-dep", "--json"): (
+            _ok(
+                "bd",
+                "show",
+                "at-dep",
+                "--json",
+                stdout=_issue_json(
+                    id="at-dep",
+                    issue_type="task",
+                    status="closed",
+                    description="pr_state: merged\n",
+                ),
+            ),
+            _ok(
+                "bd",
+                "show",
+                "at-dep",
+                "--json",
+                stdout=_issue_json(
+                    id="at-dep",
+                    issue_type="task",
+                    status="closed",
+                    description="pr_state: merged\n",
+                ),
+            ),
+        ),
+        ("bd", "dep", operation, "at-change", "at-dep", "--json"): _ok(
+            "bd",
+            "dep",
+            operation,
+            "at-change",
+            "at-dep",
+            "--json",
+            stdout=json.dumps(
+                {
+                    "issue_id": "at-change",
+                    "depends_on_id": "at-dep",
+                    "status": operation,
+                },
+                separators=(",", ":"),
+            ),
+        ),
+    }
+    dep_store = build_atelier_store(
+        beads=SubprocessBeadsClient(transport=ScriptedBeadsTransport(probe))
+    )
+    mutation = DependencyMutation(issue_id="at-change", depends_on_id="at-dep")
+    result = _RUN(
+        dep_store.add_dependency(mutation)
+        if operation == "add"
+        else dep_store.remove_dependency(mutation)
+    )
+
+    assert result is not None and (result.issue_id, result.depends_on_id, result.satisfied) == (
+        "at-change",
+        "at-dep",
+        True,
+    )
+
+
+def test_beads_store_fails_closed() -> None:
+    store = _store_for(
+        BUILDER.issue("at-epic", issue_type="epic", labels=("at:epic",)),
+        BUILDER.issue("at-change", parent="at-epic", status="blocked"),
+        BUILDER.issue("at-dep", status="closed", description="pr_state: merged\n"),
+        _queue_message(
+            claimed_by="atelier/planner/codex/p999",
+            assignee="atelier/planner/codex/p999",
+        ),
+    )
+
+    with pytest.raises(ValueError, match="already claimed"):
+        _RUN(
+            store.claim_message(
+                ClaimMessageRequest(
+                    message_id="msg-queue",
+                    claimed_by="atelier/planner/codex/p200",
+                )
+            )
+        )
+    with pytest.raises(ValueError, match="lifecycle mismatch"):
+        _RUN(
+            store.transition_lifecycle(
+                LifecycleTransitionRequest(
+                    issue_id="at-change",
+                    target_status=LifecycleStatus.IN_PROGRESS,
+                    expected_current=LifecycleStatus.OPEN,
+                )
+            )
+        )
+    with pytest.raises(UnsupportedOperationError, match="dep-add"):
+        _RUN(store.add_dependency(DependencyMutation(issue_id="at-change", depends_on_id="at-dep")))
