@@ -77,6 +77,7 @@ _STORE_METHOD_NAMES = (
     "create_epic",
     "create_changeset",
     "create_message",
+    "mark_message_read",
     "append_notes",
     "claim_message",
     "mark_message_read",
@@ -141,12 +142,14 @@ def test_work_threaded_messages_require_thread_identity() -> None:
     request = CreateMessageRequest(
         title="Need a decision",
         body="Choose one of the migration paths.",
+        recipient="atelier/planner/codex/p101",
         thread_id="at-123",
         thread_kind=MessageThreadKind.CHANGESET,
         audience=("planner", "planner"),
     )
 
     assert request.audience == ("planner",)
+    assert request.recipient == "atelier/planner/codex/p101"
 
 
 def test_append_notes_request_requires_non_empty_deduped_notes() -> None:
@@ -497,12 +500,20 @@ def _mutation_snapshot(backend: str) -> dict[str, object]:
                 title="NEEDS-DECISION: pick one",
                 body="Choose one migration path.",
                 sender="atelier/worker/codex/p100",
+                recipient="atelier/planner/codex/p200",
                 thread_id="at-change",
                 thread_kind=MessageThreadKind.CHANGESET,
                 audience=("planner",),
                 queue="planner",
                 kind="needs-decision",
                 blocking=True,
+            )
+        )
+    )
+    marked_read = _RUN(
+        store.mark_message_read(
+            MarkMessageReadRequest(
+                message_id="msg-queue",
             )
         )
     )
@@ -553,6 +564,13 @@ def _mutation_snapshot(backend: str) -> dict[str, object]:
             "queue": created_message.queue,
             "audience": created_message.audience,
             "blocking": created_message.blocking,
+            "assignee_hint": _RUN(store._show_issue(created_message.id)).assignee,
+        },
+        "marked_read": {
+            "id": marked_read.id,
+            "remaining_unread": tuple(
+                record.id for record in _RUN(store.list_messages(MessageQuery(unread_only=True)))
+            ),
         },
         "claimed": {
             "claimed_by": claimed.claimed_by,
@@ -694,6 +712,11 @@ def test_store_dual_backend_mutation_snapshot_matches_expected_contract(backend:
             "queue": "planner",
             "audience": ("planner",),
             "blocking": True,
+            "assignee_hint": "atelier/planner/codex/p200",
+        },
+        "marked_read": {
+            "id": "msg-queue",
+            "remaining_unread": ("at-3",),
         },
         "claimed": {
             "claimed_by": "atelier/planner/codex/p200",
@@ -831,6 +854,7 @@ def test_beads_store_mutation_paths(operation: str) -> None:
                     title="NEEDS-DECISION: pick one",
                     body="Choose one migration path.",
                     sender="atelier/worker/codex/p100",
+                    recipient="atelier/planner/codex/p200",
                     thread_id="at-change",
                     thread_kind=MessageThreadKind.CHANGESET,
                     audience=("planner",),
@@ -841,6 +865,16 @@ def test_beads_store_mutation_paths(operation: str) -> None:
             )
         ).queue
         == "planner"
+    )
+    assert (
+        _RUN(
+            store.mark_message_read(
+                MarkMessageReadRequest(
+                    message_id="msg-queue",
+                )
+            )
+        ).id
+        == "msg-queue"
     )
     assert (
         _RUN(

@@ -207,6 +207,10 @@ def test_all_projected_skill_scripts_importing_atelier_use_shared_bootstrap() ->
 @pytest.mark.parametrize(
     ("skill_name", "script_name"),
     (
+        ("mail-mark-read", "mark_message_read.py"),
+        ("mail-queue-claim", "claim_message.py"),
+        ("mail-send", "send_message.py"),
+        ("plan-promote-epic", "promote_epic.py"),
         ("planner-startup-check", "refresh_overview.py"),
         ("plan-create-epic", "create_epic.py"),
         ("plan-changeset-guardrails", "check_guardrails.py"),

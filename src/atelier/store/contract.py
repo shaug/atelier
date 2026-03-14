@@ -132,6 +132,7 @@ class CreateMessageRequest(StoreModel):
     body: str = ""
     delivery: MessageDelivery = MessageDelivery.WORK_THREADED
     sender: Identifier | None = None
+    recipient: Identifier | None = None
     thread_id: Identifier | None = None
     thread_kind: MessageThreadKind | None = None
     audience: tuple[Identifier, ...] = ()
@@ -186,6 +187,12 @@ class ClaimMessageRequest(StoreModel):
 
 class MarkMessageReadRequest(StoreModel):
     """Mutation request for marking one message as read."""
+
+    message_id: Identifier
+
+
+class MarkMessageReadRequest(StoreModel):
+    """Mutation request for clearing unread state from one message."""
 
     message_id: Identifier
 

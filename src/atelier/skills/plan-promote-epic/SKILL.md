@@ -11,6 +11,7 @@ description: >-
 
 - epic_id: Epic bead id to promote.
 - beads_dir: Optional Beads store path.
+- repo_dir: Optional repo root override.
 
 ## Readiness checks
 
@@ -71,6 +72,11 @@ description: >-
    shown (child changesets or the epic itself).
 1. Ask for explicit confirmation to promote only after the full preview and any
    missing-detail warnings are visible.
+1. Use the promotion script after confirmation:
+   - preview only:
+     `python skills/plan-promote-epic/scripts/promote_epic.py --epic-id "<epic_id>" [--beads-dir "<beads_dir>"] [--repo-dir "<repo_dir>"]`
+   - apply promotion after explicit user confirmation:
+     `python skills/plan-promote-epic/scripts/promote_epic.py --epic-id "<epic_id>" --yes [--beads-dir "<beads_dir>"] [--repo-dir "<repo_dir>"]`
 1. On approval, set epic status to `open`.
 1. Promote each fully-defined child changeset from `deferred` to `open`
    regardless of current dependency blockers (dependency graph still gates
