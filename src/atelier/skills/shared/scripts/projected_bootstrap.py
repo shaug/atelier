@@ -109,6 +109,14 @@ def bootstrap_projected_atelier_script(
     from atelier.runtime_env import (
         ensure_projected_runtime_dependency,
         maybe_reexec_projected_repo_runtime,
+        reset_current_process_pythonpath,
+        sanitize_pythonpath_environment,
+    )
+
+    resolved_env, removed_pythonpath = sanitize_pythonpath_environment(base_env=resolved_env)
+    reset_current_process_pythonpath(
+        removed_pythonpath,
+        preserve_paths=(str(repo_root / "src") if repo_root is not None else "",),
     )
 
     if require_runtime_health:

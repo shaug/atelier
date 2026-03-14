@@ -40,6 +40,28 @@ def test_format_ambient_env_warning_includes_removed_keys_and_migration_guidance
     assert "./worktree" in warning
 
 
+def test_sanitize_pythonpath_environment_drops_inherited_entries() -> None:
+    env, removed = runtime_env.sanitize_pythonpath_environment(
+        base_env={
+            "PYTHONPATH": "/tmp/one:/tmp/two",
+            "PATH": "/usr/bin",
+        }
+    )
+
+    assert "PYTHONPATH" not in env
+    assert env["PATH"] == "/usr/bin"
+    assert removed == ("/tmp/one", "/tmp/two")
+
+
+def test_format_ambient_pythonpath_warning_includes_removed_entries() -> None:
+    warning = runtime_env.format_ambient_pythonpath_warning(("/tmp/one", "/tmp/two"))
+
+    assert warning is not None
+    assert "/tmp/one" in warning
+    assert "/tmp/two" in warning
+    assert "selected repo runtime" in warning
+
+
 def test_sanitize_subprocess_environment_empty_mapping_does_not_inherit_ambient(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -101,7 +123,61 @@ def test_ensure_projected_runtime_dependency_returns_when_import_succeeds(
         script_path=Path("/repo/skills/example.py"),
     )
 
-    assert imported == ["pydantic_core._pydantic_core"]
+    assert imported == [
+        "pydantic",
+        "pydantic_core",
+        "pydantic_core._pydantic_core",
+    ]
+
+
+def test_ensure_projected_runtime_dependency_fails_closed_for_provenance_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class _FakeModule:
+        def __init__(self, module_file: str) -> None:
+            self.__file__ = module_file
+
+    module_map = {
+        "pydantic": _FakeModule("/tmp/foreign/pydantic/__init__.py"),
+        "pydantic_core": _FakeModule(
+            "/repo/.venv/lib/python3.11/site-packages/pydantic_core/__init__.py"
+        ),
+        "pydantic_core._pydantic_core": _FakeModule(
+            "/repo/.venv/lib/python3.11/site-packages/pydantic_core/_pydantic_core.so"
+        ),
+    }
+
+    monkeypatch.setattr(
+        runtime_env.importlib,
+        "import_module",
+        lambda name: module_map[name],
+    )
+    monkeypatch.setattr(
+        runtime_env.sysconfig,
+        "get_path",
+        lambda key: {
+            "purelib": "/repo/.venv/lib/python3.11/site-packages",
+            "platlib": "/repo/.venv/lib/python3.11/site-packages",
+        }[key],
+    )
+    monkeypatch.setattr(runtime_env, "projected_repo_python_command", lambda **_kwargs: None)
+
+    with pytest.raises(SystemExit) as exc_info:
+        runtime_env.ensure_projected_runtime_dependency(
+            repo_root=Path("/repo"),
+            script_path=Path("/repo/skills/example.py"),
+            current_executable="/repo/.venv/bin/python3",
+        )
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "runtime provenance is mixed" in captured.err
+    assert "module: pydantic" in captured.err
+    assert "module_path:" in captured.err
+    assert "foreign/pydantic/__init__.py" in captured.err
+    assert "expected_roots: /repo/.venv/lib/python3.11/site-packages" in captured.err
+    assert "dependency provenance contradiction" in captured.err
 
 
 def test_ensure_projected_runtime_dependency_fails_closed_for_installed_tool_runtime(

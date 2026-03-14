@@ -277,6 +277,7 @@ def agent_environment(
         Sanitized launch environment with required identity variables injected.
     """
     env, removed = runtime_env.sanitize_subprocess_environment(base_env=base_env)
+    env, removed_pythonpath = runtime_env.sanitize_pythonpath_environment(base_env=env)
     warning_keys = _warning_removed_routing_keys(
         removed=removed,
         base_env=base_env,
@@ -285,6 +286,9 @@ def agent_environment(
     warning = runtime_env.format_ambient_env_warning(warning_keys)
     if warning and warn is not None:
         warn(warning)
+    pythonpath_warning = runtime_env.format_ambient_pythonpath_warning(removed_pythonpath)
+    if pythonpath_warning and warn is not None:
+        warn(pythonpath_warning)
     if agent_id:
         env["ATELIER_AGENT_ID"] = agent_id
         env["BD_ACTOR"] = agent_id

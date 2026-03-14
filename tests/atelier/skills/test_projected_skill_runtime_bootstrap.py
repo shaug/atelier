@@ -91,6 +91,21 @@ def _fake_installed_package(tmp_path: Path, *, modules: dict[str, str]) -> Path:
     return installed_root
 
 
+def _fake_mixed_runtime_site_packages(
+    tmp_path: Path,
+    *,
+    atelier_modules: dict[str, str],
+) -> Path:
+    installed_root = _fake_installed_package(tmp_path, modules=atelier_modules)
+    _write_fake_module(installed_root / "pydantic" / "__init__.py", "__version__ = 'installed'\n")
+    _write_fake_module(
+        installed_root / "pydantic_core" / "__init__.py",
+        "from . import _pydantic_core\n",
+    )
+    _write_fake_module(installed_root / "pydantic_core" / "_pydantic_core.py", "")
+    return installed_root
+
+
 def _link_repo_python(repo_root: Path) -> None:
     repo_python = repo_root / ".venv" / "bin" / "python3"
     repo_python.parent.mkdir(parents=True, exist_ok=True)
@@ -142,6 +157,22 @@ def _ambient_python_executable() -> str:
         if version_probe.returncode == 0 and version_probe.stdout.strip() == "True":
             return str(candidate)
     pytest.skip("no distinct Python 3.10+ executable available for projected-runtime test")
+
+
+def _pydantic_provenance_sentinel_module(env_var: str) -> str:
+    return "\n".join(
+        [
+            "from pathlib import Path",
+            "import os",
+            "import pydantic",
+            "",
+            f"Path(os.environ['{env_var}']).write_text(",
+            "    pydantic.__file__ or '',",
+            "    encoding='utf-8',",
+            ")",
+            "",
+        ]
+    )
 
 
 def test_all_projected_skill_scripts_importing_atelier_use_shared_bootstrap() -> None:
@@ -273,6 +304,55 @@ def test_projected_create_epic_reorders_repo_src_ahead_of_installed_package(
     )
 
 
+def test_projected_create_epic_ignores_inherited_pythonpath_when_repo_runtime_matches(
+    tmp_path: Path,
+) -> None:
+    agent_home, projected_script = _install_projected_script(
+        tmp_path,
+        skill_name="plan-create-epic",
+        script_name="create_epic.py",
+    )
+    repo_root = _fake_repo(
+        tmp_path,
+        sentinel_import="bootstrap_marker",
+        extra_modules={
+            "auto_export.py": _pydantic_provenance_sentinel_module("PYDANTIC_SENTINEL"),
+        },
+    )
+    _link_repo_python(repo_root)
+    installed_root = _fake_mixed_runtime_site_packages(
+        tmp_path,
+        atelier_modules={
+            "auto_export.py": "raise RuntimeError('installed auto_export should not load')\n",
+        },
+    )
+    sentinel_path = tmp_path / "create-epic-pydantic-sentinel.txt"
+
+    completed = subprocess.run(
+        [
+            str(repo_root / ".venv" / "bin" / "python3"),
+            str(projected_script),
+            "--repo-dir",
+            str(repo_root),
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=agent_home,
+        env={
+            "PYDANTIC_SENTINEL": str(sentinel_path),
+            "PYTHONPATH": os.pathsep.join([str(installed_root), str(repo_root / "src")]),
+        },
+    )
+
+    assert completed.returncode == 0
+    assert sentinel_path.exists()
+    assert sentinel_path.read_text(encoding="utf-8") != str(
+        installed_root / "pydantic" / "__init__.py"
+    )
+
+
 def test_projected_auto_export_prefers_explicit_repo_dir_source(tmp_path: Path) -> None:
     agent_home, projected_script = _install_projected_script(
         tmp_path,
@@ -384,6 +464,77 @@ def test_projected_check_guardrails_reorders_repo_src_ahead_of_installed_package
     assert completed.returncode == 0
     assert sentinel_path.read_text(encoding="utf-8") == str(
         repo_root / "src" / "atelier" / "beads_context.py"
+    )
+
+
+def test_projected_check_guardrails_ignores_inherited_pythonpath_when_repo_runtime_matches(
+    tmp_path: Path,
+) -> None:
+    agent_home, projected_script = _install_projected_script(
+        tmp_path,
+        skill_name="plan-changeset-guardrails",
+        script_name="check_guardrails.py",
+    )
+    repo_root = _fake_repo(
+        tmp_path,
+        sentinel_import="bootstrap_marker",
+        extra_modules={
+            "bd_invocation.py": (
+                "def with_bd_mode(*args, beads_dir=None, env=None):\n    return ['bd', *args]\n"
+            ),
+            "beads_context.py": (
+                _pydantic_provenance_sentinel_module("PYDANTIC_SENTINEL")
+                + "\n"
+                + "def resolve_runtime_repo_dir_hint(*, repo_dir=None, cwd=None, env=None):\n"
+                + "    return (repo_dir, None)\n"
+            ),
+            "planner_contract.py": (
+                "def validate_authoring_contract(*_args, **_kwargs):\n    return []\n"
+            ),
+        },
+    )
+    _link_repo_python(repo_root)
+    installed_root = _fake_mixed_runtime_site_packages(
+        tmp_path,
+        atelier_modules={
+            "beads.py": "raise RuntimeError('installed beads should not load')\n",
+            "bd_invocation.py": (
+                "def with_bd_mode(*args, beads_dir=None, env=None):\n"
+                "    return ['installed', *args]\n"
+            ),
+            "beads_context.py": (
+                "def resolve_runtime_repo_dir_hint(*, repo_dir=None, cwd=None, env=None):\n"
+                "    return (repo_dir, None)\n"
+            ),
+            "planner_contract.py": (
+                "def validate_authoring_contract(*_args, **_kwargs):\n    return []\n"
+            ),
+        },
+    )
+    sentinel_path = tmp_path / "check-guardrails-pydantic-sentinel.txt"
+
+    completed = subprocess.run(
+        [
+            str(repo_root / ".venv" / "bin" / "python3"),
+            str(projected_script),
+            "--repo-dir",
+            str(repo_root),
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=agent_home,
+        env={
+            "PYDANTIC_SENTINEL": str(sentinel_path),
+            "PYTHONPATH": os.pathsep.join([str(installed_root), str(repo_root / "src")]),
+        },
+    )
+
+    assert completed.returncode == 0
+    assert sentinel_path.exists()
+    assert sentinel_path.read_text(encoding="utf-8") != str(
+        installed_root / "pydantic" / "__init__.py"
     )
 
 
