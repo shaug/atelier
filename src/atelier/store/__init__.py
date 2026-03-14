@@ -1,5 +1,6 @@
 """Public Atelier-owned planning store contract."""
 
+from .beads_store import build_atelier_store
 from .contract import (
     AsyncAtelierStore,
     AtelierStore,
@@ -60,4 +61,5 @@ __all__ = [
     "UpdateReviewRequest",
     "WorkItemKind",
     "WorkRef",
+    "build_atelier_store",
 ]
