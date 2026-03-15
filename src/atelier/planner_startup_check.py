@@ -662,7 +662,11 @@ class StartupBeadsInvocationHelper:
     def list_epics(self, *, include_closed: bool = False) -> list[dict[str, object]]:
         """List indexed epics through the Atelier store."""
 
-        epics = asyncio.run(self._store().list_epics(EpicQuery(include_closed=include_closed)))
+        epics = asyncio.run(
+            self._store().list_epics(
+                EpicQuery(include_closed=include_closed, include_changesets=False)
+            )
+        )
         return [_epic_issue_payload(epic) for epic in epics]
 
     def list_descendant_changesets(

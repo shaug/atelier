@@ -280,6 +280,27 @@ def test_startup_helper_uses_in_memory_backend_for_inbox_queue_and_epic_queries(
     assert epics[0]["dependencies"] == [{"id": "at-dep", "status": "in_progress"}]
 
 
+def test_startup_helper_lists_epics_without_changesets() -> None:
+    helper = planner_startup_check.StartupBeadsInvocationHelper(
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+    captured_query = None
+
+    class _FakeStore:
+        async def list_epics(self, query):
+            nonlocal captured_query
+            captured_query = query
+            return ()
+
+    object.__setattr__(helper, "_store_cache", _FakeStore())
+
+    assert helper.list_epics(include_closed=False) == []
+    assert captured_query is not None
+    assert captured_query.include_closed is False
+    assert captured_query.include_changesets is False
+
+
 def test_startup_helper_lists_leaf_descendants_with_in_memory_backend(
     monkeypatch,
     tmp_path: Path,

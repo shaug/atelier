@@ -24,6 +24,7 @@ class EpicQuery(StoreModel):
 
     assignee: Identifier | None = None
     include_closed: bool = False
+    include_changesets: bool = True
 
 
 class ChangesetQuery(StoreModel):
