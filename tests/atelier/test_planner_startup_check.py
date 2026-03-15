@@ -280,6 +280,130 @@ def test_startup_helper_uses_in_memory_backend_for_inbox_queue_and_epic_queries(
     assert epics[0]["dependencies"] == [{"id": "at-dep", "status": "in_progress"}]
 
 
+def test_startup_command_plan_handles_legacy_tombstones_with_real_store(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    repo_root = tmp_path / "repo"
+    beads_root.mkdir()
+    repo_root.mkdir()
+    helper = planner_startup_check.StartupBeadsInvocationHelper(
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    builder = IssueFixtureBuilder()
+    client, _store = build_in_memory_beads_client(
+        issues=(
+            builder.issue(
+                "at-msg-routed",
+                title="NEEDS-DECISION: Publish incomplete (at-epic.1)",
+                issue_type="message",
+                labels=("at:message", "at:unread"),
+                description=messages.render_message(
+                    {
+                        "from": "atelier/worker/codex/p100",
+                        "thread": "at-epic.1",
+                        "thread_kind": "changeset",
+                        "audience": ["planner"],
+                        "kind": "notification",
+                    },
+                    "Confirm the next publish step.",
+                ),
+            ),
+            builder.issue(
+                "at-msg-tombstone",
+                title="Deleted planner message",
+                issue_type="message",
+                status="tombstone",
+                labels=("at:message", "at:unread"),
+                description=messages.render_message(
+                    {
+                        "from": "atelier/worker/codex/p100",
+                        "thread": "at-epic.2",
+                        "thread_kind": "changeset",
+                        "audience": ["planner"],
+                        "kind": "notification",
+                    },
+                    "Legacy deleted planner note.",
+                ),
+            ),
+            builder.issue(
+                "at-msg-queue",
+                title="Queued planner work",
+                issue_type="message",
+                labels=("at:message", "at:unread"),
+                description=messages.render_message(
+                    {
+                        "from": "atelier/worker/codex/p100",
+                        "queue": "planner",
+                    },
+                    "Queue this follow-up.",
+                ),
+            ),
+            builder.issue(
+                "at-msg-queue-tombstone",
+                title="Deleted queued planner work",
+                issue_type="message",
+                status="tombstone",
+                labels=("at:message", "at:unread"),
+                description=messages.render_message(
+                    {
+                        "from": "atelier/worker/codex/p100",
+                        "queue": "planner",
+                    },
+                    "Legacy deleted queued note.",
+                ),
+            ),
+            builder.issue(
+                "at-epic-open",
+                title="Open epic",
+                issue_type="epic",
+                labels=("at:epic",),
+                status="open",
+            ),
+            builder.issue(
+                "at-epic-tombstone",
+                title="Deleted epic",
+                issue_type="epic",
+                labels=("at:epic",),
+                status="tombstone",
+            ),
+        )
+    )
+    monkeypatch.setattr(
+        planner_startup_check,
+        "_build_store",
+        lambda **_kwargs: build_atelier_store(beads=client),
+    )
+
+    command_result = planner_startup_check.execute_startup_command_plan(
+        "atelier/planner/codex/p200",
+        helper=helper,
+    )
+    triage = planner_startup_check.build_startup_triage_model(
+        beads_root=beads_root,
+        command_result=command_result,
+        deferred_groups=[],
+        deferred_scan_limit=25,
+        deferred_scan_skipped_epics=0,
+        epic_list_markdown="Epics by state:\n- at-epic-open [open] Open epic",
+    )
+
+    assert [issue["id"] for issue in command_result.inbox_messages] == ["at-msg-routed"]
+    assert {issue["id"] for issue in command_result.queued_messages} == {
+        "at-msg-routed",
+        "at-msg-queue",
+    }
+    assert [issue["id"] for issue in command_result.epics] == ["at-epic-open"]
+    assert command_result.parity_report.active_top_level_work_count == 1
+    assert command_result.parity_report.indexed_active_epic_count == 1
+    assert command_result.parity_report.in_parity is True
+    assert "Epic discovery parity: ok" in planner_startup_check.render_startup_triage_markdown(
+        triage
+    )
+
+
 def test_startup_helper_lists_epics_without_changesets() -> None:
     helper = planner_startup_check.StartupBeadsInvocationHelper(
         beads_root=Path("/beads"),

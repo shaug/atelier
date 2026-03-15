@@ -73,6 +73,7 @@ _ISSUE_NOT_FOUND_ERROR_MARKERS = (
     "no issue found matching",
     "no issues found matching the provided ids",
 )
+_LEGACY_TERMINAL_BACKEND_STATUSES = frozenset({"tombstone"})
 _ACTIVE_TOP_LEVEL_DISCOVERY_STATUSES = frozenset(
     {
         LifecycleStatus.OPEN,
@@ -149,6 +150,8 @@ def _canonical_status(issue: IssueRecord) -> LifecycleStatus:
     status = lifecycle.canonical_lifecycle_status(issue.status)
     if status is None:
         raise ValueError(f"issue {issue.id} is missing a canonical lifecycle status")
+    if status in _LEGACY_TERMINAL_BACKEND_STATUSES:
+        return LifecycleStatus.CLOSED
     try:
         return LifecycleStatus(status)
     except ValueError as exc:
@@ -361,6 +364,9 @@ class AtelierStore:
         issues = await state.scan_issues(include_closed=query.include_closed)
         records: list[EpicRecord] = []
         for issue in issues:
+            record_status = _canonical_status(issue)
+            if not query.include_closed and record_status is LifecycleStatus.CLOSED:
+                continue
             if query.assignee is not None and issue.assignee != query.assignee:
                 continue
             if await self._is_indexed_epic(issue, state=state):
@@ -482,6 +488,8 @@ class AtelierStore:
         issues = await state.scan_issues(include_closed=False)
         records: list[MessageRecord] = []
         for issue in issues:
+            if _canonical_status(issue) is LifecycleStatus.CLOSED:
+                continue
             if not self._matches_issue_kind(issue, "message"):
                 continue
             if query.unread_only and not _has_contract_label(
@@ -517,6 +525,8 @@ class AtelierStore:
         issues = await state.scan_issues(include_closed=False)
         records: list[StartupMessageRecord] = []
         for issue in issues:
+            if _canonical_status(issue) is LifecycleStatus.CLOSED:
+                continue
             if not self._matches_issue_kind(issue, "message"):
                 continue
             if query.unread_only and not _has_contract_label(
@@ -1255,7 +1265,6 @@ class AtelierStore:
         if not self._matches_issue_kind(issue, "message"):
             return None
         contract = messages.parse_message_contract(issue.description or "", assignee=issue.assignee)
-        status = lifecycle.canonical_lifecycle_status(issue.status)
         queue_name = _clean_text(contract.metadata.get("queue"))
         if contract.delivery != "work-threaded":
             return None
@@ -1266,7 +1275,7 @@ class AtelierStore:
             title=issue.title or issue.id,
             body=contract.body,
             delivery=MessageDelivery.WORK_THREADED,
-            status=LifecycleStatus(status) if status else None,
+            status=_canonical_status(issue),
             sender=contract.sender,
             thread_id=contract.thread_id,
             thread_kind=MessageThreadKind(contract.thread_kind),

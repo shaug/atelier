@@ -67,6 +67,11 @@ implementation is backed by Beads:
 
 - Lifecycle status uses the canonical set
   `deferred|open|in_progress|blocked|closed`.
+- Legacy Beads `tombstone` remains backend-specific deletion state.
+  `AtelierStore` does not widen the public lifecycle vocabulary for it: direct
+  typed reads normalize `tombstone` to `closed`, and open
+  discovery/inbox/queue/ready queries exclude those records from actionable
+  results.
 - Review state is tracked separately from lifecycle state using the canonical PR
   lifecycle values `pushed|draft-pr|pr-open|in-review|approved|merged|closed`.
 - Changesets may carry branch metadata plus review and integration metadata
