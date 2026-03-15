@@ -5,6 +5,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
 from atelier import messages
 from atelier.store import MessageQuery, build_atelier_store
 from atelier.testing.beads import IssueFixtureBuilder, build_in_memory_beads_client
@@ -80,6 +82,69 @@ def test_mail_inbox_lists_messages_for_runtime_role() -> None:
     assert [item["id"] for item in inbox] == ["at-msg-1"]
     assert "changeset=at-epic.1" in inbox[0]["title"]
     assert inbox[0]["blocking_roles"] == ["planner"]
+
+
+def test_mail_inbox_defaults_to_unread_only(tmp_path: Path) -> None:
+    module = _load_script("mail-inbox", "list_inbox.py")
+
+    unread_values: list[bool] = []
+
+    module._resolve_agent_id = lambda _agent_id: "atelier/planner/codex/p200"
+    module._resolve_context = lambda **_kwargs: (tmp_path, tmp_path, None)
+    module.list_inbox_messages = lambda **kwargs: unread_values.append(kwargs["unread_only"]) or []
+
+    module.main(["--agent-id", "atelier/planner/codex/p200"])
+
+    assert unread_values == [True]
+
+
+def test_mail_inbox_explicit_unread_matches_default_mode(tmp_path: Path) -> None:
+    module = _load_script("mail-inbox", "list_inbox.py")
+
+    unread_values: list[bool] = []
+
+    module._resolve_agent_id = lambda _agent_id: "atelier/planner/codex/p200"
+    module._resolve_context = lambda **_kwargs: (tmp_path, tmp_path, None)
+    module.list_inbox_messages = lambda **kwargs: unread_values.append(kwargs["unread_only"]) or []
+
+    module.main(["--agent-id", "atelier/planner/codex/p200", "--unread"])
+
+    assert unread_values == [True]
+
+
+def test_mail_inbox_all_includes_read_messages(tmp_path: Path) -> None:
+    module = _load_script("mail-inbox", "list_inbox.py")
+
+    unread_values: list[bool] = []
+
+    module._resolve_agent_id = lambda _agent_id: "atelier/planner/codex/p200"
+    module._resolve_context = lambda **_kwargs: (tmp_path, tmp_path, None)
+    module.list_inbox_messages = lambda **kwargs: unread_values.append(kwargs["unread_only"]) or []
+
+    module.main(["--agent-id", "atelier/planner/codex/p200", "--all"])
+
+    assert unread_values == [False]
+
+
+def test_mail_inbox_help_lists_unread_and_all_modes() -> None:
+    module = _load_script("mail-inbox", "list_inbox.py")
+
+    help_text = module.build_parser().format_help()
+
+    assert "--unread" in help_text
+    assert "--all" in help_text
+    assert "unread messages (default)" in help_text
+
+
+def test_mail_inbox_rejects_conflicting_mode_flags(capsys: pytest.CaptureFixture[str]) -> None:
+    module = _load_script("mail-inbox", "list_inbox.py")
+
+    with pytest.raises(SystemExit) as exc_info:
+        module.main(["--agent-id", "atelier/planner/codex/p200", "--unread", "--all"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 2
+    assert "not allowed with argument" in captured.err
 
 
 def test_mail_mark_read_updates_store_read_state() -> None:
