@@ -442,11 +442,6 @@ def test_reconcile_blocked_merged_changesets_converges_stale_terminal_metadata_b
     }
     operations: list[tuple[str, str]] = []
 
-    def run_bd_json(args: list[str], **_kwargs: object) -> list[dict[str, object]]:
-        if args[:2] == ["show", "at-1.2"]:
-            return [issue]
-        return []
-
     def finalize_changeset(**_kwargs: object) -> FinalizeResult:
         assert operations == [("review", "merged"), ("sha", "abc1234")]
         issue["status"] = "closed"
@@ -454,7 +449,7 @@ def test_reconcile_blocked_merged_changesets_converges_stale_terminal_metadata_b
 
     with (
         patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[issue]),
-        patch("atelier.worker.reconcile.beads.run_bd_json", side_effect=run_bd_json),
+        patch("atelier.worker.reconcile.worker_store.show_issue", return_value=issue),
         patch("atelier.worker.reconcile.git.git_ref_exists", return_value=True),
         patch(
             "atelier.worker.reconcile.prs.lookup_github_pr_status",
@@ -471,17 +466,18 @@ def test_reconcile_blocked_merged_changesets_converges_stale_terminal_metadata_b
             ),
         ),
         patch(
-            "atelier.worker.reconcile.beads.update_changeset_review",
+            "atelier.worker.reconcile.worker_store.update_changeset_review",
             side_effect=lambda _changeset_id, metadata, **_kwargs: operations.append(
                 ("review", str(metadata.pr_state))
             ),
         ),
         patch(
-            "atelier.worker.reconcile.beads.update_changeset_integrated_sha",
+            "atelier.worker.reconcile.worker_store.update_changeset_integrated_sha",
             side_effect=lambda _changeset_id, integrated_sha, **_kwargs: operations.append(
                 ("sha", integrated_sha)
             ),
         ),
+        patch("atelier.worker.reconcile.resolve_hook_agent_bead_for_epic", return_value=None),
     ):
         result = reconcile.reconcile_blocked_merged_changesets(
             agent_id="worker/1",
@@ -525,11 +521,6 @@ def test_reconcile_blocked_merged_changesets_keeps_finalize_integrated_sha_autho
     }
     operations: list[tuple[str, str]] = []
 
-    def run_bd_json(args: list[str], **_kwargs: object) -> list[dict[str, object]]:
-        if args[:2] == ["show", "at-1.2"]:
-            return [issue]
-        return []
-
     def finalize_changeset(**_kwargs: object) -> FinalizeResult:
         issue["status"] = "closed"
         issue["description"] = (
@@ -541,7 +532,7 @@ def test_reconcile_blocked_merged_changesets_keeps_finalize_integrated_sha_autho
 
     with (
         patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[issue]),
-        patch("atelier.worker.reconcile.beads.run_bd_json", side_effect=run_bd_json),
+        patch("atelier.worker.reconcile.worker_store.show_issue", return_value=issue),
         patch("atelier.worker.reconcile.git.git_ref_exists", return_value=True),
         patch(
             "atelier.worker.reconcile.prs.lookup_github_pr_status",
@@ -558,17 +549,18 @@ def test_reconcile_blocked_merged_changesets_keeps_finalize_integrated_sha_autho
             ),
         ),
         patch(
-            "atelier.worker.reconcile.beads.update_changeset_review",
+            "atelier.worker.reconcile.worker_store.update_changeset_review",
             side_effect=lambda _changeset_id, metadata, **_kwargs: operations.append(
                 ("review", str(metadata.pr_state))
             ),
         ),
         patch(
-            "atelier.worker.reconcile.beads.update_changeset_integrated_sha",
+            "atelier.worker.reconcile.worker_store.update_changeset_integrated_sha",
             side_effect=lambda _changeset_id, integrated_sha, **_kwargs: operations.append(
                 ("sha", integrated_sha)
             ),
         ),
+        patch("atelier.worker.reconcile.resolve_hook_agent_bead_for_epic", return_value=None),
     ):
         result = reconcile.reconcile_blocked_merged_changesets(
             agent_id="worker/1",
@@ -607,11 +599,6 @@ def test_reconcile_stale_terminal_metadata_next_run_uses_closed_path_without_ref
         "description": "changeset.work_branch: feat/at-1.16\npr_state: pushed\n",
     }
 
-    def run_bd_json(args: list[str], **_kwargs: object) -> list[dict[str, object]]:
-        if args[:2] == ["show", "at-1.16"]:
-            return [issue]
-        return []
-
     def finalize_changeset(**_kwargs: object) -> FinalizeResult:
         issue["status"] = "closed"
         issue["description"] = (
@@ -623,7 +610,7 @@ def test_reconcile_stale_terminal_metadata_next_run_uses_closed_path_without_ref
 
     with (
         patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[issue]),
-        patch("atelier.worker.reconcile.beads.run_bd_json", side_effect=run_bd_json),
+        patch("atelier.worker.reconcile.worker_store.show_issue", return_value=issue),
         patch("atelier.worker.reconcile.git.git_ref_exists", return_value=True),
         patch(
             "atelier.worker.reconcile.prs.lookup_github_pr_status",
@@ -639,8 +626,9 @@ def test_reconcile_stale_terminal_metadata_next_run_uses_closed_path_without_ref
                 },
             ),
         ),
-        patch("atelier.worker.reconcile.beads.update_changeset_review"),
-        patch("atelier.worker.reconcile.beads.update_changeset_integrated_sha"),
+        patch("atelier.worker.reconcile.worker_store.update_changeset_review"),
+        patch("atelier.worker.reconcile.worker_store.update_changeset_integrated_sha"),
+        patch("atelier.worker.reconcile.resolve_hook_agent_bead_for_epic", return_value=None),
     ):
         first = reconcile.reconcile_blocked_merged_changesets(
             agent_id="worker/1",
@@ -663,7 +651,7 @@ def test_reconcile_stale_terminal_metadata_next_run_uses_closed_path_without_ref
     logs: list[str] = []
     with (
         patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[issue]),
-        patch("atelier.worker.reconcile.beads.run_bd_json", side_effect=run_bd_json),
+        patch("atelier.worker.reconcile.worker_store.show_issue", return_value=issue),
         patch("atelier.worker.reconcile.git.git_ref_exists", return_value=True),
         patch(
             "atelier.worker.reconcile.prs.lookup_github_pr_status",
@@ -680,7 +668,8 @@ def test_reconcile_stale_terminal_metadata_next_run_uses_closed_path_without_ref
             ),
         ),
         patch("atelier.worker.reconcile.beads.reconcile_closed_issue_exported_github_tickets"),
-        patch("atelier.worker.reconcile.beads.update_changeset_integrated_sha"),
+        patch("atelier.worker.reconcile.worker_store.update_changeset_integrated_sha"),
+        patch("atelier.worker.reconcile.resolve_hook_agent_bead_for_epic", return_value=None),
     ):
         second = reconcile.reconcile_blocked_merged_changesets(
             agent_id="worker/1",
@@ -724,14 +713,9 @@ def test_reconcile_blocked_merged_changesets_fails_closed_when_stale_terminal_fi
     }
     logs: list[str] = []
 
-    def run_bd_json(args: list[str], **_kwargs: object) -> list[dict[str, object]]:
-        if args[:2] == ["show", "at-1.2"]:
-            return [issue]
-        return []
-
     with (
         patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[issue]),
-        patch("atelier.worker.reconcile.beads.run_bd_json", side_effect=run_bd_json),
+        patch("atelier.worker.reconcile.worker_store.show_issue", return_value=issue),
         patch("atelier.worker.reconcile.git.git_ref_exists", return_value=True),
         patch(
             "atelier.worker.reconcile.prs.lookup_github_pr_status",
@@ -747,8 +731,9 @@ def test_reconcile_blocked_merged_changesets_fails_closed_when_stale_terminal_fi
                 },
             ),
         ),
-        patch("atelier.worker.reconcile.beads.update_changeset_review"),
-        patch("atelier.worker.reconcile.beads.update_changeset_integrated_sha"),
+        patch("atelier.worker.reconcile.worker_store.update_changeset_review"),
+        patch("atelier.worker.reconcile.worker_store.update_changeset_integrated_sha"),
+        patch("atelier.worker.reconcile.resolve_hook_agent_bead_for_epic", return_value=None),
     ):
         result = reconcile.reconcile_blocked_merged_changesets(
             agent_id="worker/1",
@@ -1139,7 +1124,9 @@ def test_reconcile_blocked_merged_changesets_reports_closed_active_pr_drift() ->
     logs: list[str] = []
     with (
         patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[drift_issue]),
-        patch("atelier.worker.reconcile.beads.mark_issue_in_progress") as mark_issue_in_progress,
+        patch(
+            "atelier.worker.reconcile.worker_store.mark_issue_in_progress"
+        ) as mark_issue_in_progress,
         patch("atelier.worker.reconcile.git.git_ref_exists", return_value=True),
         patch(
             "atelier.worker.reconcile.prs.lookup_github_pr_status",
@@ -1182,7 +1169,7 @@ def test_reconcile_blocked_merged_changesets_reports_closed_active_pr_drift() ->
     mark_issue_in_progress.assert_called_once_with(
         "at-1.9",
         beads_root=Path("/beads"),
-        cwd=Path("/repo"),
+        repo_root=Path("/repo"),
     )
     assert any(
         "closed+active-pr-lifecycle(evidence(source=live-pr,active=pr-open" in line for line in logs
@@ -1217,7 +1204,9 @@ def test_reconcile_does_not_reopen_closed_changeset_when_live_pr_is_merged() -> 
                 },
             ),
         ),
-        patch("atelier.worker.reconcile.beads.mark_issue_in_progress") as mark_issue_in_progress,
+        patch(
+            "atelier.worker.reconcile.worker_store.mark_issue_in_progress"
+        ) as mark_issue_in_progress,
     ):
         result = reconcile.reconcile_blocked_merged_changesets(
             agent_id="worker/1",
@@ -1265,7 +1254,9 @@ def test_reconcile_flags_closed_pr_lookup_error_without_reopen() -> None:
             "atelier.worker.reconcile.prs.lookup_github_pr_status",
             return_value=prs.GithubPrLookup(outcome="error", error="gh timeout"),
         ),
-        patch("atelier.worker.reconcile.beads.mark_issue_in_progress") as mark_issue_in_progress,
+        patch(
+            "atelier.worker.reconcile.worker_store.mark_issue_in_progress"
+        ) as mark_issue_in_progress,
     ):
         result = reconcile.reconcile_blocked_merged_changesets(
             agent_id="worker/1",
@@ -1326,7 +1317,9 @@ def test_reconcile_recovers_after_transient_pr_lookup_error_for_closed_active_pr
                 ),
             ],
         ) as lookup,
-        patch("atelier.worker.reconcile.beads.mark_issue_in_progress") as mark_issue_in_progress,
+        patch(
+            "atelier.worker.reconcile.worker_store.mark_issue_in_progress"
+        ) as mark_issue_in_progress,
     ):
         result = reconcile.reconcile_blocked_merged_changesets(
             agent_id="worker/1",
@@ -1359,7 +1352,7 @@ def test_reconcile_recovers_after_transient_pr_lookup_error_for_closed_active_pr
     mark_issue_in_progress.assert_called_once_with(
         "at-1.15",
         beads_root=Path("/beads"),
-        cwd=Path("/repo"),
+        repo_root=Path("/repo"),
     )
     assert not any("closed+pr-lifecycle-lookup-error" in line for line in logs)
     assert any(
@@ -1430,20 +1423,15 @@ def test_reconcile_dependency_without_terminal_review_or_merge_blocks_finalize()
     def list_all_changesets(*, beads_root, cwd, include_closed):
         return [candidate]
 
-    def run_bd_json(args: list[str], **_kwargs):
-        if args[:2] == ["show", "at-1.1"]:
-            return [dependency]
-        if args[:3] == ["list", "--parent", "at-1.1"]:
-            return []
-        return []
-
     logs: list[str] = []
     with (
         patch(
             "atelier.worker.reconcile.beads.list_all_changesets", side_effect=list_all_changesets
         ),
-        patch("atelier.worker.reconcile.beads.run_bd_json", side_effect=run_bd_json),
-        patch("atelier.worker.reconcile.beads.update_changeset_integrated_sha"),
+        patch("atelier.worker.reconcile.worker_store.show_issue", return_value=dependency),
+        patch("atelier.worker.reconcile.worker_store.list_work_children", return_value=[]),
+        patch("atelier.worker.reconcile.worker_store.update_changeset_integrated_sha"),
+        patch("atelier.worker.reconcile.resolve_hook_agent_bead_for_epic", return_value=None),
     ):
         result = reconcile.reconcile_blocked_merged_changesets(
             agent_id="worker/1",
@@ -1495,13 +1483,6 @@ def test_reconcile_closed_dependency_requires_strict_integration_proof() -> None
     def list_all_changesets(*, beads_root, cwd, include_closed):
         return [candidate]
 
-    def run_bd_json(args: list[str], **_kwargs):
-        if args[:2] == ["show", "at-1.1"]:
-            return [dependency]
-        if args[:3] == ["list", "--parent", "at-1.1"]:
-            return []
-        return []
-
     calls: list[tuple[str, bool]] = []
     logs: list[str] = []
 
@@ -1518,8 +1499,10 @@ def test_reconcile_closed_dependency_requires_strict_integration_proof() -> None
         patch(
             "atelier.worker.reconcile.beads.list_all_changesets", side_effect=list_all_changesets
         ),
-        patch("atelier.worker.reconcile.beads.run_bd_json", side_effect=run_bd_json),
-        patch("atelier.worker.reconcile.beads.update_changeset_integrated_sha"),
+        patch("atelier.worker.reconcile.worker_store.show_issue", return_value=dependency),
+        patch("atelier.worker.reconcile.worker_store.list_work_children", return_value=[]),
+        patch("atelier.worker.reconcile.worker_store.update_changeset_integrated_sha"),
+        patch("atelier.worker.reconcile.resolve_hook_agent_bead_for_epic", return_value=None),
     ):
         result = reconcile.reconcile_blocked_merged_changesets(
             agent_id="worker/1",
@@ -1570,20 +1553,15 @@ def test_reconcile_dependency_with_integrated_signal_allows_finalize() -> None:
     def list_all_changesets(*, beads_root, cwd, include_closed):
         return [candidate]
 
-    def run_bd_json(args: list[str], **_kwargs):
-        if args[:2] == ["show", "at-1.1"]:
-            return [dependency]
-        if args[:3] == ["list", "--parent", "at-1.1"]:
-            return []
-        return []
-
     finalized: list[str] = []
     with (
         patch(
             "atelier.worker.reconcile.beads.list_all_changesets", side_effect=list_all_changesets
         ),
-        patch("atelier.worker.reconcile.beads.run_bd_json", side_effect=run_bd_json),
-        patch("atelier.worker.reconcile.beads.update_changeset_integrated_sha"),
+        patch("atelier.worker.reconcile.worker_store.show_issue", return_value=dependency),
+        patch("atelier.worker.reconcile.worker_store.list_work_children", return_value=[]),
+        patch("atelier.worker.reconcile.worker_store.update_changeset_integrated_sha"),
+        patch("atelier.worker.reconcile.resolve_hook_agent_bead_for_epic", return_value=None),
     ):
         result = reconcile.reconcile_blocked_merged_changesets(
             agent_id="worker/1",
@@ -1642,24 +1620,19 @@ def test_reconcile_join_dependencies_require_all_integrated_signals() -> None:
     def list_all_changesets(*, beads_root, cwd, include_closed):
         return [candidate]
 
-    def run_bd_json(args: list[str], **_kwargs):
-        if args[:2] == ["show", "at-1.1"]:
-            return [dependency_one]
-        if args[:2] == ["show", "at-1.2"]:
-            return [dependency_two]
-        if args[:3] == ["list", "--parent", "at-1.1"]:
-            return []
-        if args[:3] == ["list", "--parent", "at-1.2"]:
-            return []
-        return []
-
     logs: list[str] = []
+    issues_by_id = {"at-1.1": dependency_one, "at-1.2": dependency_two}
     with (
         patch(
             "atelier.worker.reconcile.beads.list_all_changesets", side_effect=list_all_changesets
         ),
-        patch("atelier.worker.reconcile.beads.run_bd_json", side_effect=run_bd_json),
-        patch("atelier.worker.reconcile.beads.update_changeset_integrated_sha"),
+        patch(
+            "atelier.worker.reconcile.worker_store.show_issue",
+            side_effect=lambda issue_id, **_kwargs: issues_by_id.get(issue_id),
+        ),
+        patch("atelier.worker.reconcile.worker_store.list_work_children", return_value=[]),
+        patch("atelier.worker.reconcile.worker_store.update_changeset_integrated_sha"),
+        patch("atelier.worker.reconcile.resolve_hook_agent_bead_for_epic", return_value=None),
     ):
         result = reconcile.reconcile_blocked_merged_changesets(
             agent_id="worker/1",
@@ -1720,24 +1693,19 @@ def test_reconcile_join_dependencies_all_integrated_allows_finalize() -> None:
     def list_all_changesets(*, beads_root, cwd, include_closed):
         return [candidate]
 
-    def run_bd_json(args: list[str], **_kwargs):
-        if args[:2] == ["show", "at-1.1"]:
-            return [dependency_one]
-        if args[:2] == ["show", "at-1.2"]:
-            return [dependency_two]
-        if args[:3] == ["list", "--parent", "at-1.1"]:
-            return []
-        if args[:3] == ["list", "--parent", "at-1.2"]:
-            return []
-        return []
-
     finalized: list[str] = []
+    issues_by_id = {"at-1.1": dependency_one, "at-1.2": dependency_two}
     with (
         patch(
             "atelier.worker.reconcile.beads.list_all_changesets", side_effect=list_all_changesets
         ),
-        patch("atelier.worker.reconcile.beads.run_bd_json", side_effect=run_bd_json),
-        patch("atelier.worker.reconcile.beads.update_changeset_integrated_sha"),
+        patch(
+            "atelier.worker.reconcile.worker_store.show_issue",
+            side_effect=lambda issue_id, **_kwargs: issues_by_id.get(issue_id),
+        ),
+        patch("atelier.worker.reconcile.worker_store.list_work_children", return_value=[]),
+        patch("atelier.worker.reconcile.worker_store.update_changeset_integrated_sha"),
+        patch("atelier.worker.reconcile.resolve_hook_agent_bead_for_epic", return_value=None),
     ):
         result = reconcile.reconcile_blocked_merged_changesets(
             agent_id="worker/1",
@@ -1793,18 +1761,12 @@ def test_reconcile_dependency_with_abandoned_label_requires_review_metadata() ->
     def list_all_changesets(*, beads_root, cwd, include_closed):
         return [candidate]
 
-    def run_bd_json(args: list[str], **_kwargs):
-        if args[:2] == ["show", "at-1.1"]:
-            return [dependency]
-        if args[:3] == ["list", "--parent", "at-1.1"]:
-            return []
-        return []
-
     with (
         patch(
             "atelier.worker.reconcile.beads.list_all_changesets", side_effect=list_all_changesets
         ),
-        patch("atelier.worker.reconcile.beads.run_bd_json", side_effect=run_bd_json),
+        patch("atelier.worker.reconcile.worker_store.show_issue", return_value=dependency),
+        patch("atelier.worker.reconcile.worker_store.list_work_children", return_value=[]),
     ):
         result = reconcile.reconcile_blocked_merged_changesets(
             agent_id="worker/1",
