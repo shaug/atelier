@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from atelier.lib.beads import SyncBeadsClient
+from atelier.messages import render_message
 from atelier.store import build_atelier_store
 from atelier.testing.beads import IssueFixtureBuilder
 from atelier.testing.beads.client import build_in_memory_beads_client
@@ -17,6 +18,28 @@ def _patch_bundle(monkeypatch, *, issues: tuple[dict[str, object], ...]) -> None
         lambda **_kwargs: worker_store._StoreBundle(  # pyright: ignore[reportPrivateUsage]
             store=store,
             sync_client=SyncBeadsClient(async_client),
+        ),
+    )
+
+
+def _worker_message(
+    builder: IssueFixtureBuilder, message_id: str, *, thread_id: str
+) -> dict[str, object]:
+    return builder.issue(
+        message_id,
+        issue_type="message",
+        labels=("at:message", "at:unread"),
+        description=render_message(
+            {
+                "from": "atelier/planner/codex/p200",
+                "delivery": "work-threaded",
+                "thread": thread_id,
+                "thread_kind": "changeset" if "." in thread_id else "epic",
+                "audience": ["worker"],
+                "kind": "instruction",
+                "blocking": True,
+            },
+            "Follow these instructions.",
         ),
     )
 
@@ -120,4 +143,78 @@ def test_list_work_children_filters_non_work_children(monkeypatch) -> None:
     )
 
     assert [child["id"] for child in children] == ["at-epic.1"]
+    worker_store.clear_bundle_cache()
+
+
+def test_list_inbox_messages_skips_closed_changeset_threads(monkeypatch) -> None:
+    builder = IssueFixtureBuilder()
+    _patch_bundle(
+        monkeypatch,
+        issues=(
+            builder.issue("at-epic", issue_type="epic", labels=("at:epic",), status="open"),
+            builder.issue(
+                "at-epic.1",
+                issue_type="task",
+                parent="at-epic",
+                status="closed",
+                labels=("cs:merged",),
+            ),
+            _worker_message(builder, "at-msg", thread_id="at-epic.1"),
+        ),
+    )
+
+    inbox = worker_store.list_inbox_messages(
+        "atelier/worker/codex/p100",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert inbox == []
+    worker_store.clear_bundle_cache()
+
+
+def test_list_inbox_messages_keeps_open_changeset_threads(monkeypatch) -> None:
+    builder = IssueFixtureBuilder()
+    _patch_bundle(
+        monkeypatch,
+        issues=(
+            builder.issue("at-epic", issue_type="epic", labels=("at:epic",), status="open"),
+            builder.issue(
+                "at-epic.1",
+                issue_type="task",
+                parent="at-epic",
+                status="open",
+            ),
+            _worker_message(builder, "at-msg", thread_id="at-epic.1"),
+        ),
+    )
+
+    inbox = worker_store.list_inbox_messages(
+        "atelier/worker/codex/p100",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert len(inbox) == 1
+    assert inbox[0]["id"] == "at-msg"
+    worker_store.clear_bundle_cache()
+
+
+def test_list_inbox_messages_skips_closed_epic_threads(monkeypatch) -> None:
+    builder = IssueFixtureBuilder()
+    _patch_bundle(
+        monkeypatch,
+        issues=(
+            builder.issue("at-epic", issue_type="epic", labels=("at:epic",), status="closed"),
+            _worker_message(builder, "at-msg", thread_id="at-epic"),
+        ),
+    )
+
+    inbox = worker_store.list_inbox_messages(
+        "atelier/worker/codex/p100",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert inbox == []
     worker_store.clear_bundle_cache()

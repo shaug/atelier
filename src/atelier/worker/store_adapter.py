@@ -701,6 +701,38 @@ def _startup_messages(
     return cast(tuple[object, ...], asyncio.run(bundle.store.list_messages(query)))
 
 
+def _startup_message_thread_is_terminal(
+    record: object,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> bool:
+    """Return whether a startup message belongs to terminal work.
+
+    The worker inbox should fail closed on lookup uncertainty, so only a
+    successful thread lookup that proves terminal lifecycle state suppresses
+    the message from inbox gating.
+    """
+
+    thread_id = getattr(record, "thread_id", None)
+    if not isinstance(thread_id, str) or not thread_id.strip():
+        return False
+    thread_kind = getattr(record, "thread_kind", None)
+    if thread_kind not in {MessageThreadKind.CHANGESET, MessageThreadKind.EPIC}:
+        return False
+    try:
+        issue = _show_issue(
+            issue_id=thread_id.strip(),
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+    except Exception:
+        return False
+    if issue is None:
+        return False
+    return lifecycle.is_closed_status(issue.get("status"))
+
+
 def list_inbox_messages(
     agent_id: str,
     *,
@@ -719,6 +751,12 @@ def list_inbox_messages(
         repo_root=repo_root,
         unread_only=unread_only,
     ):
+        if _startup_message_thread_is_terminal(
+            record,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        ):
+            continue
         if getattr(record, "queue", None):
             continue
         blocking_roles = tuple(getattr(record, "blocking_roles", ()))
