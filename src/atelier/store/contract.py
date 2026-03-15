@@ -205,6 +205,21 @@ class ClearHookRequest(StoreModel):
     expected_epic_id: Identifier | None = None
 
 
+class SetAgentBeadHookRequest(StoreModel):
+    """Mutation request for binding one agent bead to an epic hook."""
+
+    agent_bead_id: Identifier
+    epic_id: Identifier
+    expected_current_epic_id: Identifier | None = None
+
+
+class ClearAgentBeadHookRequest(StoreModel):
+    """Mutation request for clearing one agent bead hook."""
+
+    agent_bead_id: Identifier
+    expected_epic_id: Identifier | None = None
+
+
 class UpdateReviewRequest(StoreModel):
     """Mutation request for replacing or merging changeset review metadata."""
 
@@ -226,6 +241,7 @@ __all__ = [
     "AppendNotesRequest",
     "ChangesetQuery",
     "ClaimMessageRequest",
+    "ClearAgentBeadHookRequest",
     "ClearHookRequest",
     "CreateChangesetRequest",
     "CreateEpicRequest",
@@ -236,6 +252,7 @@ __all__ = [
     "MarkMessageReadRequest",
     "MessageQuery",
     "ReadyChangesetQuery",
+    "SetAgentBeadHookRequest",
     "SetHookRequest",
     "UpdateReviewRequest",
 ]

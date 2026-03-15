@@ -26,6 +26,7 @@ from atelier.store import (
     ChangesetBranches,
     ChangesetRecord,
     ClaimMessageRequest,
+    ClearAgentBeadHookRequest,
     ClearHookRequest,
     CreateChangesetRequest,
     CreateEpicRequest,
@@ -43,6 +44,7 @@ from atelier.store import (
     MessageThreadKind,
     ReviewMetadata,
     ReviewState,
+    SetAgentBeadHookRequest,
     SetHookRequest,
     StartupMessageRecord,
     UpdateReviewRequest,
@@ -75,6 +77,7 @@ _STORE_METHOD_NAMES = (
     "list_messages",
     "list_startup_messages",
     "get_agent_hook",
+    "get_agent_bead_hook",
     "add_dependency",
     "remove_dependency",
     "create_epic",
@@ -84,7 +87,9 @@ _STORE_METHOD_NAMES = (
     "append_notes",
     "claim_message",
     "mark_message_read",
+    "set_agent_bead_hook",
     "set_agent_hook",
+    "clear_agent_bead_hook",
     "clear_agent_hook",
     "update_review",
     "transition_lifecycle",
@@ -212,6 +217,17 @@ def test_startup_message_record_allows_startup_routing_metadata() -> None:
 
     assert record.audience == ("planner",)
     assert record.blocking_roles == ("planner",)
+
+
+def test_agent_bead_hook_requests_use_validated_bead_identity() -> None:
+    set_request = SetAgentBeadHookRequest(agent_bead_id="at-agent", epic_id="at-epic")
+    clear_request = ClearAgentBeadHookRequest(
+        agent_bead_id="at-agent",
+        expected_epic_id="at-epic",
+    )
+
+    assert set_request.agent_bead_id == "at-agent"
+    assert clear_request.expected_epic_id == "at-epic"
 
 
 def test_store_contract_stays_above_the_beads_client_layer() -> None:
@@ -1113,6 +1129,37 @@ def test_store_get_agent_hook_prefers_slot_value_when_available() -> None:
     hook = _RUN(store.get_agent_hook("atelier/worker/agent"))
 
     assert hook == HookRecord(agent_id="atelier/worker/agent", epic_id="at-slot")
+
+
+def test_store_agent_bead_hook_methods_bind_without_agent_scan() -> None:
+    store = _store_for(
+        BUILDER.issue(
+            "at-agent",
+            title="atelier/worker/agent",
+            issue_type="agent",
+            labels=("at:agent",),
+            description="agent_id: atelier/worker/agent\n",
+        )
+    )
+
+    set_hook = _RUN(
+        store.set_agent_bead_hook(
+            SetAgentBeadHookRequest(agent_bead_id="at-agent", epic_id="at-epic")
+        )
+    )
+    observed = _RUN(store.get_agent_bead_hook("at-agent"))
+    cleared = _RUN(
+        store.clear_agent_bead_hook(
+            ClearAgentBeadHookRequest(
+                agent_bead_id="at-agent",
+                expected_epic_id="at-epic",
+            )
+        )
+    )
+
+    assert set_hook == HookRecord(agent_id="atelier/worker/agent", epic_id="at-epic")
+    assert observed == HookRecord(agent_id="atelier/worker/agent", epic_id="at-epic")
+    assert cleared == HookRecord(agent_id="atelier/worker/agent", epic_id="at-epic")
 
 
 def test_store_list_startup_messages_returns_validated_startup_projection() -> None:

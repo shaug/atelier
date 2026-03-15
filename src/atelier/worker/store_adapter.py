@@ -27,14 +27,14 @@ from ..store import (
     AtelierStore,
     ChangesetQuery,
     ClaimMessageRequest,
-    ClearHookRequest,
+    ClearAgentBeadHookRequest,
     CreateMessageRequest,
     LifecycleStatus,
     MarkMessageReadRequest,
     MessageQuery,
     MessageThreadKind,
     ReadyChangesetQuery,
-    SetHookRequest,
+    SetAgentBeadHookRequest,
     StartupMessageRecord,
     build_atelier_store,
 )
@@ -340,28 +340,6 @@ def ensure_agent_bead(
     return _issue_payload(created)
 
 
-def _current_agent_id(agent_issue: dict[str, object]) -> str | None:
-    title = agent_issue.get("title")
-    if isinstance(title, str) and title.strip():
-        return title.strip()
-    description = agent_issue.get("description")
-    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
-    value = fields.get("agent_id")
-    return value.strip() if isinstance(value, str) and value.strip() else None
-
-
-def _agent_id_for_bead(
-    agent_bead_id: str,
-    *,
-    beads_root: Path,
-    repo_root: Path,
-) -> str | None:
-    issue = _show_issue(issue_id=agent_bead_id, beads_root=beads_root, repo_root=repo_root)
-    if issue is None:
-        return None
-    return _current_agent_id(issue)
-
-
 def resolve_hooked_epic(
     agent_bead_id: str,
     agent_id: str,
@@ -394,15 +372,9 @@ def get_agent_hook(
 ) -> str | None:
     """Return the current hook id for one agent bead, when present."""
 
-    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
-    bound_agent_id = _agent_id_for_bead(
-        agent_bead_id,
-        beads_root=beads_root,
-        repo_root=repo_root,
+    hook = asyncio.run(
+        _bundle(beads_root=beads_root, repo_root=repo_root).store.get_agent_bead_hook(agent_bead_id)
     )
-    if bound_agent_id is None:
-        return None
-    hook = asyncio.run(bundle.store.get_agent_hook(bound_agent_id))
     return None if hook is None else hook.epic_id
 
 
@@ -417,14 +389,13 @@ def agent_hook_observation(
     agent_bead_id = str(agent_issue.get("id") or "").strip()
     if not agent_bead_id:
         return worker_selection.AgentHookObservation.unknown("agent_bead_id_missing")
-    bound_agent_id = _current_agent_id(agent_issue)
-    if bound_agent_id is None:
-        return worker_selection.AgentHookObservation.unknown("agent_id_missing")
     bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
     try:
-        hook = asyncio.run(bundle.store.get_agent_hook(bound_agent_id))
+        hook = asyncio.run(bundle.store.get_agent_bead_hook(agent_bead_id))
     except LookupError:
         return worker_selection.AgentHookObservation.unknown("hook_lookup_failed")
+    except ValueError:
+        return worker_selection.AgentHookObservation.unknown("agent_id_missing")
     if hook is None:
         return worker_selection.AgentHookObservation.absent()
     return worker_selection.AgentHookObservation.present(hook.epic_id)
@@ -615,10 +586,11 @@ def set_agent_hook(
     """Bind an agent bead to an epic through AtelierStore hook mutations."""
 
     bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
-    agent_id = _agent_id_for_bead(agent_bead_id, beads_root=beads_root, repo_root=repo_root)
-    if agent_id is None:
-        die(f"agent bead not found: {agent_bead_id}")
-    asyncio.run(bundle.store.set_agent_hook(SetHookRequest(agent_id=agent_id, epic_id=epic_id)))
+    asyncio.run(
+        bundle.store.set_agent_bead_hook(
+            SetAgentBeadHookRequest(agent_bead_id=agent_bead_id, epic_id=epic_id)
+        )
+    )
 
 
 def clear_agent_hook(
@@ -631,12 +603,12 @@ def clear_agent_hook(
     """Clear an agent hook through AtelierStore hook mutations."""
 
     bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
-    agent_id = _agent_id_for_bead(agent_bead_id, beads_root=beads_root, repo_root=repo_root)
-    if agent_id is None:
-        die(f"agent bead not found: {agent_bead_id}")
     asyncio.run(
-        bundle.store.clear_agent_hook(
-            ClearHookRequest(agent_id=agent_id, expected_epic_id=expected_hook)
+        bundle.store.clear_agent_bead_hook(
+            ClearAgentBeadHookRequest(
+                agent_bead_id=agent_bead_id,
+                expected_epic_id=expected_hook,
+            )
         )
     )
 

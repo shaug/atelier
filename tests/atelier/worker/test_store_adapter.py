@@ -2,7 +2,7 @@ from pathlib import Path
 
 from atelier.lib.beads import IssueRecord, SyncBeadsClient
 from atelier.messages import render_message
-from atelier.store import StartupMessageRecord, build_atelier_store
+from atelier.store import HookRecord, StartupMessageRecord, build_atelier_store
 from atelier.testing.beads import IssueFixtureBuilder
 from atelier.testing.beads.client import build_in_memory_beads_client
 from atelier.worker import store_adapter as worker_store
@@ -231,6 +231,86 @@ def test_list_inbox_messages_uses_typed_startup_store_method(monkeypatch) -> Non
     )
 
     assert [item["id"] for item in inbox] == ["at-msg"]
+    worker_store.clear_bundle_cache()
+
+
+def test_get_agent_hook_uses_agent_bead_store_method(monkeypatch) -> None:
+    class _FakeStore:
+        async def get_agent_bead_hook(self, agent_bead_id):
+            assert agent_bead_id == "at-agent"
+            return HookRecord(agent_id="atelier/worker/codex/p100", epic_id="at-epic")
+
+        async def get_agent_hook(self, _agent_id):
+            raise AssertionError("agent-id hook lookup should not be used")
+
+    monkeypatch.setattr(
+        worker_store,
+        "_build_store_bundle",
+        lambda **_kwargs: worker_store._StoreBundle(  # pyright: ignore[reportPrivateUsage]
+            store=_FakeStore(),
+            sync_client=SyncBeadsClient(build_in_memory_beads_client()[0]),
+        ),
+    )
+    worker_store.clear_bundle_cache()
+
+    hook = worker_store.get_agent_hook(
+        "at-agent",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert hook == "at-epic"
+    worker_store.clear_bundle_cache()
+
+
+def test_agent_hook_mutations_use_agent_bead_store_methods(monkeypatch) -> None:
+    seen: list[tuple[str, str, str | None]] = []
+
+    class _FakeStore:
+        async def set_agent_bead_hook(self, request):
+            seen.append(("set", request.agent_bead_id, request.epic_id))
+            return HookRecord(agent_id="atelier/worker/codex/p100", epic_id=request.epic_id)
+
+        async def clear_agent_bead_hook(self, request):
+            seen.append(("clear", request.agent_bead_id, request.expected_epic_id))
+            return HookRecord(
+                agent_id="atelier/worker/codex/p100",
+                epic_id=request.expected_epic_id or "at-epic",
+            )
+
+        async def set_agent_hook(self, _request):
+            raise AssertionError("agent-id hook mutation should not be used")
+
+        async def clear_agent_hook(self, _request):
+            raise AssertionError("agent-id hook mutation should not be used")
+
+    monkeypatch.setattr(
+        worker_store,
+        "_build_store_bundle",
+        lambda **_kwargs: worker_store._StoreBundle(  # pyright: ignore[reportPrivateUsage]
+            store=_FakeStore(),
+            sync_client=SyncBeadsClient(build_in_memory_beads_client()[0]),
+        ),
+    )
+    worker_store.clear_bundle_cache()
+
+    worker_store.set_agent_hook(
+        "at-agent",
+        "at-epic",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+    worker_store.clear_agent_hook(
+        "at-agent",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        expected_hook="at-epic",
+    )
+
+    assert seen == [
+        ("set", "at-agent", "at-epic"),
+        ("clear", "at-agent", "at-epic"),
+    ]
     worker_store.clear_bundle_cache()
 
 

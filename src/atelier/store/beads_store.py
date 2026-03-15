@@ -29,6 +29,7 @@ from .contract import (
     AppendNotesRequest,
     ChangesetQuery,
     ClaimMessageRequest,
+    ClearAgentBeadHookRequest,
     ClearHookRequest,
     CreateChangesetRequest,
     CreateEpicRequest,
@@ -39,6 +40,7 @@ from .contract import (
     MarkMessageReadRequest,
     MessageQuery,
     ReadyChangesetQuery,
+    SetAgentBeadHookRequest,
     SetHookRequest,
     UpdateReviewRequest,
 )
@@ -533,13 +535,14 @@ class AtelierStore:
         issue = await self._find_agent_issue(agent_id, state=state)
         if issue is None:
             return None
-        slots = await _read_issue_slots(self._beads, issue.id)
-        slot_hook = _clean_text(slots.get("hook"))
-        if slot_hook is not None:
-            return HookRecord(agent_id=agent_id, epic_id=slot_hook)
-        fields = beads_metadata.parse_description_fields(issue.description or "")
-        hooked_epic = _normalize_description_field_value(fields.get("hook_bead"))
-        return None if hooked_epic is None else HookRecord(agent_id=agent_id, epic_id=hooked_epic)
+        return await self._hook_record_for_agent_issue(issue, fallback_agent_id=agent_id)
+
+    async def get_agent_bead_hook(self, agent_bead_id: str) -> HookRecord | None:
+        state = _ReadState(self)
+        issue = await self._get_agent_issue_by_bead_id(agent_bead_id, state=state)
+        if issue is None:
+            return None
+        return await self._hook_record_for_agent_issue(issue)
 
     async def add_dependency(self, mutation: DependencyMutation) -> DependencyRecord:
         state = _ReadState(self)
@@ -844,6 +847,59 @@ class AtelierStore:
         )
         return HookRecord(agent_id=request.agent_id, epic_id=request.epic_id)
 
+    async def set_agent_bead_hook(self, request: SetAgentBeadHookRequest) -> HookRecord:
+        state = _ReadState(self)
+        agent_issue = await self._get_agent_issue_by_bead_id(
+            request.agent_bead_id,
+            state=state,
+        )
+        if agent_issue is None:
+            raise LookupError(f"agent issue not found: {request.agent_bead_id}")
+        agent_id = self._require_agent_identifier(agent_issue)
+        current_fields = beads_metadata.parse_description_fields(agent_issue.description or "")
+        current_hook = _normalize_description_field_value(current_fields.get("hook_bead"))
+        if (
+            request.expected_current_epic_id is not None
+            and current_hook != request.expected_current_epic_id
+        ):
+            raise ValueError(
+                f"agent {agent_id} hook mismatch: expected "
+                f"{request.expected_current_epic_id!r}, got {current_hook!r}"
+            )
+        if current_hook == request.epic_id:
+            return HookRecord(agent_id=agent_id, epic_id=request.epic_id)
+
+        def build_request(current: IssueRecord) -> UpdateIssueRequest:
+            fields = beads_metadata.parse_description_fields(current.description or "")
+            existing = _normalize_description_field_value(fields.get("hook_bead"))
+            if (
+                request.expected_current_epic_id is not None
+                and existing != request.expected_current_epic_id
+            ):
+                raise ValueError(
+                    f"agent {agent_id} hook mismatch: expected "
+                    f"{request.expected_current_epic_id!r}, got {existing!r}"
+                )
+            description = _apply_description_fields(
+                current.description or "",
+                fields={"hook_bead": request.epic_id},
+            )
+            return UpdateIssueRequest(issue_id=current.id, description=description)
+
+        def verify(issue: IssueRecord) -> bool:
+            return _description_fields_match(
+                issue.description or "",
+                fields={"hook_bead": request.epic_id},
+            )
+
+        await self._update_issue_until_verified(
+            agent_issue.id,
+            build_request=build_request,
+            verify=verify,
+            failure_message=f"agent hook update could not be verified for {request.agent_bead_id}",
+        )
+        return HookRecord(agent_id=agent_id, epic_id=request.epic_id)
+
     async def clear_agent_hook(self, request: ClearHookRequest) -> HookRecord | None:
         state = _ReadState(self)
         agent_issue = await self._find_agent_issue(request.agent_id, state=state)
@@ -885,6 +941,55 @@ class AtelierStore:
             failure_message=f"agent hook clear could not be verified for {request.agent_id}",
         )
         return HookRecord(agent_id=request.agent_id, epic_id=current_hook)
+
+    async def clear_agent_bead_hook(
+        self,
+        request: ClearAgentBeadHookRequest,
+    ) -> HookRecord | None:
+        state = _ReadState(self)
+        agent_issue = await self._get_agent_issue_by_bead_id(
+            request.agent_bead_id,
+            state=state,
+        )
+        if agent_issue is None:
+            return None
+        agent_id = self._require_agent_identifier(agent_issue)
+        fields = beads_metadata.parse_description_fields(agent_issue.description or "")
+        current_hook = _normalize_description_field_value(fields.get("hook_bead"))
+        if current_hook is None:
+            return None
+        if request.expected_epic_id is not None and current_hook != request.expected_epic_id:
+            return None
+
+        def build_request(current: IssueRecord) -> UpdateIssueRequest:
+            current_fields = beads_metadata.parse_description_fields(current.description or "")
+            existing = _normalize_description_field_value(current_fields.get("hook_bead"))
+            if existing is None:
+                raise ValueError("agent hook disappeared during clear")
+            if request.expected_epic_id is not None and existing != request.expected_epic_id:
+                raise ValueError(
+                    f"agent {agent_id} hook mismatch: expected "
+                    f"{request.expected_epic_id!r}, got {existing!r}"
+                )
+            description = _apply_description_fields(
+                current.description or "",
+                fields={"hook_bead": None},
+            )
+            return UpdateIssueRequest(issue_id=current.id, description=description)
+
+        def verify(issue: IssueRecord) -> bool:
+            return _description_fields_match(
+                issue.description or "",
+                fields={"hook_bead": None},
+            )
+
+        await self._update_issue_until_verified(
+            agent_issue.id,
+            build_request=build_request,
+            verify=verify,
+            failure_message=f"agent hook clear could not be verified for {request.agent_bead_id}",
+        )
+        return HookRecord(agent_id=agent_id, epic_id=current_hook)
 
     async def update_review(self, request: UpdateReviewRequest) -> ChangesetRecord:
         state = _ReadState(self)
@@ -1406,6 +1511,48 @@ class AtelierStore:
         if description_matches:
             return self._prefer_active_issue(description_matches)
         return None
+
+    async def _get_agent_issue_by_bead_id(
+        self,
+        agent_bead_id: str,
+        *,
+        state: _ReadState,
+    ) -> IssueRecord | None:
+        try:
+            issue = await state.get_issue(agent_bead_id)
+        except LookupError:
+            return None
+        return issue if self._matches_issue_kind(issue, "agent") else None
+
+    async def _hook_record_for_agent_issue(
+        self,
+        issue: IssueRecord,
+        *,
+        fallback_agent_id: str | None = None,
+    ) -> HookRecord | None:
+        agent_id = self._agent_identifier(issue) or fallback_agent_id
+        if agent_id is None:
+            raise ValueError(f"agent issue missing agent identifier: {issue.id}")
+        slots = await _read_issue_slots(self._beads, issue.id)
+        slot_hook = _clean_text(slots.get("hook"))
+        if slot_hook is not None:
+            return HookRecord(agent_id=agent_id, epic_id=slot_hook)
+        fields = beads_metadata.parse_description_fields(issue.description or "")
+        hooked_epic = _normalize_description_field_value(fields.get("hook_bead"))
+        return None if hooked_epic is None else HookRecord(agent_id=agent_id, epic_id=hooked_epic)
+
+    def _require_agent_identifier(self, issue: IssueRecord) -> str:
+        agent_id = self._agent_identifier(issue)
+        if agent_id is None:
+            raise ValueError(f"agent issue missing agent identifier: {issue.id}")
+        return agent_id
+
+    def _agent_identifier(self, issue: IssueRecord) -> str | None:
+        title = _clean_text(issue.title)
+        if title is not None:
+            return title
+        fields = beads_metadata.parse_description_fields(issue.description or "")
+        return _clean_text(fields.get("agent_id"))
 
     async def _transition_issue_kind(
         self,
