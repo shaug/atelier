@@ -1,5 +1,61 @@
 # Changelog
 
+## [0.9.0](https://github.com/shaug/atelier/compare/v0.8.3...v0.9.0) (2026-03-15)
+
+
+### Features
+
+* add store-native notes mutation ([5af6c22](https://github.com/shaug/atelier/commit/5af6c22046d42a61371c27ecab03fadcae7c3846))
+* **beads:** add process-backed client ([9d63b60](https://github.com/shaug/atelier/commit/9d63b6094e628ecbba5d05ad2edd180b5bdc500d))
+* **beads:** add sync wrappers and test doubles ([e08f92d](https://github.com/shaug/atelier/commit/e08f92df91c8fc175fc1e8e9782adfe1a241cbf1)), closes [#580](https://github.com/shaug/atelier/issues/580)
+* **messages:** define work-threaded coordination contract ([bf2ebe5](https://github.com/shaug/atelier/commit/bf2ebe54add6374c1086dff8a376562d8c476744))
+* **messages:** demote agent inbox routing to compatibility ([3f98151](https://github.com/shaug/atelier/commit/3f981519211bcaf38e32b86581cf1ca044f96bed)), closes [#594](https://github.com/shaug/atelier/issues/594)
+* migrate planner startup reads to AtelierStore ([e949d54](https://github.com/shaug/atelier/commit/e949d54a8d153df075aca46ca94f2d23a91c090c))
+* **planner:** enforce richer bead authoring contract ([#559](https://github.com/shaug/atelier/issues/559)) ([f209363](https://github.com/shaug/atelier/commit/f2093637c023926edb3ab9b092ca8b45925e48c0)), closes [#556](https://github.com/shaug/atelier/issues/556)
+* **planner:** migrate mailbox skills onto AtelierStore ([8954c84](https://github.com/shaug/atelier/commit/8954c84e0758f993ff4bfb9a1a077c76e51f10b4)), closes [#652](https://github.com/shaug/atelier/issues/652)
+* **planner:** require full promotion previews ([#562](https://github.com/shaug/atelier/issues/562)) ([f643765](https://github.com/shaug/atelier/commit/f6437658393cc25aaca1766f5c4622e25a5093f5)), closes [#557](https://github.com/shaug/atelier/issues/557)
+* **store:** add Beads-backed discovery reads ([94ef9ef](https://github.com/shaug/atelier/commit/94ef9efb08acfdb481330a6a5827a5f7f154e08c))
+* **store:** add lifecycle mutation adapter ([3954fbe](https://github.com/shaug/atelier/commit/3954fbefa10c749d14454548ee82febad026eee0))
+* **store:** migrate planner authoring mutations ([bdf8da3](https://github.com/shaug/atelier/commit/bdf8da399578582228de63abb7b4dbbf1c3a7ce9)), closes [#653](https://github.com/shaug/atelier/issues/653)
+* **store:** migrate planner mutation skills to AtelierStore ([feb3447](https://github.com/shaug/atelier/commit/feb344766b04e67acc02ba23e119128e8e8d3a26)), closes [#653](https://github.com/shaug/atelier/issues/653)
+* **testing:** define in-memory beads dispatcher harness ([7fd6ea6](https://github.com/shaug/atelier/commit/7fd6ea673bb9b634ff8f50a7c1c567489b0d6285)), closes [#467](https://github.com/shaug/atelier/issues/467)
+* **worker:** add north-star self-review contract ([#561](https://github.com/shaug/atelier/issues/561)) ([c9b616c](https://github.com/shaug/atelier/commit/c9b616ccbffee81cbc5b50049ad5602dc62168cf))
+* **worker:** capture restart runtime contract ([#572](https://github.com/shaug/atelier/issues/572)) ([0616125](https://github.com/shaug/atelier/commit/0616125374ec548468c8262ad6f2e4e964c47dcb)), closes [#569](https://github.com/shaug/atelier/issues/569)
+* **worker:** process work-threaded blocking messages ([3795ea4](https://github.com/shaug/atelier/commit/3795ea407e0fb3bb246a8a49c22e365c93fb81e7)), closes [#593](https://github.com/shaug/atelier/issues/593)
+* **worker:** restart at idle boundary after runtime updates ([#595](https://github.com/shaug/atelier/issues/595)) ([faaa738](https://github.com/shaug/atelier/commit/faaa738288b29ffe64b1298c77d9179f8654fdb3)), closes [#570](https://github.com/shaug/atelier/issues/570)
+
+
+### Bug Fixes
+
+* **beads:** gate json capability checks during inspection ([07c09db](https://github.com/shaug/atelier/commit/07c09db0dc3a976cadfd08af36c7f45a6bc5f5ba)), closes [#579](https://github.com/shaug/atelier/issues/579)
+* **dev:** pin local quality gates to python 3.11 ([0af5f5c](https://github.com/shaug/atelier/commit/0af5f5c2877cc92632a08033ab7e806de122be6d))
+* **gc:** normalize placeholder null bead ids ([#632](https://github.com/shaug/atelier/issues/632)) ([086d1c4](https://github.com/shaug/atelier/commit/086d1c497313fc7aa3c09564f9adea7bac20b72b))
+* **guardrails:** accept underscored re_split trigger notes ([327cc5e](https://github.com/shaug/atelier/commit/327cc5e032d5edc2a3420787a640c0784ee11cc8)), closes [#656](https://github.com/shaug/atelier/issues/656)
+* **install:** recover invalid project venv ([83411ac](https://github.com/shaug/atelier/commit/83411ac435d9f76dc5ea6b173332e4eaad145931))
+* **messages:** infer epic thread kind for top-level work ids ([c6420ad](https://github.com/shaug/atelier/commit/c6420adef44e5cb00c5477d951fee26c403dd8fa))
+* **planner-startup:** harden projected skill runtime ([d5b7c23](https://github.com/shaug/atelier/commit/d5b7c2312e38f15a0c2059126c075082054e2c7a)), closes [#605](https://github.com/shaug/atelier/issues/605)
+* **planner:** accept structured guardrail authoring fields ([#637](https://github.com/shaug/atelier/issues/637)) ([844d54f](https://github.com/shaug/atelier/commit/844d54f092316662b5a691d16177dae19d3bbc2e)), closes [#634](https://github.com/shaug/atelier/issues/634)
+* **planner:** clarify issue owner vs assignee ([ff10a06](https://github.com/shaug/atelier/commit/ff10a06064e2640427baedf4dd906ea90aa2a51c))
+* **planner:** harden ownership helper runtime ([261353c](https://github.com/shaug/atelier/commit/261353c00d886129cd5cb5b016d3582bf7e7c805))
+* **planner:** keep startup compatibility reads adapter-local ([d835a06](https://github.com/shaug/atelier/commit/d835a06732523699661125352125b50735dd6e6c))
+* **planner:** move startup message compatibility reads into store ([5e116d7](https://github.com/shaug/atelier/commit/5e116d7d505a37e530eb82fb70664dec373badf5)), closes [#651](https://github.com/shaug/atelier/issues/651)
+* **planner:** preserve inbox startup routing after rebase ([f15f369](https://github.com/shaug/atelier/commit/f15f369fd824a0c63aa231bd63524d8c7ec76002))
+* preserve guardrails script default cwd behavior ([7697367](https://github.com/shaug/atelier/commit/7697367a29d1e602aa47641f5793ad2a304033c9))
+* **publish:** close exported GitHub issues from PR bodies ([#609](https://github.com/shaug/atelier/issues/609)) ([1afffc8](https://github.com/shaug/atelier/commit/1afffc89339773ffa78885354813b3009eb6bbd5)), closes [#607](https://github.com/shaug/atelier/issues/607)
+* repair planner helper runtime preflight for broken tool installs ([11bb37e](https://github.com/shaug/atelier/commit/11bb37e7aad49e0fba0c2d80edc17680235d222d))
+* **runtime:** isolate projected skill dependency provenance ([1ffab95](https://github.com/shaug/atelier/commit/1ffab9560ad5990d7812102b4a2d9bf026d11594))
+* **runtime:** stabilize projected repo python detection ([89e420d](https://github.com/shaug/atelier/commit/89e420dbf69f81054e96af992b6556004cd12ad3))
+* **skills:** package shared projected bootstrap tree ([#642](https://github.com/shaug/atelier/issues/642)) ([4d7ac6e](https://github.com/shaug/atelier/commit/4d7ac6e2965d014704b1ac57379c5fe862a8252f)), closes [#640](https://github.com/shaug/atelier/issues/640)
+* **skills:** preserve PR base on update ([bcd4ac9](https://github.com/shaug/atelier/commit/bcd4ac95511bebb2d121b0c864b406f7b5e5df9e)), closes [#599](https://github.com/shaug/atelier/issues/599)
+* **store:** collapse the public store boundary ([e2b42be](https://github.com/shaug/atelier/commit/e2b42be4249b8a7b1440c71c212173f702104111))
+* **store:** keep message recipient hints adapter-local ([3ef96eb](https://github.com/shaug/atelier/commit/3ef96eb93e0c7c1be388e1f09e7ff294010b7562))
+* **store:** keep the public store boundary abstract ([39e9fb4](https://github.com/shaug/atelier/commit/39e9fb484bbda5f77b05933e0cfdcc6af3d8bf36))
+* **store:** remove extra public store protocol ([3e8b568](https://github.com/shaug/atelier/commit/3e8b5689faa3b960f838b8d4e11aadfe4b92500f))
+* **worker:** demote stale hooked epics at startup ([3171b9b](https://github.com/shaug/atelier/commit/3171b9bf7f320eaa928a51b3dbc10867fcd0d534))
+* **worker:** enforce bead-first review-feedback ordering ([#567](https://github.com/shaug/atelier/issues/567)) ([41d7b41](https://github.com/shaug/atelier/commit/41d7b41a5ef466e7df553edd8dda81b051a85592))
+* **worker:** preserve changeset review metadata during finalize ([#638](https://github.com/shaug/atelier/issues/638)) ([387a0e1](https://github.com/shaug/atelier/commit/387a0e1932a6fe1a44dd416b05e2c5778f55eac6)), closes [#636](https://github.com/shaug/atelier/issues/636)
+* **worker:** tighten startup review-followup diagnostics ([9f82f4d](https://github.com/shaug/atelier/commit/9f82f4db64079e12e9d8a20a1b59c8056fd32688)), closes [#661](https://github.com/shaug/atelier/issues/661)
+
 ## [0.8.3](https://github.com/shaug/atelier/compare/v0.8.2...v0.8.3) (2026-03-06)
 
 ### Bug Fixes
