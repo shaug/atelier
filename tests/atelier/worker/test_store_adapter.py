@@ -835,6 +835,36 @@ def test_list_inbox_messages_skips_merged_changeset_threads(monkeypatch) -> None
     worker_store.clear_bundle_cache()
 
 
+def test_list_inbox_messages_keeps_open_changeset_threads_with_closed_pr_state(
+    monkeypatch,
+) -> None:
+    builder = IssueFixtureBuilder()
+    _patch_bundle(
+        monkeypatch,
+        issues=(
+            builder.issue("at-epic", issue_type="epic", labels=("at:epic",), status="open"),
+            builder.issue(
+                "at-epic.1",
+                issue_type="task",
+                parent="at-epic",
+                status="open",
+                description="pr_state: closed\n",
+            ),
+            _worker_message(builder, "at-msg", thread_id="at-epic.1"),
+        ),
+    )
+
+    inbox = worker_store.list_inbox_messages(
+        "atelier/worker/codex/p100",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert len(inbox) == 1
+    assert inbox[0]["id"] == "at-msg"
+    worker_store.clear_bundle_cache()
+
+
 def test_list_inbox_messages_skips_closed_epic_threads(monkeypatch) -> None:
     builder = IssueFixtureBuilder()
     _patch_bundle(

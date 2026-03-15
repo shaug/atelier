@@ -1083,8 +1083,6 @@ def _startup_message_thread_is_terminal(
     review_state = changeset_fields.review_state(issue)
     if lifecycle.is_integrated_review_state(review_state):
         return True
-    if lifecycle.is_terminal_review_without_integration(review_state):
-        return True
     fields = changeset_fields.issue_fields(issue)
     return changeset_fields.normalized_field(fields, "changeset.integrated_sha") is not None
 
