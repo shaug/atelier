@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from atelier import messages, planner_startup_check
-from atelier.store import build_atelier_store
+from atelier.store import StartupMessageRecord, build_atelier_store
 from atelier.testing.beads import (
     IssueFixtureBuilder,
     build_in_memory_beads_client,
@@ -101,19 +101,21 @@ def test_startup_helper_surfaces_threaded_planner_decisions_without_assignee() -
         beads_root=Path("/beads"),
         cwd=Path("/repo"),
     )
-    fake_message = SimpleNamespace(
+    fake_message = StartupMessageRecord(
         id="at-msg-1",
         title="NEEDS-DECISION: Publish incomplete (at-epic.1)",
         body="Confirm the next publish step.",
         thread_id="at-epic.1",
-        thread_kind=SimpleNamespace(value="changeset"),
+        thread_kind="changeset",
         kind="notification",
         audience=("planner",),
+        queue=None,
+        claimed_by=None,
         blocking_roles=("planner",),
     )
 
     class _FakeStore:
-        async def list_messages(self, _query):
+        async def list_startup_messages(self, _query):
             return (fake_message,)
 
     object.__setattr__(helper, "_store_cache", _FakeStore())
@@ -125,13 +127,13 @@ def test_startup_helper_surfaces_threaded_planner_decisions_without_assignee() -
     assert "at-epic.1" in str(messages_for_planner[0]["title"])
 
 
-def test_startup_helper_uses_private_startup_message_projection_when_available() -> None:
+def test_startup_helper_uses_typed_startup_message_projection() -> None:
     helper = planner_startup_check.StartupBeadsInvocationHelper(
         beads_root=Path("/beads"),
         cwd=Path("/repo"),
     )
 
-    fake_message = SimpleNamespace(
+    fake_message = StartupMessageRecord(
         id="at-msg-assigned",
         title="Assigned planner note",
         body="Direct assignee routing.",
@@ -145,7 +147,7 @@ def test_startup_helper_uses_private_startup_message_projection_when_available()
     )
 
     class _FakeStore:
-        async def _list_startup_messages(self, _query):
+        async def list_startup_messages(self, _query):
             return (fake_message,)
 
     object.__setattr__(helper, "_store_cache", _FakeStore())

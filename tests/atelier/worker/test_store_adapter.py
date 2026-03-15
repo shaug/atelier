@@ -2,7 +2,7 @@ from pathlib import Path
 
 from atelier.lib.beads import SyncBeadsClient
 from atelier.messages import render_message
-from atelier.store import build_atelier_store
+from atelier.store import StartupMessageRecord, build_atelier_store
 from atelier.testing.beads import IssueFixtureBuilder
 from atelier.testing.beads.client import build_in_memory_beads_client
 from atelier.worker import store_adapter as worker_store
@@ -143,6 +143,54 @@ def test_list_work_children_filters_non_work_children(monkeypatch) -> None:
     )
 
     assert [child["id"] for child in children] == ["at-epic.1"]
+    worker_store.clear_bundle_cache()
+
+
+def test_list_inbox_messages_uses_typed_startup_store_method(monkeypatch) -> None:
+    class _FakeStore:
+        async def list_startup_messages(self, _query):
+            return (
+                StartupMessageRecord(
+                    id="at-msg",
+                    title="Worker instruction",
+                    body="Follow these instructions.",
+                    thread_id="at-epic.1",
+                    thread_kind="changeset",
+                    audience=("worker",),
+                    kind="instruction",
+                    blocking_roles=("worker",),
+                ),
+            )
+
+        async def list_messages(self, _query):
+            raise AssertionError("list_messages fallback should not be used")
+
+    monkeypatch.setattr(
+        worker_store,
+        "_build_store_bundle",
+        lambda **_kwargs: worker_store._StoreBundle(  # pyright: ignore[reportPrivateUsage]
+            store=_FakeStore(),
+            sync_client=SyncBeadsClient(build_in_memory_beads_client()[0]),
+        ),
+    )
+    monkeypatch.setattr(
+        worker_store,
+        "_show_issue",
+        lambda **_kwargs: {
+            "id": "at-epic.1",
+            "status": "open",
+            "labels": ["at:changeset"],
+        },
+    )
+    worker_store.clear_bundle_cache()
+
+    inbox = worker_store.list_inbox_messages(
+        "atelier/worker/codex/p100",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert [item["id"] for item in inbox] == ["at-msg"]
     worker_store.clear_bundle_cache()
 
 

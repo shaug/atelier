@@ -33,6 +33,7 @@ from .models import (
     MessageThreadKind,
     ReviewMetadata,
     ReviewState,
+    StartupMessageRecord,
     WorkItemKind,
     WorkRef,
 )
@@ -67,6 +68,7 @@ __all__ = [
     "ReviewMetadata",
     "ReviewState",
     "SetHookRequest",
+    "StartupMessageRecord",
     "UpdateReviewRequest",
     "WorkItemKind",
     "WorkRef",

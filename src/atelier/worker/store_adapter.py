@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import subprocess
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -36,6 +36,7 @@ from ..store import (
     MessageThreadKind,
     ReadyChangesetQuery,
     SetHookRequest,
+    StartupMessageRecord,
     build_atelier_store,
 )
 from . import selection as worker_selection
@@ -689,20 +690,14 @@ def _startup_messages(
     repo_root: Path,
     queue: str | None = None,
     unread_only: bool = True,
-) -> tuple[object, ...]:
+) -> tuple[StartupMessageRecord, ...]:
     bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
     query = MessageQuery(queue=queue, unread_only=unread_only)
-    startup_loader = cast(
-        Callable[[MessageQuery], Coroutine[object, object, tuple[object, ...]]] | None,
-        getattr(bundle.store, "_list_startup_messages", None),
-    )
-    if startup_loader is not None:
-        return asyncio.run(startup_loader(query))
-    return cast(tuple[object, ...], asyncio.run(bundle.store.list_messages(query)))
+    return asyncio.run(bundle.store.list_startup_messages(query))
 
 
 def _startup_message_thread_is_terminal(
-    record: object,
+    record: StartupMessageRecord,
     *,
     beads_root: Path,
     repo_root: Path,
@@ -714,15 +709,15 @@ def _startup_message_thread_is_terminal(
     the message from inbox gating.
     """
 
-    thread_id = getattr(record, "thread_id", None)
-    if not isinstance(thread_id, str) or not thread_id.strip():
+    thread_id = record.thread_id
+    if thread_id is None:
         return False
-    thread_kind = getattr(record, "thread_kind", None)
+    thread_kind = record.thread_kind
     if thread_kind not in {MessageThreadKind.CHANGESET, MessageThreadKind.EPIC}:
         return False
     try:
         issue = _show_issue(
-            issue_id=thread_id.strip(),
+            issue_id=thread_id,
             beads_root=beads_root,
             repo_root=repo_root,
         )
@@ -757,13 +752,13 @@ def list_inbox_messages(
             repo_root=repo_root,
         ):
             continue
-        if getattr(record, "queue", None):
+        if record.queue:
             continue
-        blocking_roles = tuple(getattr(record, "blocking_roles", ()))
-        audience = tuple(getattr(record, "audience", ()))
+        blocking_roles = record.blocking_roles
+        audience = record.audience
         if runtime_role not in set(blocking_roles) | set(audience):
             continue
-        matches.append({"id": getattr(record, "id"), "title": getattr(record, "title")})
+        matches.append({"id": record.id, "title": record.title})
     return matches
 
 
@@ -784,14 +779,14 @@ def list_queue_messages(
         queue=queue,
         unread_only=unread_only,
     ):
-        claimed_by = getattr(record, "claimed_by", None)
+        claimed_by = record.claimed_by
         if unclaimed_only and claimed_by:
             continue
         matches.append(
             {
-                "id": getattr(record, "id"),
-                "title": getattr(record, "title"),
-                "queue": getattr(record, "queue", None) or "queue",
+                "id": record.id,
+                "title": record.title,
+                "queue": record.queue or "queue",
                 "claimed_by": claimed_by,
             }
         )
@@ -925,10 +920,7 @@ class WorkerStoreBeadsAdapter:
                     queue=queue,
                     unread_only=unread_only,
                 ):
-                    issue_id = getattr(record, "id", None)
-                    if not isinstance(issue_id, str):
-                        continue
-                    payload = show_issue(issue_id, beads_root=beads_root, repo_root=cwd)
+                    payload = show_issue(record.id, beads_root=beads_root, repo_root=cwd)
                     if payload is not None:
                         payloads.append(payload)
                 return payloads

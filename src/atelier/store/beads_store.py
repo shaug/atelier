@@ -57,6 +57,7 @@ from .models import (
     MessageThreadKind,
     ReviewMetadata,
     ReviewState,
+    StartupMessageRecord,
     WorkItemKind,
     WorkRef,
 )
@@ -329,22 +330,6 @@ class _ReadState:
         )
 
 
-@dataclass(frozen=True)
-class _StartupMessageProjection:
-    """Startup-only message projection kept out of the public store contract."""
-
-    id: str
-    title: str
-    body: str
-    thread_id: str | None
-    thread_kind: MessageThreadKind | None
-    audience: tuple[str, ...]
-    kind: str | None
-    queue: str | None
-    claimed_by: str | None
-    blocking_roles: tuple[str, ...]
-
-
 class AtelierStore:
     """Concrete Atelier planning store backed by the typed async Beads client.
 
@@ -508,13 +493,21 @@ class AtelierStore:
             records.append(record)
         return tuple(records)
 
-    async def _list_startup_messages(
+    async def list_startup_messages(
         self,
         query: MessageQuery = MessageQuery(),
-    ) -> tuple[_StartupMessageProjection, ...]:
+    ) -> tuple[StartupMessageRecord, ...]:
+        """List startup routing projections for inbox and queue handling.
+
+        Args:
+            query: Startup message filter criteria.
+
+        Returns:
+            Startup-specific validated message projections.
+        """
         state = _ReadState(self)
         issues = await state.scan_issues(include_closed=False)
-        records: list[_StartupMessageProjection] = []
+        records: list[StartupMessageRecord] = []
         for issue in issues:
             if not self._matches_issue_kind(issue, "message"):
                 continue
@@ -523,7 +516,7 @@ class AtelierStore:
                 "unread",
             ):
                 continue
-            record = self._startup_message_projection(issue)
+            record = self._startup_message_record(issue)
             if record is None:
                 continue
             if query.thread_id is not None and record.thread_id != query.thread_id:
@@ -1170,7 +1163,7 @@ class AtelierStore:
             claimed_at=_clean_text(contract.metadata.get("claimed_at")),
         )
 
-    def _startup_message_projection(self, issue: IssueRecord) -> _StartupMessageProjection | None:
+    def _startup_message_record(self, issue: IssueRecord) -> StartupMessageRecord | None:
         if not self._matches_issue_kind(issue, "message"):
             return None
         contract = messages.parse_message_contract(issue.description or "", assignee=issue.assignee)
@@ -1184,7 +1177,7 @@ class AtelierStore:
         if contract.delivery == "work-threaded":
             if thread_kind is None:
                 return None
-            return _StartupMessageProjection(
+            return StartupMessageRecord(
                 id=issue.id,
                 title=issue.title or issue.id,
                 body=contract.body,
@@ -1201,7 +1194,7 @@ class AtelierStore:
         claimed_by = _clean_text(contract.metadata.get("claimed_by"))
         if queue_name and claimed_by is None:
             claimed_by = _clean_text(issue.assignee)
-        return _StartupMessageProjection(
+        return StartupMessageRecord(
             id=issue.id,
             title=issue.title or issue.id,
             body=contract.body,

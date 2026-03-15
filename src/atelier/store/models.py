@@ -180,6 +180,26 @@ class MessageRecord(StoreModel):
         return self
 
 
+class StartupMessageRecord(StoreModel):
+    """Startup-specific message projection for routing and gating reads."""
+
+    id: Identifier
+    title: Identifier
+    body: str = ""
+    thread_id: Identifier | None = None
+    thread_kind: MessageThreadKind | None = None
+    audience: tuple[Identifier, ...] = ()
+    kind: Identifier | None = None
+    queue: Identifier | None = None
+    claimed_by: Identifier | None = None
+    blocking_roles: tuple[Identifier, ...] = ()
+
+    @field_validator("audience", "blocking_roles")
+    @classmethod
+    def _dedupe_startup_roles(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _dedupe_identifiers(value)
+
+
 class HookRecord(StoreModel):
     """Agent-to-epic hook ownership tracked by the store contract."""
 
@@ -243,6 +263,7 @@ __all__ = [
     "MessageThreadKind",
     "ReviewMetadata",
     "ReviewState",
+    "StartupMessageRecord",
     "StoreModel",
     "WorkItemKind",
     "WorkRef",

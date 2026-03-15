@@ -44,6 +44,7 @@ from atelier.store import (
     ReviewMetadata,
     ReviewState,
     SetHookRequest,
+    StartupMessageRecord,
     UpdateReviewRequest,
     WorkItemKind,
     WorkRef,
@@ -72,6 +73,7 @@ _STORE_METHOD_NAMES = (
     "list_changesets",
     "list_ready_changesets",
     "list_messages",
+    "list_startup_messages",
     "get_agent_hook",
     "add_dependency",
     "remove_dependency",
@@ -197,6 +199,19 @@ def test_message_record_requires_work_thread_identity() -> None:
 def test_store_message_contract_only_exposes_durable_threaded_path() -> None:
     assert tuple(item.value for item in MessageDelivery) == ("work-threaded",)
     assert tuple(item.value for item in MessageThreadKind) == ("changeset", "epic")
+
+
+def test_startup_message_record_allows_startup_routing_metadata() -> None:
+    record = StartupMessageRecord(
+        id="msg-startup",
+        title="Assigned planner note",
+        body="Direct assignee routing.",
+        audience=("planner", "planner"),
+        blocking_roles=("planner", "planner"),
+    )
+
+    assert record.audience == ("planner",)
+    assert record.blocking_roles == ("planner",)
 
 
 def test_store_contract_stays_above_the_beads_client_layer() -> None:
@@ -1098,6 +1113,66 @@ def test_store_get_agent_hook_prefers_slot_value_when_available() -> None:
     hook = _RUN(store.get_agent_hook("atelier/worker/agent"))
 
     assert hook == HookRecord(agent_id="atelier/worker/agent", epic_id="at-slot")
+
+
+def test_store_list_startup_messages_returns_validated_startup_projection() -> None:
+    store = _store_for(
+        BUILDER.issue(
+            "msg-worker",
+            title="Worker instruction",
+            issue_type="message",
+            labels=("at:message", "at:unread"),
+            description=render_message(
+                {
+                    "from": "atelier/planner/codex/p200",
+                    "delivery": "work-threaded",
+                    "thread": "at-epic.1",
+                    "thread_kind": "changeset",
+                    "audience": ["worker"],
+                    "kind": "instruction",
+                    "blocking": True,
+                },
+                "Follow these instructions.",
+            ),
+        ),
+        BUILDER.issue(
+            "msg-queue",
+            title="Queue planner work",
+            issue_type="message",
+            labels=("at:message", "at:unread"),
+            assignee="atelier/planner/codex/p200",
+            description=render_message({"queue": "planner"}, "Need a decision."),
+        ),
+    )
+
+    records = _RUN(store.list_startup_messages(MessageQuery(unread_only=True)))
+
+    assert records == (
+        StartupMessageRecord(
+            id="msg-worker",
+            title="Worker instruction",
+            body="Follow these instructions.",
+            thread_id="at-epic.1",
+            thread_kind=MessageThreadKind.CHANGESET,
+            audience=("worker",),
+            kind="instruction",
+            queue=None,
+            claimed_by=None,
+            blocking_roles=("worker",),
+        ),
+        StartupMessageRecord(
+            id="msg-queue",
+            title="Queue planner work",
+            body="Need a decision.",
+            thread_id=None,
+            thread_kind=None,
+            audience=("planner",),
+            kind=None,
+            queue="planner",
+            claimed_by="atelier/planner/codex/p200",
+            blocking_roles=(),
+        ),
+    )
 
 
 def test_store_get_agent_hook_falls_back_when_agent_id_show_reports_no_match(
