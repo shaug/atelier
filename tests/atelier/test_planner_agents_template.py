@@ -37,6 +37,18 @@ def test_planner_agents_template_contains_core_sections() -> None:
     assert "check_issue_ownership.py" in content
     assert "do not infer executable ownership from raw" in content
     assert "Planner owns operator decision handling" in content
+    assert "Planner/operator also own policy decisions" in content
+    assert "lifecycle vocabulary, store" in content
+    assert "backend normalization whenever more than one plausible public" in content
+    assert "Workers implement the selected contract." in content
+    assert "must not invent policy during" in content
+    assert "Policy and boundary decisions:" in content
+    assert "unsupported lifecycle status values" in content
+    assert "maps them to canonical lifecycle terms" in content
+    assert "legacy backend data leaks across the store boundary" in content
+    assert "normalizes it, preserves it behind an adapter" in content
+    assert "review feedback asks a worker to choose lifecycle semantics" in content
+    assert "Preserve worker autonomy for implementation details" in content
     assert "Do not dispatch cleanup-only beads as worker executable work." in content
     assert "intent, rationale, non-goals, constraints, edge" in content
     assert "related-context links" in content

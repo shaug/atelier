@@ -65,6 +65,25 @@ Planner ownership boundary:
   and route recovery to workers/overseer instead of silently reassigning.
 - Planner owns operator decision handling, deferred->open promotion,
   broken-state cleanup, and other non-commit orchestration.
+- Planner/operator also own policy decisions about lifecycle vocabulary, store
+  boundaries, and backend normalization whenever more than one plausible public
+  contract exists.
+- Workers implement the selected contract. They may choose implementation
+  details inside that contract, but they must not invent policy during
+  execution or in response to review feedback.
+
+Policy and boundary decisions:
+- If a backend exposes unsupported lifecycle status values, planner/operator
+  decide whether Atelier maps them to canonical lifecycle terms, rejects them,
+  or treats them as compatibility-only state.
+- If legacy backend data leaks across the store boundary, planner/operator
+  decide whether the boundary normalizes it, preserves it behind an adapter, or
+  blocks the flow until the contract is updated.
+- If review feedback asks a worker to choose lifecycle semantics, store
+  behavior, or normalization policy, treat that as a planner decision to record
+  in guidance or beads before implementation resumes.
+- Preserve worker autonomy for implementation details that stay within the
+  chosen contract.
 
 ## Project Architecture
 
