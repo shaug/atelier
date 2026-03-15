@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import hashlib
 import json
@@ -6162,33 +6163,48 @@ def update_changeset_review(
     Returns:
         The refreshed issue payload after the update.
     """
-    with _issue_write_lock(changeset_id, beads_root=beads_root):
-        fields = {
-            "pr_url": metadata.pr_url,
-            "pr_number": metadata.pr_number,
-            "pr_state": metadata.pr_state,
-            "review_owner": metadata.review_owner,
-        }
-        if preserve_missing:
-            issues = run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=cwd)
-            if not issues:
-                die(f"changeset not found: {changeset_id}")
-            issue = issues[0]
-            existing = changesets.parse_review_metadata(_issue_description(issue))
-            if metadata.pr_url is None:
-                fields["pr_url"] = existing.pr_url
-            if metadata.pr_number is None:
-                fields["pr_number"] = existing.pr_number
-            if metadata.pr_state is None:
-                fields["pr_state"] = existing.pr_state
-            if metadata.review_owner is None:
-                fields["review_owner"] = existing.review_owner
-        return _update_description_fields_optimistic(
-            changeset_id,
-            fields=fields,
-            beads_root=beads_root,
-            cwd=cwd,
+    from .lib.beads import SubprocessBeadsClient
+    from .store import (
+        ReviewMetadata as StoreReviewMetadata,
+    )
+    from .store import (
+        ReviewState,
+        UpdateReviewRequest,
+        build_atelier_store,
+    )
+
+    normalized_pr_number: int | None = None
+    raw_pr_number = metadata.pr_number.strip() if metadata.pr_number is not None else None
+    if raw_pr_number and raw_pr_number.isdigit():
+        parsed_pr_number = int(raw_pr_number)
+        if parsed_pr_number > 0:
+            normalized_pr_number = parsed_pr_number
+    normalized_pr_state = lifecycle.normalize_review_state(metadata.pr_state)
+    normalized_review = StoreReviewMetadata(
+        pr_url=_clean_text(metadata.pr_url),
+        pr_number=normalized_pr_number,
+        pr_state=ReviewState(normalized_pr_state) if normalized_pr_state else None,
+        review_owner=_clean_text(metadata.review_owner),
+    )
+    client = SubprocessBeadsClient(
+        cwd=cwd,
+        beads_root=beads_root,
+        env={"BEADS_DIR": str(beads_root)},
+    )
+    store = build_atelier_store(beads=client)
+    asyncio.run(
+        store.update_review(
+            UpdateReviewRequest(
+                changeset_id=changeset_id,
+                review=normalized_review,
+                preserve_existing=preserve_missing,
+            )
         )
+    )
+    issues = run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        die(f"changeset not found: {changeset_id}")
+    return issues[0]
 
 
 def update_changeset_review_feedback_cursor(

@@ -2,7 +2,7 @@
 name: changeset-review
 description: >-
   Update changeset review metadata fields (pr_url, pr_number, pr_state,
-  review_owner) in a changeset bead description.
+  review_owner) through the AtelierStore review contract.
 ---
 
 # Changeset review update
@@ -20,12 +20,13 @@ description: >-
 
 1. Show the changeset bead:
    - `bd show <changeset_id>`
-1. Update the description fields (`pr_url`, `pr_number`, `pr_state`,
-   `review_owner`).
+1. Persist the review metadata through AtelierStore-owned review update
+   operations rather than editing Beads-shaped description fields directly.
 1. Keep lifecycle status authoritative
    (`deferred|open|in_progress|blocked|closed`). `cs:*` lifecycle labels are not
    execution gates.
-1. Write the new description with `bd update <changeset_id> --body-file <path>`.
+1. Verify the resulting changeset still exposes the expected `pr_url`,
+   `pr_number`, `pr_state`, and `review_owner` fields when read back.
 
 ## Verification
 
