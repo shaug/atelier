@@ -14,6 +14,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -171,12 +172,31 @@ class IssueRecord(BeadsModel):
 
     @field_validator("dependencies", "children", mode="before")
     @classmethod
-    def _coerce_refs(cls, value: object) -> object:
+    def _coerce_refs(cls, value: object, info: ValidationInfo) -> object:
         if value is None:
             return ()
         if not isinstance(value, (list, tuple)):
             raise ValueError("references must be a list or tuple")
+        if info.field_name == "dependencies":
+            return tuple(
+                IssueReference.model_validate(_normalize_dependency_entry(item)) for item in value
+            )
         return tuple(IssueReference.model_validate(item) for item in value)
+
+
+def _normalize_dependency_entry(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+    if "id" in value:
+        return value
+    depends_on_id = value.get("depends_on_id")
+    if not isinstance(depends_on_id, str) or not depends_on_id.strip():
+        depends_on_id = value.get("dependsOnId")
+    if not isinstance(depends_on_id, str) or not depends_on_id.strip():
+        return value
+    normalized = dict(value)
+    normalized["id"] = depends_on_id
+    return normalized
 
 
 class BeadsStartupState(BeadsModel):
