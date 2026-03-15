@@ -132,7 +132,6 @@ class CreateMessageRequest(StoreModel):
     body: str = ""
     delivery: MessageDelivery = MessageDelivery.WORK_THREADED
     sender: Identifier | None = None
-    recipient: Identifier | None = None
     thread_id: Identifier | None = None
     thread_kind: MessageThreadKind | None = None
     audience: tuple[Identifier, ...] = ()

@@ -142,14 +142,12 @@ def test_work_threaded_messages_require_thread_identity() -> None:
     request = CreateMessageRequest(
         title="Need a decision",
         body="Choose one of the migration paths.",
-        recipient="atelier/planner/codex/p101",
         thread_id="at-123",
         thread_kind=MessageThreadKind.CHANGESET,
         audience=("planner", "planner"),
     )
 
     assert request.audience == ("planner",)
-    assert request.recipient == "atelier/planner/codex/p101"
 
 
 def test_append_notes_request_requires_non_empty_deduped_notes() -> None:
@@ -500,7 +498,6 @@ def _mutation_snapshot(backend: str) -> dict[str, object]:
                 title="NEEDS-DECISION: pick one",
                 body="Choose one migration path.",
                 sender="atelier/worker/codex/p100",
-                recipient="atelier/planner/codex/p200",
                 thread_id="at-change",
                 thread_kind=MessageThreadKind.CHANGESET,
                 audience=("planner",),
@@ -712,7 +709,7 @@ def test_store_dual_backend_mutation_snapshot_matches_expected_contract(backend:
             "queue": "planner",
             "audience": ("planner",),
             "blocking": True,
-            "assignee_hint": "atelier/planner/codex/p200",
+            "assignee_hint": None,
         },
         "marked_read": {
             "id": "msg-queue",
@@ -854,7 +851,6 @@ def test_beads_store_mutation_paths(operation: str) -> None:
                     title="NEEDS-DECISION: pick one",
                     body="Choose one migration path.",
                     sender="atelier/worker/codex/p100",
-                    recipient="atelier/planner/codex/p200",
                     thread_id="at-change",
                     thread_kind=MessageThreadKind.CHANGESET,
                     audience=("planner",),
