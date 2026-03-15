@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from atelier.lib.beads import SyncBeadsClient
+from atelier.lib.beads import IssueRecord, SyncBeadsClient
 from atelier.messages import render_message
 from atelier.store import StartupMessageRecord, build_atelier_store
 from atelier.testing.beads import IssueFixtureBuilder
@@ -146,6 +146,46 @@ def test_list_work_children_filters_non_work_children(monkeypatch) -> None:
     worker_store.clear_bundle_cache()
 
 
+def test_list_epics_uses_label_scoped_typed_scan(monkeypatch) -> None:
+    seen: list[tuple[tuple[str, ...], int | None, bool]] = []
+
+    class _FakeSyncClient:
+        def list(self, request):
+            seen.append((request.labels, request.limit, request.include_closed))
+            label = request.labels[0]
+            if label == "at:epic":
+                return (IssueRecord(id="at-epic", title="Primary", status="open"),)
+            return (IssueRecord(id="at-epic", title="Primary duplicate", status="open"),)
+
+    monkeypatch.setattr(
+        worker_store.beads,
+        "issue_label_candidates",
+        lambda *_args, **_kwargs: ("at:epic", "ts:epic"),
+    )
+    monkeypatch.setattr(
+        worker_store,
+        "_build_store_bundle",
+        lambda **_kwargs: worker_store._StoreBundle(  # pyright: ignore[reportPrivateUsage]
+            store=build_atelier_store(beads=build_in_memory_beads_client()[0]),
+            sync_client=_FakeSyncClient(),
+        ),
+    )
+    worker_store.clear_bundle_cache()
+
+    epics = worker_store.list_epics(
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        include_closed=True,
+    )
+
+    assert [epic["id"] for epic in epics] == ["at-epic"]
+    assert seen == [
+        (("at:epic",), 10_000, True),
+        (("ts:epic",), 10_000, True),
+    ]
+    worker_store.clear_bundle_cache()
+
+
 def test_list_inbox_messages_uses_typed_startup_store_method(monkeypatch) -> None:
     class _FakeStore:
         async def list_startup_messages(self, _query):
@@ -191,6 +231,35 @@ def test_list_inbox_messages_uses_typed_startup_store_method(monkeypatch) -> Non
     )
 
     assert [item["id"] for item in inbox] == ["at-msg"]
+    worker_store.clear_bundle_cache()
+
+
+def test_find_agent_bead_uses_unbounded_list_request_without_zero_limit(monkeypatch) -> None:
+    seen_limits: list[int | None] = []
+
+    class _FakeSyncClient:
+        def list(self, request):
+            seen_limits.append(request.limit)
+            return ()
+
+    monkeypatch.setattr(
+        worker_store,
+        "_build_store_bundle",
+        lambda **_kwargs: worker_store._StoreBundle(  # pyright: ignore[reportPrivateUsage]
+            store=build_atelier_store(beads=build_in_memory_beads_client()[0]),
+            sync_client=_FakeSyncClient(),
+        ),
+    )
+    worker_store.clear_bundle_cache()
+
+    bead = worker_store.find_agent_bead(
+        "atelier/worker/codex/p100",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert bead is None
+    assert seen_limits == [None]
     worker_store.clear_bundle_cache()
 
 

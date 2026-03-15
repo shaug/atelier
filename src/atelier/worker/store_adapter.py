@@ -29,7 +29,6 @@ from ..store import (
     ClaimMessageRequest,
     ClearHookRequest,
     CreateMessageRequest,
-    EpicQuery,
     LifecycleStatus,
     MarkMessageReadRequest,
     MessageQuery,
@@ -44,7 +43,7 @@ from . import selection as worker_selection
 _SHOW_JSON_SUFFIX = ("show",)
 _READY_JSON_ARGS = ("ready",)
 _LIST_JSON_PREFIX = ("list",)
-_UNLIMITED_LIST_LIMIT = 0
+_EPIC_LABEL_SCAN_LIMIT = 10_000
 
 
 @dataclass(frozen=True)
@@ -138,15 +137,30 @@ def list_epics(
     repo_root: Path,
     include_closed: bool = False,
 ) -> list[dict[str, object]]:
-    """List executable epics through AtelierStore, then hydrate raw payloads."""
+    """List executable epics via typed label-scoped reads."""
 
     bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
-    records = asyncio.run(bundle.store.list_epics(EpicQuery(include_closed=include_closed)))
-    return _store_ids_to_payloads(
-        [record.id for record in records],
-        beads_root=beads_root,
-        repo_root=repo_root,
-    )
+    payloads: list[dict[str, object]] = []
+    seen_ids: set[str] = set()
+    for label in beads.issue_label_candidates("epic", beads_root=beads_root):
+        records = bundle.sync_client.list(
+            ListIssuesRequest(
+                labels=(label,),
+                include_closed=include_closed,
+                limit=_EPIC_LABEL_SCAN_LIMIT,
+            )
+        )
+        if len(records) >= _EPIC_LABEL_SCAN_LIMIT:
+            raise RuntimeError(
+                "epic label scan reached the configured limit "
+                f"({_EPIC_LABEL_SCAN_LIMIT}) for {label!r}"
+            )
+        for record in records:
+            if record.id in seen_ids:
+                continue
+            seen_ids.add(record.id)
+            payloads.append(_issue_payload(record))
+    return payloads
 
 
 def list_descendant_changesets(
@@ -224,7 +238,7 @@ def _find_agent_candidates(
             labels=(label,),
             title_query=agent_id,
             include_closed=True,
-            limit=_UNLIMITED_LIST_LIMIT,
+            limit=None,
         )
     )
     return tuple(_issue_payload(issue) for issue in issues)
