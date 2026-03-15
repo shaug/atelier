@@ -73,11 +73,14 @@ implementation is backed by Beads:
   dependency edges, but whether a dependency counts as satisfied is owned by
   Atelier lifecycle policy.
 - Durable message routing is an Atelier contract: store-level messages are
-  `work-threaded` on `epic|changeset` threads, and `thread_id`, `thread_kind`,
-  `audience`, `blocking`, `reply_to`, and queue claim metadata are stable store
-  concepts. `blocking_roles` is the normalized read-time routing decision used
-  by planner and worker startup flows. Assignee-delivery hints remain
-  adapter-local compatibility state rather than published store vocabulary.
+  `work-threaded` on `epic|changeset` threads for mutations, and read models may
+  also project legacy compatibility routing as `delivery=compatibility-routed`
+  while preserving normalized `audience`, `blocking_roles`, and queue claim
+  metadata. `thread_id`, `thread_kind`, `audience`, `blocking`, `reply_to`, and
+  queue claim metadata are stable store concepts. `blocking_roles` is the
+  normalized read-time routing decision used by planner and worker startup
+  flows. Assignee-delivery hints remain adapter-local compatibility state rather
+  than published store vocabulary.
 - Hook ownership is an Atelier contract binding one agent to one epic.
 - Lifecycle transitions are store mutations with canonical target states, not
   free-form status edits.

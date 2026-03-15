@@ -61,6 +61,7 @@ class MessageDelivery(str, Enum):
     """Delivery modes for coordination messages."""
 
     WORK_THREADED = "work-threaded"
+    COMPATIBILITY_ROUTED = "compatibility-routed"
 
 
 class MessageThreadKind(str, Enum):

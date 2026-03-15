@@ -896,28 +896,54 @@ class AtelierStore:
         if not self._matches_issue_kind(issue, "message"):
             return None
         contract = messages.parse_message_contract(issue.description or "", assignee=issue.assignee)
-        if contract.delivery != "work-threaded":
-            return None
-        if contract.thread_kind not in {"changeset", "epic"}:
-            return None
         routing = messages.work_thread_routing(issue.model_dump(mode="python", by_alias=True))
         status = lifecycle.canonical_lifecycle_status(issue.status)
         queue_name = _clean_text(contract.metadata.get("queue"))
+        if contract.delivery == "work-threaded":
+            if contract.thread_kind not in {"changeset", "epic"}:
+                return None
+            return MessageRecord(
+                id=issue.id,
+                title=issue.title or issue.id,
+                body=contract.body,
+                delivery=MessageDelivery.WORK_THREADED,
+                status=LifecycleStatus(status) if status else None,
+                sender=contract.sender,
+                thread_id=contract.thread_id,
+                thread_kind=MessageThreadKind(contract.thread_kind),
+                audience=tuple(contract.audience),
+                kind=contract.kind,
+                blocking=contract.blocking,
+                reply_to=contract.reply_to,
+                queue=queue_name,
+                claimed_by=_clean_text(contract.metadata.get("claimed_by")),
+                claimed_at=_clean_text(contract.metadata.get("claimed_at")),
+                blocking_roles=tuple(routing.blocking_roles),
+            )
+        if not (routing.audiences or queue_name or _clean_text(issue.assignee)):
+            return None
+        claimed_by = _clean_text(contract.metadata.get("claimed_by"))
+        if queue_name and claimed_by is None:
+            claimed_by = _clean_text(issue.assignee)
         return MessageRecord(
             id=issue.id,
             title=issue.title or issue.id,
             body=contract.body,
-            delivery=MessageDelivery.WORK_THREADED,
+            delivery=MessageDelivery.COMPATIBILITY_ROUTED,
             status=LifecycleStatus(status) if status else None,
             sender=contract.sender,
             thread_id=contract.thread_id,
-            thread_kind=MessageThreadKind(contract.thread_kind),
-            audience=tuple(contract.audience),
-            kind=contract.kind,
+            thread_kind=(
+                MessageThreadKind(contract.thread_kind)
+                if contract.thread_kind in {"changeset", "epic"}
+                else None
+            ),
+            audience=tuple(routing.audiences),
+            kind=routing.kind,
             blocking=contract.blocking,
             reply_to=contract.reply_to,
             queue=queue_name,
-            claimed_by=_clean_text(contract.metadata.get("claimed_by")),
+            claimed_by=claimed_by,
             claimed_at=_clean_text(contract.metadata.get("claimed_at")),
             blocking_roles=tuple(routing.blocking_roles),
         )

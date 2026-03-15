@@ -174,8 +174,24 @@ def test_message_record_enforces_store_message_contract() -> None:
     assert record.audience == ("worker", "planner")
 
 
+def test_compatibility_routed_message_record_allows_missing_thread_identity() -> None:
+    record = MessageRecord(
+        id="msg-compat",
+        title="Assigned planner note",
+        delivery=MessageDelivery.COMPATIBILITY_ROUTED,
+        audience=("planner",),
+        queue="planner",
+    )
+
+    assert record.thread_id is None
+    assert record.thread_kind is None
+
+
 def test_store_message_contract_only_exposes_durable_threaded_path() -> None:
-    assert tuple(item.value for item in MessageDelivery) == ("work-threaded",)
+    assert tuple(item.value for item in MessageDelivery) == (
+        "work-threaded",
+        "compatibility-routed",
+    )
     assert tuple(item.value for item in MessageThreadKind) == ("changeset", "epic")
 
 
@@ -226,6 +242,7 @@ def test_store_contract_docs_record_invariants_and_deferred_work() -> None:
     assert "single async store boundary" in store_doc
     assert "not part of `atelier.store`" in store_doc
     assert "adapter-local compatibility state" in store_doc
+    assert "compatibility-routed" in store_doc
     assert "implement `AtelierStore` itself" in store_doc
     assert "`atelier.lib.beads.Beads` remains the swappable boundary" in store_doc
     assert "Dual-Backend Proof" in store_doc
@@ -908,3 +925,33 @@ def test_beads_store_fails_closed() -> None:
         )
     with pytest.raises(UnsupportedOperationError, match="dep-add"):
         _RUN(store.add_dependency(DependencyMutation(issue_id="at-change", depends_on_id="at-dep")))
+
+
+def test_beads_store_lists_compatibility_routed_messages() -> None:
+    store = _store_for(
+        BUILDER.issue(
+            "msg-assigned",
+            title="Assigned planner note",
+            issue_type="message",
+            labels=("at:message", "at:unread"),
+            assignee="atelier/planner/codex/p200",
+            description="Direct assignee routing.",
+        ),
+        BUILDER.issue(
+            "msg-queue",
+            title="Queue planner work",
+            issue_type="message",
+            labels=("at:message", "at:unread"),
+            assignee="atelier/planner/codex/p200",
+            description=render_message({"queue": "planner"}, "Need a decision."),
+        ),
+    )
+
+    messages = _RUN(store.list_messages(MessageQuery(unread_only=True)))
+
+    assert [message.id for message in messages] == ["msg-assigned", "msg-queue"]
+    assert messages[0].delivery is MessageDelivery.COMPATIBILITY_ROUTED
+    assert messages[0].audience == ("planner",)
+    assert messages[0].thread_id is None
+    assert messages[1].queue == "planner"
+    assert messages[1].claimed_by == "atelier/planner/codex/p200"

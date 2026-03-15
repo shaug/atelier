@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import beads, lifecycle, messages
-from .lib.beads import Beads, ListIssuesRequest, SubprocessBeadsClient
+from .lib.beads import Beads, SubprocessBeadsClient
 from .store import ChangesetQuery, EpicQuery, MessageQuery, build_atelier_store
 
 _SUPPORTED_LIST_FLAGS = frozenset({"--label", "--assignee", "--all", "--limit", "--parent"})
@@ -586,94 +586,28 @@ class StartupBeadsInvocationHelper:
             object.__setattr__(self, "_store_cache", cached)
         return cached
 
-    def _beads_client(self) -> Beads:
-        cached = getattr(self, "_beads_client_cache", None)
-        if cached is None:
-            cached = _build_beads_client(beads_root=self.beads_root, cwd=self.cwd)
-            object.__setattr__(self, "_beads_client_cache", cached)
-        return cached
-
-    def _list_assignee_messages(
-        self,
-        agent_id: str,
-        *,
-        unread_only: bool,
-    ) -> list[dict[str, object]]:
-        labels = [beads.issue_label("message", beads_root=self.beads_root)]
-        if unread_only:
-            labels.append(beads.issue_label("unread", beads_root=self.beads_root))
-        issues = asyncio.run(
-            self._beads_client().list(ListIssuesRequest(labels=tuple(labels), include_closed=False))
-        )
-        matches: list[dict[str, object]] = []
-        for issue in issues:
-            if issue.assignee != agent_id:
-                continue
-            matches.append(
-                {
-                    "id": issue.id,
-                    "title": issue.title or issue.id,
-                }
-            )
-        return matches
-
-    def _list_compat_queue_messages(
-        self,
-        *,
-        queue: str | None,
-        unread_only: bool,
-    ) -> list[dict[str, object]]:
-        labels = [beads.issue_label("message", beads_root=self.beads_root)]
-        if unread_only:
-            labels.append(beads.issue_label("unread", beads_root=self.beads_root))
-        issues = asyncio.run(
-            self._beads_client().list(ListIssuesRequest(labels=tuple(labels), include_closed=False))
-        )
-        matches: list[dict[str, object]] = []
-        for issue in issues:
-            if not isinstance(issue.description, str):
-                continue
-            payload = messages.parse_message(issue.description)
-            queue_name = payload.metadata.get("queue")
-            if not isinstance(queue_name, str) or not queue_name.strip():
-                continue
-            if queue is not None and queue_name != queue:
-                continue
-            assignee_claim = issue.assignee.strip() if issue.assignee else None
-            claimed_by = payload.metadata.get("claimed_by")
-            normalized_claim = (
-                claimed_by.strip()
-                if isinstance(claimed_by, str) and claimed_by.strip()
-                else assignee_claim
-            )
-            matches.append(
-                {
-                    "id": issue.id,
-                    "title": issue.title or issue.id,
-                    "queue": queue_name,
-                    "claimed_by": normalized_claim,
-                }
-            )
-        return matches
-
     def list_inbox_messages(
         self,
         agent_id: str,
         *,
         unread_only: bool = True,
     ) -> list[dict[str, object]]:
-        """List planner inbox messages via store reads plus assignee fallback.
-
-        This preserves legacy assignee-routed compatibility messages while the
-        store-backed threaded path becomes the default planner read surface.
-        """
+        """List planner inbox messages via store-native message projections."""
 
         issues = asyncio.run(self._store().list_messages(MessageQuery(unread_only=unread_only)))
         matches: list[dict[str, object]] = []
         seen_ids: set[str] = set()
         for issue in issues:
             issue_id = issue.id
-            routed_attention = any(role in issue.blocking_roles for role in ("planner", "operator"))
+            if getattr(issue, "queue", None):
+                continue
+            routed_attention = any(
+                role in ("planner", "operator")
+                for role in (
+                    *tuple(getattr(issue, "blocking_roles", ())),
+                    *tuple(getattr(issue, "audience", ())),
+                )
+            )
             if not routed_attention:
                 continue
             title = _render_message_summary(issue).replace("\n", " | ")
@@ -681,12 +615,6 @@ class StartupBeadsInvocationHelper:
                 continue
             seen_ids.add(issue_id)
             matches.append({"id": issue.id, "title": title})
-        for issue in self._list_assignee_messages(agent_id, unread_only=unread_only):
-            issue_id = str(issue.get("id") or "").strip()
-            if not issue_id or issue_id in seen_ids:
-                continue
-            seen_ids.add(issue_id)
-            matches.append(issue)
         return matches
 
     def list_queue_messages(
@@ -702,12 +630,10 @@ class StartupBeadsInvocationHelper:
             self._store().list_messages(MessageQuery(queue=queue, unread_only=unread_only))
         )
         matches: list[dict[str, object]] = []
-        seen_ids: set[str] = set()
         for issue in issues:
             normalized_claim = issue.claimed_by
             if unclaimed_only and issue.claimed_by:
                 continue
-            seen_ids.add(issue.id)
             matches.append(
                 {
                     "id": issue.id,
@@ -716,14 +642,6 @@ class StartupBeadsInvocationHelper:
                     "claimed_by": normalized_claim,
                 }
             )
-        for issue in self._list_compat_queue_messages(queue=queue, unread_only=unread_only):
-            issue_id = str(issue.get("id") or "").strip()
-            if not issue_id or issue_id in seen_ids:
-                continue
-            if unclaimed_only and issue.get("claimed_by"):
-                continue
-            seen_ids.add(issue_id)
-            matches.append(issue)
         return matches
 
     def list_epics(self, *, include_closed: bool = False) -> list[dict[str, object]]:

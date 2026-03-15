@@ -116,12 +116,7 @@ def test_startup_helper_surfaces_threaded_planner_decisions_without_assignee() -
         async def list_messages(self, _query):
             return (fake_message,)
 
-    class _FakeClient:
-        async def list(self, _request):
-            return ()
-
     object.__setattr__(helper, "_store_cache", _FakeStore())
-    object.__setattr__(helper, "_beads_client_cache", _FakeClient())
 
     messages_for_planner = helper.list_inbox_messages("atelier/planner/codex/p200")
 
