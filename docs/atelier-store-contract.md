@@ -56,7 +56,6 @@ Planner startup and discovery migrations may also rely on:
 - `AtelierStore.epic_discovery_parity()`
 - `EpicRecord.root_branch`
 - `DependencyRecord.status`
-- `MessageRecord.blocking_roles`
 
 ## Atelier-Owned Invariants
 
@@ -73,14 +72,13 @@ implementation is backed by Beads:
   dependency edges, but whether a dependency counts as satisfied is owned by
   Atelier lifecycle policy.
 - Durable message routing is an Atelier contract: store-level messages are
-  `work-threaded` on `epic|changeset` threads for mutations, and read models may
-  also project legacy compatibility routing as `delivery=compatibility-routed`
-  while preserving normalized `audience`, `blocking_roles`, and queue claim
-  metadata. `thread_id`, `thread_kind`, `audience`, `blocking`, `reply_to`, and
-  queue claim metadata are stable store concepts. `blocking_roles` is the
-  normalized read-time routing decision used by planner and worker startup
-  flows. Assignee-delivery hints remain adapter-local compatibility state rather
-  than published store vocabulary.
+  `work-threaded` on `epic|changeset` threads. `thread_id`, `thread_kind`,
+  `audience`, `blocking`, `reply_to`, and queue claim metadata are stable store
+  concepts. Legacy assignee or queue compatibility routing may still be
+  projected inside adapter-local startup helpers, but those startup-only
+  compatibility projections are not part of `atelier.store`. Assignee-delivery
+  hints remain adapter-local compatibility state rather than published store
+  vocabulary.
 - Hook ownership is an Atelier contract binding one agent to one epic.
 - Lifecycle transitions are store mutations with canonical target states, not
   free-form status edits.

@@ -125,6 +125,36 @@ def test_startup_helper_surfaces_threaded_planner_decisions_without_assignee() -
     assert "at-epic.1" in str(messages_for_planner[0]["title"])
 
 
+def test_startup_helper_uses_private_startup_message_projection_when_available() -> None:
+    helper = planner_startup_check.StartupBeadsInvocationHelper(
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+
+    fake_message = SimpleNamespace(
+        id="at-msg-assigned",
+        title="Assigned planner note",
+        body="Direct assignee routing.",
+        thread_id=None,
+        thread_kind=None,
+        kind=None,
+        audience=("planner",),
+        queue=None,
+        claimed_by=None,
+        blocking_roles=(),
+    )
+
+    class _FakeStore:
+        async def _list_startup_messages(self, _query):
+            return (fake_message,)
+
+    object.__setattr__(helper, "_store_cache", _FakeStore())
+
+    messages_for_planner = helper.list_inbox_messages("atelier/planner/codex/p200")
+
+    assert [issue["id"] for issue in messages_for_planner] == ["at-msg-assigned"]
+
+
 def test_startup_helper_uses_in_memory_backend_for_inbox_queue_and_epic_queries(
     monkeypatch,
     tmp_path: Path,

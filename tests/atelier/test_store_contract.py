@@ -174,24 +174,19 @@ def test_message_record_enforces_store_message_contract() -> None:
     assert record.audience == ("worker", "planner")
 
 
-def test_compatibility_routed_message_record_allows_missing_thread_identity() -> None:
-    record = MessageRecord(
-        id="msg-compat",
-        title="Assigned planner note",
-        delivery=MessageDelivery.COMPATIBILITY_ROUTED,
-        audience=("planner",),
-        queue="planner",
-    )
-
-    assert record.thread_id is None
-    assert record.thread_kind is None
+def test_message_record_requires_work_thread_identity() -> None:
+    with pytest.raises(ValidationError, match="thread_id"):
+        MessageRecord(
+            id="msg-compat",
+            title="Assigned planner note",
+            delivery=MessageDelivery.WORK_THREADED,
+            audience=("planner",),
+            queue="planner",
+        )
 
 
 def test_store_message_contract_only_exposes_durable_threaded_path() -> None:
-    assert tuple(item.value for item in MessageDelivery) == (
-        "work-threaded",
-        "compatibility-routed",
-    )
+    assert tuple(item.value for item in MessageDelivery) == ("work-threaded",)
     assert tuple(item.value for item in MessageThreadKind) == ("changeset", "epic")
 
 
@@ -242,7 +237,8 @@ def test_store_contract_docs_record_invariants_and_deferred_work() -> None:
     assert "single async store boundary" in store_doc
     assert "not part of `atelier.store`" in store_doc
     assert "adapter-local compatibility state" in store_doc
-    assert "compatibility-routed" in store_doc
+    assert "startup-only" in store_doc
+    assert "compatibility projections" in store_doc
     assert "implement `AtelierStore` itself" in store_doc
     assert "`atelier.lib.beads.Beads` remains the swappable boundary" in store_doc
     assert "Dual-Backend Proof" in store_doc
@@ -428,7 +424,6 @@ def _read_snapshot(backend: str) -> dict[str, object]:
             "queue": message.queue,
             "audience": message.audience,
             "claimed_by": message.claimed_by,
-            "blocking_roles": message.blocking_roles,
         },
         "hook": hook.model_dump(mode="json") if hook else None,
     }
@@ -561,7 +556,6 @@ def test_store_dual_backend_read_snapshot_matches_expected_contract(backend: str
             "queue": "planner",
             "audience": ("planner",),
             "claimed_by": None,
-            "blocking_roles": (),
         },
         "hook": None,
     }
@@ -927,7 +921,7 @@ def test_beads_store_fails_closed() -> None:
         _RUN(store.add_dependency(DependencyMutation(issue_id="at-change", depends_on_id="at-dep")))
 
 
-def test_beads_store_lists_compatibility_routed_messages() -> None:
+def test_beads_store_public_message_listing_skips_compatibility_routing() -> None:
     store = _store_for(
         BUILDER.issue(
             "msg-assigned",
@@ -949,9 +943,4 @@ def test_beads_store_lists_compatibility_routed_messages() -> None:
 
     messages = _RUN(store.list_messages(MessageQuery(unread_only=True)))
 
-    assert [message.id for message in messages] == ["msg-assigned", "msg-queue"]
-    assert messages[0].delivery is MessageDelivery.COMPATIBILITY_ROUTED
-    assert messages[0].audience == ("planner",)
-    assert messages[0].thread_id is None
-    assert messages[1].queue == "planner"
-    assert messages[1].claimed_by == "atelier/planner/codex/p200"
+    assert messages == ()

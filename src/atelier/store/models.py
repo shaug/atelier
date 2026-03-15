@@ -61,7 +61,6 @@ class MessageDelivery(str, Enum):
     """Delivery modes for coordination messages."""
 
     WORK_THREADED = "work-threaded"
-    COMPATIBILITY_ROUTED = "compatibility-routed"
 
 
 class MessageThreadKind(str, Enum):
@@ -166,18 +165,17 @@ class MessageRecord(StoreModel):
     queue: Identifier | None = None
     claimed_by: Identifier | None = None
     claimed_at: Identifier | None = None
-    blocking_roles: tuple[Identifier, ...] = ()
 
-    @field_validator("audience", "blocking_roles")
+    @field_validator("audience")
     @classmethod
     def _dedupe_identifiers(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return _dedupe_identifiers(value)
 
     @model_validator(mode="after")
     def _validate_thread_contract(self) -> "MessageRecord":
-        if self.delivery == MessageDelivery.WORK_THREADED and self.thread_id is None:
+        if self.thread_id is None:
             raise ValueError("work-threaded messages require thread_id")
-        if self.delivery == MessageDelivery.WORK_THREADED and self.thread_kind is None:
+        if self.thread_kind is None:
             raise ValueError("work-threaded messages require thread_kind")
         return self
 

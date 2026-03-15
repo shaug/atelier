@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol, cast
 
 from . import beads, lifecycle, messages
 from .lib.beads import Beads, SubprocessBeadsClient
@@ -56,6 +58,21 @@ class StartupQueuedMessageSummary:
     queue: str
     title: str
     claimed_by: str | None
+
+
+class _StartupMessageLike(Protocol):
+    """Structural message shape used by startup inbox/queue rendering."""
+
+    id: str
+    title: str
+    body: str
+    thread_id: str | None
+    thread_kind: object | None
+    audience: tuple[str, ...]
+    kind: str | None
+    queue: str | None
+    claimed_by: str | None
+    blocking_roles: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -594,7 +611,7 @@ class StartupBeadsInvocationHelper:
     ) -> list[dict[str, object]]:
         """List planner inbox messages via store-native message projections."""
 
-        issues = asyncio.run(self._store().list_messages(MessageQuery(unread_only=unread_only)))
+        issues = self._list_startup_messages(unread_only=unread_only)
         matches: list[dict[str, object]] = []
         seen_ids: set[str] = set()
         for issue in issues:
@@ -626,9 +643,7 @@ class StartupBeadsInvocationHelper:
     ) -> list[dict[str, object]]:
         """List queued message beads from store-backed message queries."""
 
-        issues = asyncio.run(
-            self._store().list_messages(MessageQuery(queue=queue, unread_only=unread_only))
-        )
+        issues = self._list_startup_messages(queue=queue, unread_only=unread_only)
         matches: list[dict[str, object]] = []
         for issue in issues:
             normalized_claim = issue.claimed_by
@@ -643,6 +658,29 @@ class StartupBeadsInvocationHelper:
                 }
             )
         return matches
+
+    def _list_startup_messages(
+        self,
+        *,
+        queue: str | None = None,
+        unread_only: bool,
+    ) -> tuple[_StartupMessageLike, ...]:
+        store = self._store()
+        query = MessageQuery(queue=queue, unread_only=unread_only)
+        list_startup_messages = getattr(store, "_list_startup_messages", None)
+        if callable(list_startup_messages):
+            startup_loader = cast(
+                Callable[
+                    [MessageQuery],
+                    Coroutine[object, object, tuple[_StartupMessageLike, ...]],
+                ],
+                list_startup_messages,
+            )
+            return asyncio.run(startup_loader(query))
+        return cast(
+            tuple[_StartupMessageLike, ...],
+            asyncio.run(store.list_messages(query)),
+        )
 
     def list_epics(self, *, include_closed: bool = False) -> list[dict[str, object]]:
         """List indexed epics through the Atelier store."""
