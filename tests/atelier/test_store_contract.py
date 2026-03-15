@@ -417,8 +417,50 @@ def _parity_seed_issues() -> tuple[dict[str, object], ...]:
     )
 
 
-def _store_for_backend(backend: str) -> AtelierStore:
-    issues = _parity_seed_issues()
+def _legacy_tombstone_seed_issues() -> tuple[dict[str, object], ...]:
+    return (
+        BUILDER.issue("at-epic", title="Epic", issue_type="epic", labels=("at:epic", "atelier")),
+        BUILDER.issue("at-change", title="Change", parent="at-epic", labels=("atelier",)),
+        BUILDER.issue(
+            "at-tomb-epic",
+            title="Deleted epic",
+            issue_type="epic",
+            status="tombstone",
+            labels=("at:epic", "atelier"),
+        ),
+        BUILDER.issue(
+            "at-tomb-change",
+            title="Deleted change",
+            parent="at-epic",
+            status="tombstone",
+            labels=("atelier",),
+        ),
+        _queue_message(),
+        BUILDER.issue(
+            "msg-tombstone",
+            title="Deleted queue message",
+            status="tombstone",
+            labels=("at:message", "at:unread"),
+            description=render_message(
+                {
+                    "delivery": "work-threaded",
+                    "thread": "at-change",
+                    "thread_kind": "changeset",
+                    "queue": "planner",
+                    "audience": ["planner"],
+                },
+                "Legacy deleted message.",
+            ),
+        ),
+    )
+
+
+def _store_for_backend(
+    backend: str,
+    *,
+    issues: tuple[dict[str, object], ...] | None = None,
+) -> AtelierStore:
+    issues = _parity_seed_issues() if issues is None else issues
     if backend == "in-memory":
         client, _ = build_in_memory_beads_client(issues=issues)
         return build_atelier_store(beads=client)
@@ -698,6 +740,39 @@ def test_store_epic_discovery_parity_reports_missing_identity(backend: str) -> N
         "bd update at-missing --type epic --add-label at:epic"
     )
     assert parity.missing_from_index == ()
+
+
+@pytest.mark.parametrize("backend", _BACKENDS)
+def test_store_normalizes_legacy_tombstones_on_direct_reads(backend: str) -> None:
+    store = _store_for_backend(backend, issues=_legacy_tombstone_seed_issues())
+
+    epic = _RUN(store.get_epic("at-tomb-epic"))
+    changeset = _RUN(store.get_changeset("at-tomb-change"))
+
+    assert epic.lifecycle is LifecycleStatus.CLOSED
+    assert changeset.lifecycle is LifecycleStatus.CLOSED
+
+
+@pytest.mark.parametrize("backend", _BACKENDS)
+def test_store_actionable_scans_exclude_legacy_tombstones(backend: str) -> None:
+    store = _store_for_backend(backend, issues=_legacy_tombstone_seed_issues())
+
+    epics = _RUN(store.list_epics())
+    all_epics = _RUN(store.list_epics(EpicQuery(include_closed=True)))
+    changesets = _RUN(store.list_changesets())
+    ready_changesets = _RUN(store.list_ready_changesets())
+    messages = _RUN(store.list_messages(MessageQuery(unread_only=True)))
+    startup_messages = _RUN(store.list_startup_messages(MessageQuery(unread_only=True)))
+
+    assert tuple(record.id for record in epics) == ("at-epic",)
+    assert {record.id: record.lifecycle for record in all_epics} == {
+        "at-epic": LifecycleStatus.OPEN,
+        "at-tomb-epic": LifecycleStatus.CLOSED,
+    }
+    assert tuple(record.id for record in changesets) == ("at-change",)
+    assert tuple(record.id for record in ready_changesets) == ("at-change",)
+    assert tuple(record.id for record in messages) == ("msg-queue",)
+    assert tuple(record.id for record in startup_messages) == ("msg-queue",)
 
 
 def test_list_epics_skips_descendant_scans_when_changesets_not_requested(monkeypatch) -> None:
