@@ -16,15 +16,21 @@ description: >-
 
 ## Steps
 
-1. Claim the epic:
-   - `bd update <epic_id> --assignee <agent_id> --status in_progress --add-label at:hooked`
-1. Re-read the epic to verify the assignee is still `<agent_id>`.
-1. Load the agent bead description:
-   - `bd show <agent_bead_id>`
-1. Update `hook_bead` in the agent bead description:
-   - Write a new description with `hook_bead: <epic_id>` (use `--body-file`).
+1. Claim the epic through the worker lifecycle helper:
+   - persist assignee, `in_progress`, and `at:hooked` together as one verified
+     claim mutation
+1. Re-read the epic to verify the assignee is still `<agent_id>` and the hook
+   label remains present.
+1. Persist the agent hook through the store-owned hook mutation for
+   `<agent_bead_id>`.
+1. See [Worker Store Migration Contract] for the store-backed claim/hook
+   boundary and the remaining compatibility seams.
 
 ## Verification
 
 - Epic shows assignee and `at:hooked` label.
-- Agent bead description includes `hook_bead: <epic_id>`.
+- Agent bead hook resolves to `<epic_id>`.
+
+<!-- inline reference link definitions. please keep alphabetized -->
+
+[worker store migration contract]: ../../../../docs/worker-store-migration-contract.md

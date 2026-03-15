@@ -69,12 +69,14 @@ other planner mutations.
 
 This planner migration slice leaves the following work deferred:
 
-- worker lifecycle and finalization migrations onto `atelier.store`
 - publish and integration orchestration migrations onto `atelier.store`
 - a richer planner preview read model in `atelier.store` so `plan-promote-epic`
   can drop its raw issue reads
 - shared dual-backend proof for dependency add/remove once the in-memory Beads
   backend supports those mutations at planner parity
+
+Worker lifecycle and hook/message migrations now follow the
+[Worker Store Migration Contract].
 
 No new planner business flow should introduce a fresh Beads-shaped contract. If
 a planner path needs more state than `atelier.store` currently exposes, add that
@@ -98,3 +100,4 @@ planning future planner, worker, or publish migrations.
 <!-- inline reference link definitions. please keep alphabetized -->
 
 [atelier store contract]: ./atelier-store-contract.md
+[worker store migration contract]: ./worker-store-migration-contract.md

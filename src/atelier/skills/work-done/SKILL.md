@@ -23,6 +23,8 @@ description: >-
    - `python src/atelier/skills/work-done/scripts/close_epic.py --epic-id <epic_id> --agent-bead-id <agent_bead_id>`
 1. For explicit direct-close flows (skip readiness checks), use:
    - `python src/atelier/skills/work-done/scripts/close_epic.py --epic-id <epic_id> --agent-bead-id <agent_bead_id> --direct-close`
+1. This remains a compatibility path until `atelier.store` publishes an explicit
+   epic-close/finalize mutation. See [Worker Store Migration Contract].
 
 ## Verification
 
@@ -30,3 +32,7 @@ description: >-
 - Agent hook slot is empty.
 - If `external_tickets` has exported GitHub links, close-state metadata is
   reconciled.
+
+<!-- inline reference link definitions. please keep alphabetized -->
+
+[worker store migration contract]: ../../../../docs/worker-store-migration-contract.md
