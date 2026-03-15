@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .. import agent_home, beads, changesets, config, git, lifecycle, prs
 from . import stale_pr_lifecycle
+from . import store_adapter as worker_store
 from .models import FinalizeResult, ReconcileResult
 
 
@@ -182,7 +183,7 @@ def _converge_stale_terminal_metadata(
         )
         stored_state = lifecycle.normalize_review_state(metadata.pr_state)
         if stored_state != candidate.terminal_pr_state:
-            beads.update_changeset_review(
+            worker_store.update_changeset_review(
                 changeset_id,
                 changesets.ReviewMetadata(
                     pr_url=metadata.pr_url,
@@ -191,17 +192,17 @@ def _converge_stale_terminal_metadata(
                     review_owner=metadata.review_owner,
                 ),
                 beads_root=beads_root,
-                cwd=repo_root,
+                repo_root=repo_root,
             )
             updates.append(f"pr_state={candidate.terminal_pr_state}")
     if candidate.integrated_sha:
         recorded_sha = _recorded_integrated_sha(issue)
         if recorded_sha != candidate.integrated_sha:
-            beads.update_changeset_integrated_sha(
+            worker_store.update_changeset_integrated_sha(
                 changeset_id,
                 candidate.integrated_sha,
                 beads_root=beads_root,
-                cwd=repo_root,
+                repo_root=repo_root,
             )
             updates.append(f"changeset.integrated_sha={candidate.integrated_sha}")
     return tuple(updates)
@@ -626,10 +627,10 @@ def reconcile_blocked_merged_changesets(
             issue,
             active_pr_lifecycle=True,
         ):
-            beads.mark_issue_in_progress(
+            worker_store.mark_issue_in_progress(
                 changeset_id,
                 beads_root=beads_root,
-                cwd=repo_root,
+                repo_root=repo_root,
             )
             reconciled += 1
             if log:
@@ -844,8 +845,11 @@ def reconcile_blocked_merged_changesets(
     def load_issue(issue_id: str) -> dict[str, object] | None:
         if issue_id in issue_cache:
             return issue_cache[issue_id]
-        loaded = beads.run_bd_json(["show", issue_id], beads_root=beads_root, cwd=repo_root)
-        issue_cache[issue_id] = loaded[0] if loaded else None
+        issue_cache[issue_id] = worker_store.show_issue(
+            issue_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
         return issue_cache[issue_id]
 
     dependency_finalized_cache: dict[str, bool] = {}
@@ -863,10 +867,10 @@ def reconcile_blocked_merged_changesets(
         ):
             dependency_finalized_cache[issue_id] = True
             return True
-        work_children = beads.list_work_children(
+        work_children = worker_store.list_work_children(
             issue_id,
             beads_root=beads_root,
-            cwd=repo_root,
+            repo_root=repo_root,
             include_closed=True,
         )
         if work_children:
@@ -979,11 +983,11 @@ def reconcile_blocked_merged_changesets(
                     cwd=repo_root,
                 )
                 if candidate.integrated_sha:
-                    beads.update_changeset_integrated_sha(
+                    worker_store.update_changeset_integrated_sha(
                         changeset_id,
                         candidate.integrated_sha,
                         beads_root=beads_root,
-                        cwd=repo_root,
+                        repo_root=repo_root,
                     )
                 if log:
                     log(
@@ -1058,11 +1062,11 @@ def reconcile_blocked_merged_changesets(
                 and _converged_integrated_sha(converged_updates) is None
                 and _recorded_integrated_sha(refreshed_issue or {}) is None
             ):
-                beads.update_changeset_integrated_sha(
+                worker_store.update_changeset_integrated_sha(
                     changeset_id,
                     candidate.integrated_sha,
                     beads_root=beads_root,
-                    cwd=repo_root,
+                    repo_root=repo_root,
                 )
             if log:
                 log(

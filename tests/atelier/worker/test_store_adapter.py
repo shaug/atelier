@@ -1,5 +1,7 @@
 from pathlib import Path
+from unittest.mock import patch
 
+from atelier import changesets
 from atelier.lib.beads import IssueRecord, SyncBeadsClient
 from atelier.messages import render_message
 from atelier.store import HookRecord, StartupMessageRecord, build_atelier_store
@@ -143,6 +145,128 @@ def test_list_work_children_filters_non_work_children(monkeypatch) -> None:
     )
 
     assert [child["id"] for child in children] == ["at-epic.1"]
+    worker_store.clear_bundle_cache()
+
+
+def test_update_changeset_review_updates_pr_state_via_store(monkeypatch) -> None:
+    builder = IssueFixtureBuilder()
+    _patch_bundle(
+        monkeypatch,
+        issues=(
+            builder.issue(
+                "at-epic",
+                issue_type="epic",
+                labels=("at:epic",),
+                children=("at-epic.1",),
+            ),
+            builder.issue(
+                "at-epic.1",
+                issue_type="task",
+                parent="at-epic",
+                status="blocked",
+                description="pr_state: pushed\n",
+            ),
+        ),
+    )
+
+    worker_store.update_changeset_review(
+        "at-epic.1",
+        changesets.ReviewMetadata(pr_state="merged"),
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+    updated = worker_store.show_issue(
+        "at-epic.1",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert updated is not None
+    assert "pr_state: merged" in str(updated.get("description"))
+    worker_store.clear_bundle_cache()
+
+
+def test_update_changeset_integrated_sha_preserves_existing_review_fields(monkeypatch) -> None:
+    builder = IssueFixtureBuilder()
+    _patch_bundle(
+        monkeypatch,
+        issues=(
+            builder.issue(
+                "at-epic",
+                issue_type="epic",
+                labels=("at:epic",),
+                children=("at-epic.1",),
+            ),
+            builder.issue(
+                "at-epic.1",
+                issue_type="task",
+                parent="at-epic",
+                status="blocked",
+                description="pr_state: merged\n",
+            ),
+        ),
+    )
+
+    worker_store.update_changeset_integrated_sha(
+        "at-epic.1",
+        "abc1234",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+    updated = worker_store.show_issue(
+        "at-epic.1",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert updated is not None
+    description = str(updated.get("description"))
+    assert "pr_state: merged" in description
+    assert "changeset.integrated_sha: abc1234" in description
+    worker_store.clear_bundle_cache()
+
+
+def test_mark_issue_in_progress_transitions_lifecycle_and_reconciles_tickets(monkeypatch) -> None:
+    builder = IssueFixtureBuilder()
+    _patch_bundle(
+        monkeypatch,
+        issues=(
+            builder.issue(
+                "at-epic",
+                issue_type="epic",
+                labels=("at:epic",),
+                children=("at-epic.1",),
+            ),
+            builder.issue(
+                "at-epic.1",
+                issue_type="task",
+                parent="at-epic",
+                status="blocked",
+            ),
+        ),
+    )
+
+    with patch(
+        "atelier.worker.store_adapter.beads.reconcile_reopened_issue_exported_github_tickets"
+    ) as reconcile_tickets:
+        worker_store.mark_issue_in_progress(
+            "at-epic.1",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    refreshed = worker_store.show_issue(
+        "at-epic.1",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+    assert refreshed is not None
+    assert refreshed["status"] == "in_progress"
+    reconcile_tickets.assert_called_once_with(
+        "at-epic.1",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
     worker_store.clear_bundle_cache()
 
 

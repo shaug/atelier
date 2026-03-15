@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import cast
 
-from .. import beads, lifecycle, messages
+from .. import beads, changesets, lifecycle, messages
 from ..io import die
 from ..lib.beads import (
     CreateIssueRequest,
@@ -30,12 +30,16 @@ from ..store import (
     ClearAgentBeadHookRequest,
     CreateMessageRequest,
     LifecycleStatus,
+    LifecycleTransitionRequest,
     MarkMessageReadRequest,
     MessageQuery,
     MessageThreadKind,
     ReadyChangesetQuery,
+    ReviewMetadata,
+    ReviewState,
     SetAgentBeadHookRequest,
     StartupMessageRecord,
+    UpdateReviewRequest,
     build_atelier_store,
 )
 from . import selection as worker_selection
@@ -208,6 +212,107 @@ def list_work_children(
         for issue in issues
         if lifecycle.is_work_issue(labels=set(issue.labels), issue_type=issue.type)
     ]
+
+
+def _normalize_review_state(value: str | None) -> ReviewState | None:
+    normalized = lifecycle.normalize_review_state(value)
+    return None if normalized is None else ReviewState(normalized)
+
+
+def _normalized_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    return normalized
+
+
+def _normalize_pr_number(value: str | None) -> int | None:
+    normalized = _normalized_text(value)
+    if normalized is None:
+        return None
+    return int(normalized)
+
+
+def update_changeset_review(
+    changeset_id: str,
+    metadata: changesets.ReviewMetadata,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> dict[str, object]:
+    """Update changeset review metadata through the worker-local store adapter."""
+
+    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    record = asyncio.run(
+        bundle.store.update_review(
+            UpdateReviewRequest(
+                changeset_id=changeset_id,
+                review=ReviewMetadata(
+                    pr_url=_normalized_text(metadata.pr_url),
+                    pr_number=_normalize_pr_number(metadata.pr_number),
+                    pr_state=_normalize_review_state(metadata.pr_state),
+                    review_owner=_normalized_text(metadata.review_owner),
+                ),
+            )
+        )
+    )
+    payload = _show_issue(issue_id=record.id, beads_root=beads_root, repo_root=repo_root)
+    return payload or cast(
+        dict[str, object],
+        record.model_dump(mode="json", by_alias=True, exclude_none=True),
+    )
+
+
+def update_changeset_integrated_sha(
+    changeset_id: str,
+    integrated_sha: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> dict[str, object]:
+    """Persist integrated SHA metadata through AtelierStore review updates."""
+
+    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    record = asyncio.run(
+        bundle.store.update_review(
+            UpdateReviewRequest(
+                changeset_id=changeset_id,
+                preserve_existing=True,
+                review=ReviewMetadata(integrated_sha=_normalized_text(integrated_sha)),
+            )
+        )
+    )
+    payload = _show_issue(issue_id=record.id, beads_root=beads_root, repo_root=repo_root)
+    return payload or cast(
+        dict[str, object],
+        record.model_dump(mode="json", by_alias=True, exclude_none=True),
+    )
+
+
+def mark_issue_in_progress(
+    issue_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> beads.ExternalTicketReconcileResult:
+    """Restore one issue to in-progress using the store lifecycle contract."""
+
+    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    asyncio.run(
+        bundle.store.transition_lifecycle(
+            LifecycleTransitionRequest(
+                issue_id=issue_id,
+                target_status=LifecycleStatus.IN_PROGRESS,
+            )
+        )
+    )
+    return beads.reconcile_reopened_issue_exported_github_tickets(
+        issue_id,
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
 
 
 def ready_changesets_global(
@@ -1039,10 +1144,13 @@ __all__ = [
     "list_inbox_messages",
     "list_queue_messages",
     "list_work_children",
+    "mark_issue_in_progress",
     "mark_message_read",
     "ready_changesets_global",
     "release_epic_assignment",
     "resolve_hooked_epic",
     "set_agent_hook",
     "show_issue",
+    "update_changeset_integrated_sha",
+    "update_changeset_review",
 ]
