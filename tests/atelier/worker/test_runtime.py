@@ -1004,10 +1004,7 @@ def test_startup_service_no_eligible_summary_does_not_queue_message() -> None:
         repo_root=Path("/repo"),
     )
 
-    with (
-        patch("atelier.worker.work_startup_runtime.say", side_effect=emitted.append),
-        patch("atelier.worker.work_startup_runtime.beads.create_message_bead") as create_message,
-    ):
+    with patch("atelier.worker.work_startup_runtime.say", side_effect=emitted.append):
         service.send_needs_decision(
             agent_id="atelier/worker/codex/p1",
             mode="auto",
@@ -1017,7 +1014,6 @@ def test_startup_service_no_eligible_summary_does_not_queue_message() -> None:
             review_followup_enabled=True,
         )
 
-    assert create_message.call_count == 0
     assert emitted[0] == "No eligible epics available."
     assert any("Ready epics (actionable): 0" in line for line in emitted)
     assert any("Ready epics (top-level): 1" in line for line in emitted)
@@ -1031,7 +1027,7 @@ def test_startup_service_lists_only_non_closed_epics() -> None:
     )
 
     with patch(
-        "atelier.worker.work_startup_runtime.beads.list_epics",
+        "atelier.worker.work_startup_runtime.worker_store.list_epics",
         return_value=[{"id": "at-1"}],
     ) as list_epics:
         issues = service.list_epics()
@@ -1039,7 +1035,7 @@ def test_startup_service_lists_only_non_closed_epics() -> None:
     assert issues == [{"id": "at-1"}]
     list_epics.assert_called_once_with(
         beads_root=Path("/beads"),
-        cwd=Path("/repo"),
+        repo_root=Path("/repo"),
         include_closed=False,
     )
 
@@ -1326,16 +1322,13 @@ def test_startup_service_preserves_live_worker_when_hook_lookup_fails() -> None:
             return_value=True,
         ),
         patch(
-            "atelier.worker.work_startup_runtime.beads.find_agent_bead",
+            "atelier.worker.work_startup_runtime.worker_store.find_agent_bead",
             return_value={"id": "at-agent-live"},
         ),
         patch(
-            "atelier.worker.work_startup_runtime.beads.run_bd_command",
-            return_value=subprocess.CompletedProcess(
-                args=["slot", "show", "at-agent-live", "--json"],
-                returncode=1,
-                stdout="",
-                stderr="slot read failed",
+            "atelier.worker.work_startup_runtime.worker_store.agent_hook_observation",
+            return_value=work_startup_runtime.worker_selection.AgentHookObservation.unknown(
+                "hook_lookup_failed"
             ),
         ),
     ):

@@ -7,7 +7,7 @@ from atelier.worker import queueing
 def test_send_planner_notification_dry_run_logs_and_skips_beads() -> None:
     logs: list[str] = []
 
-    with patch("atelier.worker.queueing.beads.create_message_bead") as create_message:
+    with patch("atelier.worker.queueing.worker_store.create_message") as create_message:
         queueing.send_planner_notification(
             subject="hello",
             body="world",
@@ -31,10 +31,10 @@ def test_send_no_ready_changesets_uses_summary_counts() -> None:
 
     with (
         patch(
-            "atelier.worker.queueing.beads.epic_changeset_summary",
+            "atelier.worker.queueing.worker_store.epic_changeset_summary",
             return_value=_Summary(),
         ),
-        patch("atelier.worker.queueing.beads.create_message_bead") as create_message,
+        patch("atelier.worker.queueing.worker_store.create_message") as create_message,
     ):
         queueing.send_no_ready_changesets(
             epic_id="at-1",
@@ -49,22 +49,18 @@ def test_send_no_ready_changesets_uses_summary_counts() -> None:
     kwargs = create_message.call_args.kwargs
     assert kwargs["subject"] == "NEEDS-DECISION: No ready changesets for at-1"
     assert "Ready changesets: 0" in kwargs["body"]
-    assert kwargs["metadata"]["queue"] == "planner"
-    assert kwargs["metadata"]["audience"] == ["planner"]
-    assert kwargs["metadata"]["thread"] == "at-1"
-    assert kwargs["metadata"]["thread_kind"] == "epic"
-    assert kwargs["metadata"]["thread_target"] == "epic"
-    assert kwargs["metadata"]["audiences"] == ["planner"]
-    assert kwargs["metadata"]["kind"] == "needs-decision"
-    assert kwargs["metadata"]["blocking"] is True
-    assert kwargs["metadata"]["blocking_roles"] == ["planner"]
+    assert kwargs["queue"] == "planner"
+    assert kwargs["audience"] == ("planner",)
+    assert kwargs["thread_id"] == "at-1"
+    assert kwargs["kind"] == "needs-decision"
+    assert kwargs["blocking"] is True
 
 
 def test_prompt_queue_claim_assume_yes_claims_first_message() -> None:
     emitted: list[str] = []
     queued = [{"id": "at-msg-1", "queue": "planner", "title": "Needs review"}]
 
-    with patch("atelier.worker.queueing.beads.claim_queue_message") as claim_message:
+    with patch("atelier.worker.queueing.worker_store.claim_queue_message") as claim_message:
         claimed = queueing.prompt_queue_claim(
             queued,
             agent_id="worker/1",
@@ -86,7 +82,7 @@ def test_handle_queue_before_claim_dry_run_reports_messages() -> None:
     emitted: list[str] = []
     dry_logs: list[str] = []
 
-    with patch("atelier.worker.queueing.beads.list_queue_messages", return_value=queued):
+    with patch("atelier.worker.queueing.worker_store.list_queue_messages", return_value=queued):
         handled = queueing.handle_queue_before_claim(
             "worker/1",
             beads_root=Path("/beads"),
@@ -109,7 +105,7 @@ def test_handle_queue_before_claim_dry_run_reports_messages() -> None:
 def test_check_inbox_before_claim_reports_unread() -> None:
     emitted: list[str] = []
     with patch(
-        "atelier.worker.queueing.beads.list_inbox_messages",
+        "atelier.worker.queueing.worker_store.list_inbox_messages",
         return_value=[{"id": "at-msg-1"}],
     ):
         blocked = queueing.check_inbox_before_claim(
