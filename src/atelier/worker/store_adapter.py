@@ -44,6 +44,7 @@ _SHOW_JSON_SUFFIX = ("show",)
 _READY_JSON_ARGS = ("ready",)
 _LIST_JSON_PREFIX = ("list",)
 _EPIC_LABEL_SCAN_LIMIT = 10_000
+_AGENT_LABEL_SCAN_LIMIT = 10_000
 
 
 @dataclass(frozen=True)
@@ -238,9 +239,14 @@ def _find_agent_candidates(
             labels=(label,),
             title_query=agent_id,
             include_closed=True,
-            limit=None,
+            limit=_AGENT_LABEL_SCAN_LIMIT,
         )
     )
+    if len(issues) >= _AGENT_LABEL_SCAN_LIMIT:
+        raise RuntimeError(
+            "agent label scan reached the configured limit "
+            f"({_AGENT_LABEL_SCAN_LIMIT}) for {label!r}"
+        )
     return tuple(_issue_payload(issue) for issue in issues)
 
 

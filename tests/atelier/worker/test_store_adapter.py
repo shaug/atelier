@@ -234,14 +234,37 @@ def test_list_inbox_messages_uses_typed_startup_store_method(monkeypatch) -> Non
     worker_store.clear_bundle_cache()
 
 
-def test_find_agent_bead_uses_unbounded_list_request_without_zero_limit(monkeypatch) -> None:
+def test_find_agent_bead_scans_beyond_default_list_cap(monkeypatch) -> None:
     seen_limits: list[int | None] = []
+    candidate_issues = tuple(
+        IssueRecord(
+            id=f"at-agent-{index:02d}",
+            title=f"atelier/worker/codex/p100-extra-{index:02d}",
+        )
+        for index in range(55)
+    ) + (
+        IssueRecord(
+            id="at-agent-match",
+            title="atelier/worker/codex/p100",
+            status="open",
+        ),
+    )
 
     class _FakeSyncClient:
         def list(self, request):
             seen_limits.append(request.limit)
-            return ()
+            title_query = request.title_query or ""
+            matching = tuple(
+                issue for issue in candidate_issues if title_query in (issue.title or "")
+            )
+            effective_limit = 50 if request.limit is None else request.limit
+            return matching[:effective_limit]
 
+    monkeypatch.setattr(
+        worker_store.beads,
+        "_agent_label_candidates",
+        lambda **_kwargs: ("at:agent",),
+    )
     monkeypatch.setattr(
         worker_store,
         "_build_store_bundle",
@@ -258,12 +281,57 @@ def test_find_agent_bead_uses_unbounded_list_request_without_zero_limit(monkeypa
         repo_root=Path("/repo"),
     )
 
-    assert bead is None
-    assert seen_limits == [None]
+    assert bead is not None
+    assert bead["id"] == "at-agent-match"
+    assert bead["title"] == "atelier/worker/codex/p100"
+    assert bead["status"] == "open"
+    assert seen_limits == [10_000]
     worker_store.clear_bundle_cache()
 
 
+def test_find_agent_bead_fails_closed_when_agent_scan_hits_limit(monkeypatch) -> None:
+    class _FakeSyncClient:
+        def list(self, request):
+            return tuple(
+                IssueRecord(
+                    id=f"at-agent-{index:05d}",
+                    title=f"atelier/worker/codex/p100-{index:05d}",
+                )
+                for index in range(request.limit or 0)
+            )
+
+    monkeypatch.setattr(
+        worker_store.beads,
+        "_agent_label_candidates",
+        lambda **_kwargs: ("at:agent",),
+    )
+    monkeypatch.setattr(
+        worker_store,
+        "_build_store_bundle",
+        lambda **_kwargs: worker_store._StoreBundle(  # pyright: ignore[reportPrivateUsage]
+            store=build_atelier_store(beads=build_in_memory_beads_client()[0]),
+            sync_client=_FakeSyncClient(),
+        ),
+    )
+    worker_store.clear_bundle_cache()
+
+    try:
+        try:
+            worker_store.find_agent_bead(
+                "atelier/worker/codex/p100",
+                beads_root=Path("/beads"),
+                repo_root=Path("/repo"),
+            )
+        except RuntimeError as exc:
+            assert "agent label scan reached the configured limit" in str(exc)
+        else:
+            raise AssertionError("expected agent label scan overflow to fail closed")
+    finally:
+        worker_store.clear_bundle_cache()
+
+
 def test_list_inbox_messages_skips_closed_changeset_threads(monkeypatch) -> None:
+    worker_store.clear_bundle_cache()
     builder = IssueFixtureBuilder()
     _patch_bundle(
         monkeypatch,
