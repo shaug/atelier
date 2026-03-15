@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""List store-backed inbox messages for one agent runtime."""
+"""List store-backed inbox messages for one agent runtime.
+
+Defaults to unread-only mode unless ``--all`` is requested.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +11,7 @@ import asyncio
 import json
 import os
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 _SHARED_SCRIPTS_ROOT = Path(__file__).resolve().parents[2] / "shared" / "scripts"
@@ -134,14 +138,22 @@ def list_inbox_messages(
     return sorted(matches, key=lambda item: (str(item["id"]), str(item["title"])))
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
+    """Build the ``mail-inbox`` CLI parser."""
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--agent-id",
         default="",
         help="agent identity (defaults to ATELIER_AGENT_ID)",
     )
-    parser.add_argument(
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--unread",
+        action="store_true",
+        help="explicitly limit results to unread messages (default)",
+    )
+    mode_group.add_argument(
         "--all",
         action="store_true",
         help="include already-read messages",
@@ -161,7 +173,12 @@ def main() -> None:
         action="store_true",
         help="emit machine-readable JSON",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    parser = build_parser()
+    args = parser.parse_args(argv)
 
     agent_id = _resolve_agent_id(args.agent_id)
     beads_dir = str(args.beads_dir).strip() or None

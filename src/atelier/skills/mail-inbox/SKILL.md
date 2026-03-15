@@ -1,8 +1,8 @@
 ---
 name: mail-inbox
 description: >-
-  List compatibility-routed message beads assigned to the current agent,
-  optionally filtering to unread messages.
+  List compatibility-routed message beads assigned to the current agent, with
+  explicit unread-only and all-messages modes.
 ---
 
 # Mail inbox
@@ -10,13 +10,14 @@ description: >-
 ## Inputs
 
 - agent_id: Agent identity to filter by assignee.
-- unread_only: Whether to filter by `at:unread` (default true).
+- mode: Defaults to unread-only; use `--unread` for an explicit unread-only
+  invocation or `--all` to include already-read messages.
 - beads_dir: Optional Beads store path.
 
 ## Steps
 
 1. Use the inbox script:
-   - `python3 skills/mail-inbox/scripts/list_inbox.py --agent-id "<agent_id>" [--all] [--beads-dir "<beads_dir>"] [--repo-dir "<repo_dir>"]`
+   - `python3 skills/mail-inbox/scripts/list_inbox.py --agent-id "<agent_id>" [--unread | --all] [--beads-dir "<beads_dir>"] [--repo-dir "<repo_dir>"]`
 1. The script reads through `atelier.store` message models and filters by the
    agent runtime role.
 1. Treat assignee-based inbox delivery as compatibility-only routing:
@@ -29,8 +30,10 @@ description: >-
 
 ## Verification
 
-- Returned list includes only store-backed threaded messages for the agent
-  runtime role.
+- Default invocations and explicit `--unread` invocations return the unread-only
+  threaded messages for the agent runtime role.
+- `--all` broadens the result set to include already-read threaded messages for
+  the agent runtime role.
 
 <!-- inline reference link definitions. please keep alphabetized -->
 
