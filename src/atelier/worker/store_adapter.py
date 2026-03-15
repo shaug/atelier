@@ -633,13 +633,13 @@ def mark_issue_blocked(
     """Persist blocked lifecycle and audit note as one verified issue update."""
 
     bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    timestamp = dt.datetime.now(tz=dt.timezone.utc).isoformat()
+    note = f"blocked_at: {timestamp} reason: {reason}"
     for _attempt in range(5):
         current = _show_issue(issue_id=issue_id, beads_root=beads_root, repo_root=repo_root)
         if current is None:
             die(f"issue not found: {issue_id}")
         current_description = _normalize_text(current.get("description"))
-        timestamp = dt.datetime.now(tz=dt.timezone.utc).isoformat()
-        note = f"blocked_at: {timestamp} reason: {reason}"
         desired_description = _append_issue_notes(
             current_description,
             notes=(note,),
