@@ -12,7 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import cast
 
-from .. import beads, lifecycle, messages
+from .. import beads, changeset_fields, lifecycle, messages
 from ..io import die
 from ..lib.beads import (
     CreateIssueRequest,
@@ -1073,7 +1073,20 @@ def _startup_message_thread_is_terminal(
         return False
     if issue is None:
         return False
-    return lifecycle.is_closed_status(issue.get("status"))
+    if lifecycle.is_closed_status(issue.get("status")):
+        return True
+    if thread_kind is not MessageThreadKind.CHANGESET:
+        return False
+    labels = lifecycle.normalized_labels(issue.get("labels"))
+    if lifecycle.TERMINAL_CHANGESET_LABELS.intersection(labels):
+        return True
+    review_state = changeset_fields.review_state(issue)
+    if lifecycle.is_integrated_review_state(review_state):
+        return True
+    if lifecycle.is_terminal_review_without_integration(review_state):
+        return True
+    fields = changeset_fields.issue_fields(issue)
+    return changeset_fields.normalized_field(fields, "changeset.integrated_sha") is not None
 
 
 def list_inbox_messages(
