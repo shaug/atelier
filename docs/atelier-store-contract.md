@@ -11,6 +11,8 @@ The published Python surface lives in `atelier.store`.
 Typed models:
 
 - `EpicRecord`
+- `EpicDiscoveryParity`
+- `EpicIdentityViolation`
 - `ChangesetRecord`
 - `DependencyRecord`
 - `MessageRecord`
@@ -49,6 +51,12 @@ The contract is intentionally backend-neutral. It does not expose `bd` commands,
 `BEADS_DIR`, Dolt layout, filesystem probes, transport details, or startup
 marker paths.
 
+Planner startup and discovery migrations may also rely on:
+
+- `AtelierStore.epic_discovery_parity()`
+- `EpicRecord.root_branch`
+- `DependencyRecord.status`
+
 ## Atelier-Owned Invariants
 
 Atelier owns the business semantics below even when the concrete store
@@ -64,10 +72,13 @@ implementation is backed by Beads:
   dependency edges, but whether a dependency counts as satisfied is owned by
   Atelier lifecycle policy.
 - Durable message routing is an Atelier contract: store-level messages are
-  `work-threaded` on `epic|changeset` threads, and `thread_id`, `thread_kind`,
+  `work-threaded` on `epic|changeset` threads. `thread_id`, `thread_kind`,
   `audience`, `blocking`, `reply_to`, and queue claim metadata are stable store
-  concepts. Assignee-delivery hints remain adapter-local compatibility state
-  rather than published store vocabulary.
+  concepts. Legacy assignee or queue compatibility routing may still be
+  projected inside adapter-local startup helpers, but those startup-only
+  compatibility projections are not part of `atelier.store`. Assignee-delivery
+  hints remain adapter-local compatibility state rather than published store
+  vocabulary.
 - Hook ownership is an Atelier contract binding one agent to one epic.
 - Lifecycle transitions are store mutations with canonical target states, not
   free-form status edits.

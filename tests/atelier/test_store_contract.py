@@ -63,6 +63,7 @@ _BACKENDS = ("in-memory", "subprocess")
 _STORE_METHOD_NAMES = (
     "get_epic",
     "list_epics",
+    "epic_discovery_parity",
     "get_changeset",
     "list_changesets",
     "list_ready_changesets",
@@ -173,6 +174,17 @@ def test_message_record_enforces_store_message_contract() -> None:
     assert record.audience == ("worker", "planner")
 
 
+def test_message_record_requires_work_thread_identity() -> None:
+    with pytest.raises(ValidationError, match="thread_id"):
+        MessageRecord(
+            id="msg-compat",
+            title="Assigned planner note",
+            delivery=MessageDelivery.WORK_THREADED,
+            audience=("planner",),
+            queue="planner",
+        )
+
+
 def test_store_message_contract_only_exposes_durable_threaded_path() -> None:
     assert tuple(item.value for item in MessageDelivery) == ("work-threaded",)
     assert tuple(item.value for item in MessageThreadKind) == ("changeset", "epic")
@@ -225,6 +237,8 @@ def test_store_contract_docs_record_invariants_and_deferred_work() -> None:
     assert "single async store boundary" in store_doc
     assert "not part of `atelier.store`" in store_doc
     assert "adapter-local compatibility state" in store_doc
+    assert "startup-only" in store_doc
+    assert "compatibility projections" in store_doc
     assert "implement `AtelierStore` itself" in store_doc
     assert "`atelier.lib.beads.Beads` remains the swappable boundary" in store_doc
     assert "Dual-Backend Proof" in store_doc
@@ -375,6 +389,7 @@ def _store_for_backend(backend: str) -> AtelierStore:
 def _read_snapshot(backend: str) -> dict[str, object]:
     store = _store_for_backend(backend)
     epic = _RUN(store.get_epic("at-epic"))
+    parity = _RUN(store.epic_discovery_parity())
     changeset = _RUN(store.get_changeset("at-change"))
     listed_changesets = _RUN(store.list_changesets())
     ready_changesets = _RUN(store.list_ready_changesets())
@@ -382,6 +397,7 @@ def _read_snapshot(backend: str) -> dict[str, object]:
     hook = _RUN(store.get_agent_hook("atelier/worker/agent"))
     return {
         "epics": tuple(epic_record.id for epic_record in _RUN(store.list_epics())),
+        "parity": parity.model_dump(mode="json"),
         "epic_changesets": tuple(work_ref.id for work_ref in epic.changesets),
         "changeset": {
             "id": changeset.id,
@@ -394,6 +410,7 @@ def _read_snapshot(backend: str) -> dict[str, object]:
                     dependency.depends_on_id,
                     dependency.satisfied,
                     dependency.requires_integrated_state,
+                    dependency.status.value if dependency.status is not None else None,
                 )
                 for dependency in changeset.dependencies
             ),
@@ -503,6 +520,12 @@ def _mutation_snapshot(backend: str) -> dict[str, object]:
 def test_store_dual_backend_read_snapshot_matches_expected_contract(backend: str) -> None:
     assert _read_snapshot(backend) == {
         "epics": ("at-epic",),
+        "parity": {
+            "active_top_level_work_count": 1,
+            "indexed_active_epic_count": 1,
+            "missing_executable_identity": [],
+            "missing_from_index": [],
+        },
         "epic_changesets": ("at-change", "at-dep", "at-blocked"),
         "changeset": {
             "id": "at-change",
@@ -522,7 +545,7 @@ def test_store_dual_backend_read_snapshot_matches_expected_contract(backend: str
                 "review_owner": "reviewer-a",
                 "integrated_sha": None,
             },
-            "dependencies": (("at-dep", True, True),),
+            "dependencies": (("at-dep", True, True, "closed"),),
         },
         "listed_changesets": ("at-change", "at-blocked"),
         "ready_changesets": ("at-change",),
@@ -536,6 +559,44 @@ def test_store_dual_backend_read_snapshot_matches_expected_contract(backend: str
         },
         "hook": None,
     }
+
+
+@pytest.mark.parametrize("backend", _BACKENDS)
+def test_store_epic_discovery_parity_reports_missing_identity(backend: str) -> None:
+    issues = (
+        BUILDER.issue(
+            "at-missing",
+            title="Missing identity",
+            issue_type="task",
+            status="open",
+            labels=("atelier",),
+        ),
+        BUILDER.issue(
+            "at-epic",
+            title="Indexed epic",
+            issue_type="epic",
+            status="open",
+            labels=("at:epic", "atelier"),
+        ),
+    )
+    if backend == "in-memory":
+        client, _ = build_in_memory_beads_client(issues=issues)
+        store = build_atelier_store(beads=client)
+    else:
+        command_backend = InMemoryBeadsBackend(seeded_issues=issues)
+        client = SubprocessBeadsClient(transport=_InMemorySubprocessTransport(command_backend))
+        store = build_atelier_store(beads=client)
+
+    parity = _RUN(store.epic_discovery_parity())
+
+    assert parity.active_top_level_work_count == 2
+    assert parity.indexed_active_epic_count == 1
+    assert parity.in_parity is False
+    assert tuple(item.issue_id for item in parity.missing_executable_identity) == ("at-missing",)
+    assert parity.missing_executable_identity[0].remediation_command == (
+        "bd update at-missing --type epic --add-label at:epic"
+    )
+    assert parity.missing_from_index == ()
 
 
 @pytest.mark.parametrize("backend", _BACKENDS)
@@ -858,3 +919,28 @@ def test_beads_store_fails_closed() -> None:
         )
     with pytest.raises(UnsupportedOperationError, match="dep-add"):
         _RUN(store.add_dependency(DependencyMutation(issue_id="at-change", depends_on_id="at-dep")))
+
+
+def test_beads_store_public_message_listing_skips_compatibility_routing() -> None:
+    store = _store_for(
+        BUILDER.issue(
+            "msg-assigned",
+            title="Assigned planner note",
+            issue_type="message",
+            labels=("at:message", "at:unread"),
+            assignee="atelier/planner/codex/p200",
+            description="Direct assignee routing.",
+        ),
+        BUILDER.issue(
+            "msg-queue",
+            title="Queue planner work",
+            issue_type="message",
+            labels=("at:message", "at:unread"),
+            assignee="atelier/planner/codex/p200",
+            description=render_message({"queue": "planner"}, "Need a decision."),
+        ),
+    )
+
+    messages = _RUN(store.list_messages(MessageQuery(unread_only=True)))
+
+    assert messages == ()
