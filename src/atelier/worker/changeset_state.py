@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
 from collections.abc import Callable
 from pathlib import Path
 
@@ -156,17 +155,9 @@ def mark_changeset_abandoned(changeset_id: str, *, beads_root: Path, repo_root: 
 def mark_changeset_blocked(
     changeset_id: str, *, beads_root: Path, repo_root: Path, reason: str
 ) -> None:
-    timestamp = dt.datetime.now(tz=dt.timezone.utc).isoformat()
-    note = f"blocked_at: {timestamp} reason: {reason}"
-    worker_store.append_notes(
+    worker_store.mark_issue_blocked(
         changeset_id,
-        notes=(note,),
-        beads_root=beads_root,
-        repo_root=repo_root,
-    )
-    worker_store.transition_lifecycle(
-        changeset_id,
-        target_status="blocked",
+        reason=reason,
         beads_root=beads_root,
         repo_root=repo_root,
     )

@@ -294,6 +294,85 @@ def test_transition_lifecycle_updates_changeset_status(monkeypatch) -> None:
     worker_store.clear_bundle_cache()
 
 
+def test_mark_issue_blocked_updates_status_and_note_together(monkeypatch) -> None:
+    builder = IssueFixtureBuilder()
+    _patch_bundle(
+        monkeypatch,
+        issues=(builder.issue("at-epic.1", issue_type="task", status="open"),),
+    )
+
+    worker_store.mark_issue_blocked(
+        "at-epic.1",
+        reason="missing integration",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    refreshed = worker_store.show_issue(
+        "at-epic.1",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert refreshed is not None
+    assert refreshed["status"] == "blocked"
+    assert "blocked_at:" in str(refreshed.get("description"))
+    assert "missing integration" in str(refreshed.get("description"))
+    worker_store.clear_bundle_cache()
+
+
+def test_mark_issue_blocked_fails_closed_when_combined_update_cannot_be_verified(
+    monkeypatch,
+) -> None:
+    requests = []
+
+    class _FakeSyncClient:
+        def update(self, request):
+            requests.append(request)
+            return IssueRecord(id=request.issue_id, title="Stale", status="open")
+
+    monkeypatch.setattr(
+        worker_store,
+        "_build_store_bundle",
+        lambda **_kwargs: worker_store._StoreBundle(  # pyright: ignore[reportPrivateUsage]
+            store=build_atelier_store(beads=build_in_memory_beads_client()[0]),
+            sync_client=_FakeSyncClient(),
+        ),
+    )
+    monkeypatch.setattr(
+        worker_store,
+        "_show_issue",
+        lambda **_kwargs: {
+            "id": "at-epic.1",
+            "status": "open",
+            "description": "",
+        },
+    )
+    worker_store.clear_bundle_cache()
+
+    try:
+        try:
+            worker_store.mark_issue_blocked(
+                "at-epic.1",
+                reason="missing integration",
+                beads_root=Path("/beads"),
+                repo_root=Path("/repo"),
+            )
+        except RuntimeError as exc:
+            assert "blocked transition could not be verified" in str(exc)
+        else:
+            raise AssertionError("expected blocked transition verification to fail closed")
+    finally:
+        worker_store.clear_bundle_cache()
+
+    assert len(requests) == 5
+    for request in requests:
+        assert request.status == "blocked"
+        assert request.description is not None
+        assert "blocked_at:" in request.description
+        assert "missing integration" in request.description
+
+
 def test_update_changeset_review_preserves_existing_review_fields(monkeypatch) -> None:
     builder = IssueFixtureBuilder()
     _patch_bundle(

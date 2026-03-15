@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import json
 import subprocess
 from collections.abc import Callable
@@ -466,6 +467,27 @@ def _normalize_status(value: object) -> str | None:
     return _normalize_text(value)
 
 
+def _append_issue_notes(description: str | None, *, notes: tuple[str, ...]) -> str:
+    base = description.rstrip("\n") if description else ""
+    joined = "\n".join(note for note in notes if note)
+    if not joined:
+        return description or ""
+    if not base:
+        return f"{joined}\n"
+    if _description_ends_with_notes(description, notes=notes):
+        return f"{base}\n"
+    return f"{base}\n{joined}\n"
+
+
+def _description_ends_with_notes(description: str | None, *, notes: tuple[str, ...]) -> bool:
+    if not notes:
+        return True
+    lines = (description or "").rstrip("\n").splitlines()
+    if len(lines) < len(notes):
+        return False
+    return tuple(lines[-len(notes) :]) == notes
+
+
 def _labels_from_payload(value: object) -> set[str]:
     if not isinstance(value, list):
         return set()
@@ -599,6 +621,63 @@ def append_notes(
 
     bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
     asyncio.run(bundle.store.append_notes(AppendNotesRequest(issue_id=issue_id, notes=notes)))
+
+
+def mark_issue_blocked(
+    issue_id: str,
+    *,
+    reason: str,
+    beads_root: Path,
+    repo_root: Path,
+) -> None:
+    """Persist blocked lifecycle and audit note as one verified issue update."""
+
+    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    for _attempt in range(5):
+        current = _show_issue(issue_id=issue_id, beads_root=beads_root, repo_root=repo_root)
+        if current is None:
+            die(f"issue not found: {issue_id}")
+        current_description = _normalize_text(current.get("description"))
+        timestamp = dt.datetime.now(tz=dt.timezone.utc).isoformat()
+        note = f"blocked_at: {timestamp} reason: {reason}"
+        desired_description = _append_issue_notes(
+            current_description,
+            notes=(note,),
+        )
+
+        if _normalize_status(
+            current.get("status")
+        ) == LifecycleStatus.BLOCKED.value and _description_ends_with_notes(
+            current_description, notes=(note,)
+        ):
+            return
+
+        updated = bundle.sync_client.update(
+            UpdateIssueRequest(
+                issue_id=issue_id,
+                status=LifecycleStatus.BLOCKED.value,
+                description=desired_description,
+            )
+        )
+        payload = _issue_payload(updated)
+        payload_description = _normalize_text(payload.get("description"))
+        if _normalize_status(
+            payload.get("status")
+        ) == LifecycleStatus.BLOCKED.value and _description_ends_with_notes(
+            payload_description, notes=(note,)
+        ):
+            return
+        refreshed = _show_issue(issue_id=issue_id, beads_root=beads_root, repo_root=repo_root)
+        refreshed_description = None
+        if refreshed is not None:
+            refreshed_description = _normalize_text(refreshed.get("description"))
+        if (
+            refreshed is not None
+            and _normalize_status(refreshed.get("status")) == LifecycleStatus.BLOCKED.value
+            and _description_ends_with_notes(refreshed_description, notes=(note,))
+        ):
+            return
+    raise RuntimeError(f"blocked transition could not be verified for {issue_id}")
 
 
 def update_changeset_review(
