@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-import os
+import asyncio
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,7 +23,17 @@ _BOOTSTRAP_REPO_ROOT = bootstrap_projected_atelier_script(
     require_runtime_health=__name__ == "__main__",
 )
 
-from atelier import agent_home, beads, messages  # noqa: E402
+from atelier import messages  # noqa: E402
+from atelier.beads_context import (  # noqa: E402
+    resolve_runtime_repo_dir_hint,
+    resolve_skill_beads_context,
+)
+from atelier.lib.beads import SubprocessBeadsClient  # noqa: E402
+from atelier.store import (  # noqa: E402
+    CreateMessageRequest,
+    MessageThreadKind,
+    build_atelier_store,
+)
 
 
 @dataclass(frozen=True)
@@ -33,34 +43,38 @@ class DispatchOutcome:
     recipient: str
 
 
+def _merge_warnings(*messages: str | None) -> str | None:
+    lines = [message for message in messages if isinstance(message, str) and message.strip()]
+    if not lines:
+        return None
+    return "\n".join(lines)
+
+
+def _resolve_context(
+    *,
+    beads_dir: str | None,
+    repo_dir: str | None,
+) -> tuple[Path, Path, str | None]:
+    repo_hint, runtime_warning = resolve_runtime_repo_dir_hint(repo_dir=repo_dir)
+    context = resolve_skill_beads_context(
+        beads_dir=beads_dir,
+        repo_dir=repo_hint,
+    )
+    return (
+        context.beads_root,
+        context.repo_root,
+        _merge_warnings(runtime_warning, context.override_warning),
+    )
+
+
 def _agent_role(agent_id: str) -> str | None:
-    role, _name, _session = agent_home.parse_agent_identity(agent_id)
-    if role:
-        return role.strip().lower() or None
     parts = [part for part in str(agent_id).split("/") if part]
+    if len(parts) >= 2 and parts[0] == "atelier":
+        value = parts[1].strip().lower()
+        return value or None
     if not parts:
         return None
     return parts[0].strip().lower() or None
-
-
-def _thread_metadata(
-    *,
-    thread: str | None,
-    recipient: str,
-    subject: str,
-) -> dict[str, object]:
-    if not thread:
-        return {}
-    metadata: dict[str, object] = {}
-    recipient_role = _agent_role(recipient)
-    if recipient_role is None:
-        return metadata
-    if recipient_role == "worker":
-        metadata["blocking_roles"] = ["worker"]
-        return metadata
-    if subject.startswith("NEEDS-DECISION:"):
-        metadata["blocking_roles"] = [recipient_role]
-    return metadata
 
 
 def dispatch_message(
@@ -79,37 +93,36 @@ def dispatch_message(
             "mail-send requires --thread <epic-or-changeset>; "
             "agent-addressed delivery is not supported"
         )
-    metadata: dict[str, object] = {
-        "from": from_agent,
-        "kind": _message_kind(subject=subject, reply_to=reply_to),
-    }
     audience = _agent_role(to)
-    if audience in {"worker", "planner", "operator"}:
-        metadata["audience"] = [audience]
-        metadata["audiences"] = [audience]
-    metadata["thread"] = thread
     thread_target = messages.infer_thread_target(thread)
-    if thread_target is not None:
-        metadata["thread_kind"] = thread_target
-        metadata["thread_target"] = thread_target
-    metadata["delivery"] = "work-threaded"
-    metadata.update(_thread_metadata(thread=thread, recipient=to, subject=subject))
-    if subject.startswith("NEEDS-DECISION:"):
-        metadata["blocking"] = True
-    if reply_to:
-        metadata["reply_to"] = reply_to
+    if thread_target not in {"changeset", "epic"}:
+        raise RuntimeError("mail-send requires an epic or changeset thread id")
 
-    message = beads.create_message_bead(
-        subject=subject,
-        body=body,
-        metadata=metadata,
-        assignee=to,
-        beads_root=beads_root,
-        cwd=cwd,
+    store = build_atelier_store(
+        beads=SubprocessBeadsClient(
+            cwd=cwd,
+            beads_root=beads_root,
+            env={"BEADS_DIR": str(beads_root)},
+        )
     )
-    message_id = str(message.get("id") or "").strip()
+    message = asyncio.run(
+        store.create_message(
+            CreateMessageRequest(
+                title=subject,
+                body=body,
+                sender=from_agent,
+                thread_id=thread,
+                thread_kind=MessageThreadKind(thread_target),
+                audience=(audience,) if audience in {"worker", "planner", "operator"} else (),
+                kind=_message_kind(subject=subject, reply_to=reply_to),
+                blocking=subject.startswith("NEEDS-DECISION:") or audience == "worker",
+                reply_to=reply_to,
+            )
+        )
+    )
+    message_id = str(message.id or "").strip()
     if not message_id:
-        raise RuntimeError("created message bead is missing an id")
+        raise RuntimeError("created message is missing an id")
     return DispatchOutcome(decision="delivered", issue_id=message_id, recipient=to)
 
 
@@ -137,16 +150,23 @@ def main() -> None:
     parser.add_argument(
         "--beads-dir",
         default="",
-        help="Beads directory override (defaults to BEADS_DIR or repo .beads)",
+        help="explicit beads root override (defaults to project-scoped store)",
+    )
+    parser.add_argument(
+        "--repo-dir",
+        default="",
+        help="explicit repo root override (defaults to ./worktree, then cwd)",
     )
     args = parser.parse_args()
 
     beads_dir = str(args.beads_dir).strip() or None
-    if beads_dir:
-        beads_root = Path(beads_dir).expanduser().resolve()
-    else:
-        beads_root = Path(os.environ.get("BEADS_DIR", str(Path.cwd() / ".beads"))).expanduser()
-        beads_root = beads_root.resolve()
+    repo_dir = str(args.repo_dir).strip() or None
+    beads_root, repo_root, override_warning = _resolve_context(
+        beads_dir=beads_dir,
+        repo_dir=repo_dir,
+    )
+    if override_warning:
+        print(override_warning, file=sys.stderr)
     if not beads_root.exists():
         print(f"error: beads dir not found: {beads_root}", file=sys.stderr)
         raise SystemExit(1)
@@ -160,7 +180,7 @@ def main() -> None:
             thread=args.thread.strip() or None,
             reply_to=args.reply_to.strip() or None,
             beads_root=beads_root,
-            cwd=Path.cwd(),
+            cwd=repo_root,
         )
     except RuntimeError as exc:
         print(f"error: {exc}", file=sys.stderr)

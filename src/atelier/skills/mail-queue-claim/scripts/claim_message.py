@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Render a deterministic owner-versus-assignee summary for one issue."""
+"""Claim one store-backed queued coordination message."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -23,13 +24,12 @@ _BOOTSTRAP_REPO_ROOT = bootstrap_projected_atelier_script(
     require_runtime_health=__name__ == "__main__",
 )
 
-from atelier import planner_issue_ownership  # noqa: E402
 from atelier.beads_context import (  # noqa: E402
     resolve_runtime_repo_dir_hint,
     resolve_skill_beads_context,
 )
 from atelier.lib.beads import SubprocessBeadsClient  # noqa: E402
-from atelier.store import build_atelier_store  # noqa: E402
+from atelier.store import ClaimMessageRequest, build_atelier_store  # noqa: E402
 
 
 def _merge_warnings(*messages: str | None) -> str | None:
@@ -40,7 +40,9 @@ def _merge_warnings(*messages: str | None) -> str | None:
 
 
 def _resolve_context(
-    *, beads_dir: str | None, repo_dir: str | None
+    *,
+    beads_dir: str | None,
+    repo_dir: str | None,
 ) -> tuple[Path, Path, str | None]:
     repo_hint, runtime_warning = resolve_runtime_repo_dir_hint(repo_dir=repo_dir)
     context = resolve_skill_beads_context(
@@ -54,47 +56,67 @@ def _resolve_context(
     )
 
 
-def _load_issue(
+def _build_store(*, beads_root: Path, repo_root: Path):
+    client = SubprocessBeadsClient(
+        cwd=repo_root,
+        beads_root=beads_root,
+        env={"BEADS_DIR": str(beads_root)},
+    )
+    return build_atelier_store(beads=client)
+
+
+def _resolve_claimant(requested_claimed_by: str | None) -> str:
+    for candidate in (
+        str(requested_claimed_by or "").strip(),
+        os.environ.get("ATELIER_AGENT_ID", "").strip(),
+        os.environ.get("BD_ACTOR", "").strip(),
+    ):
+        if candidate:
+            return candidate
+    raise ValueError("mail-queue-claim requires --claimed-by, ATELIER_AGENT_ID, or BD_ACTOR")
+
+
+def claim_message(
     *,
-    issue_id: str,
+    message_id: str,
+    claimed_by: str,
+    queue: str | None,
     beads_root: Path,
     repo_root: Path,
-) -> dict[str, object] | None:
-    store = build_atelier_store(
-        beads=SubprocessBeadsClient(
-            cwd=repo_root,
-            beads_root=beads_root,
-            env={"BEADS_DIR": str(beads_root)},
+) -> dict[str, object]:
+    store = _build_store(beads_root=beads_root, repo_root=repo_root)
+    record = asyncio.run(
+        store.claim_message(
+            ClaimMessageRequest(
+                message_id=message_id,
+                claimed_by=claimed_by,
+                queue=queue,
+            )
         )
     )
-    try:
-        record = asyncio.run(store.get_epic(issue_id))
-        return {
-            "id": record.id,
-            "title": record.title,
-            "status": record.lifecycle.value,
-            "labels": list(record.labels),
-            "assignee": record.assignee,
-        }
-    except LookupError:
-        pass
-    try:
-        record = asyncio.run(store.get_changeset(issue_id))
-    except LookupError:
-        return None
     return {
         "id": record.id,
-        "title": record.title,
-        "status": record.lifecycle.value,
-        "labels": list(record.labels),
-        "assignee": record.assignee,
-        "parent_id": record.epic_id,
+        "queue": record.queue,
+        "claimed_by": record.claimed_by,
+        "claimed_at": record.claimed_at,
+        "thread_id": record.thread_id,
+        "thread_kind": record.thread_kind.value if record.thread_kind else None,
     }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("issue_id", help="Beads issue id to inspect")
+    parser.add_argument("message_id", help="queued message id")
+    parser.add_argument(
+        "--queue",
+        default="",
+        help="optional queue name to verify before claiming",
+    )
+    parser.add_argument(
+        "--claimed-by",
+        default="",
+        help="claimant id (defaults to ATELIER_AGENT_ID or BD_ACTOR)",
+    )
     parser.add_argument(
         "--beads-dir",
         default="",
@@ -108,12 +130,14 @@ def main() -> None:
     parser.add_argument(
         "--json",
         action="store_true",
-        help="emit machine-readable JSON instead of text",
+        help="emit machine-readable JSON",
     )
     args = parser.parse_args()
 
     beads_dir = str(args.beads_dir).strip() or None
     repo_dir = str(args.repo_dir).strip() or None
+    queue = str(args.queue).strip() or None
+    claimed_by = _resolve_claimant(args.claimed_by)
     beads_root, repo_root, override_warning = _resolve_context(
         beads_dir=beads_dir,
         repo_dir=repo_dir,
@@ -124,16 +148,18 @@ def main() -> None:
         print(f"error: beads dir not found: {beads_root}", file=sys.stderr)
         raise SystemExit(1)
 
-    issue = _load_issue(issue_id=args.issue_id, beads_root=beads_root, repo_root=repo_root)
-    if issue is None:
-        print(f"error: issue not found: {args.issue_id}", file=sys.stderr)
-        raise SystemExit(1)
-
-    summary = planner_issue_ownership.summarize_issue_ownership(issue)
+    result = claim_message(
+        message_id=args.message_id.strip(),
+        claimed_by=claimed_by,
+        queue=queue,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
     if args.json:
-        print(json.dumps(summary.as_dict(), indent=2, sort_keys=True))
+        print(json.dumps(result, indent=2, sort_keys=True))
         return
-    print(planner_issue_ownership.render_issue_ownership(summary))
+    print(f"message_id: {result['id']}")
+    print(f"claimed_by: {result['claimed_by']}")
 
 
 if __name__ == "__main__":

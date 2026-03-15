@@ -30,6 +30,7 @@ Typed request/query models:
 - `CreateMessageRequest`
 - `AppendNotesRequest`
 - `ClaimMessageRequest`
+- `MarkMessageReadRequest`
 - `SetHookRequest`
 - `ClearHookRequest`
 - `UpdateReviewRequest`
@@ -73,12 +74,12 @@ implementation is backed by Beads:
   Atelier lifecycle policy.
 - Durable message routing is an Atelier contract: store-level messages are
   `work-threaded` on `epic|changeset` threads. `thread_id`, `thread_kind`,
-  `audience`, `blocking`, `reply_to`, and queue claim metadata are stable store
-  concepts. Legacy assignee or queue compatibility routing may still be
-  projected inside adapter-local startup helpers, but those startup-only
-  compatibility projections are not part of `atelier.store`. Assignee-delivery
-  hints remain adapter-local compatibility state rather than published store
-  vocabulary.
+  `audience`, `blocking`, `reply_to`, queue claim metadata, and read-state
+  transitions are stable store concepts. Legacy assignee or queue compatibility
+  routing may still be projected inside adapter-local startup helpers, but those
+  startup-only compatibility projections are not part of `atelier.store`.
+  Assignee-delivery hints remain adapter-local compatibility state rather than
+  published store vocabulary.
 - Hook ownership is an Atelier contract binding one agent to one epic.
 - Lifecycle transitions are store mutations with canonical target states, not
   free-form status edits.
@@ -109,8 +110,8 @@ The shared proof runs the same `AtelierStore` read and mutation flows over both
 backends. Representative read coverage includes epic discovery, changeset
 listing and ready discovery, message listing, hook lookup, branch metadata, and
 review/dependency state decoding. Representative mutation coverage includes
-review updates, note appends, lifecycle transitions, message create/claim, and
-agent hook set/clear.
+review updates, note appends, lifecycle transitions, message create/claim/read,
+and agent hook set/clear.
 
 This proof freezes one architecture shape: a single Atelier-owned store boundary
 implemented on top of multiple `Beads` backends. Future backend additions must
@@ -129,8 +130,8 @@ Downstream epics can rely on the following store surface today:
 - `ReviewMetadata`, `DependencyRecord`, `LifecycleTransition`
 - the request/query models in `atelier.store.contract`, including
   `AppendNotesRequest`, `UpdateReviewRequest`, `LifecycleTransitionRequest`,
-  `CreateMessageRequest`, `ClaimMessageRequest`, `SetHookRequest`, and
-  `ClearHookRequest`
+  `CreateMessageRequest`, `ClaimMessageRequest`, `MarkMessageReadRequest`,
+  `SetHookRequest`, and `ClearHookRequest`
 - shared dual-backend parity for discovery/read flows plus notes, review,
   lifecycle, message, and hook mutations
 
