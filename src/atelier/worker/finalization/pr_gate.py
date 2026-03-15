@@ -12,6 +12,7 @@ from typing import Iterator
 from ... import beads, changesets, dependency_lineage, exec, git, lifecycle, prs
 from ... import log as atelier_log
 from .. import integration as worker_integration
+from .. import store_adapter as worker_store
 from ..models import FinalizeResult
 
 
@@ -734,12 +735,12 @@ def set_changeset_review_pending_state(
         )
         return
     if fallback_pr_state:
-        beads.update_changeset_review(
+        worker_store.update_changeset_review(
             changeset_id,
-            changesets.ReviewMetadata(pr_state=fallback_pr_state),
+            pr_state=fallback_pr_state,
             beads_root=beads_root,
-            cwd=repo_root,
-            preserve_missing=True,
+            repo_root=repo_root,
+            preserve_existing=True,
         )
 
 

@@ -950,12 +950,14 @@ def update_changeset_review_from_pr(
         pr_number=str(pr_payload.get("number") or "") or None,
         pr_state=lifecycle,
     )
-    beads.update_changeset_review(
+    worker_store.update_changeset_review(
         changeset_id,
-        metadata,
+        pr_url=metadata.pr_url,
+        pr_number=metadata.pr_number,
+        pr_state=metadata.pr_state,
         beads_root=beads_root,
-        cwd=repo_root,
-        preserve_missing=True,
+        repo_root=repo_root,
+        preserve_existing=True,
     )
 
 
@@ -1034,16 +1036,14 @@ def _reconcile_parent_review_state(
     existing = changesets.parse_review_metadata(
         parent_description if isinstance(parent_description, str) else ""
     )
-    beads.update_changeset_review(
+    worker_store.update_changeset_review(
         parent_issue_id,
-        changesets.ReviewMetadata(
-            pr_url=None if parent_state == "pushed" else existing.pr_url,
-            pr_number=None if parent_state == "pushed" else existing.pr_number,
-            pr_state=parent_state,
-            review_owner=existing.review_owner,
-        ),
+        pr_url=None if parent_state == "pushed" else existing.pr_url,
+        pr_number=None if parent_state == "pushed" else existing.pr_number,
+        pr_state=parent_state,
+        review_owner=existing.review_owner,
         beads_root=beads_root,
-        cwd=repo_root,
+        repo_root=repo_root,
     )
 
 

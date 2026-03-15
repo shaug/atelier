@@ -9,7 +9,9 @@ def test_finalize_terminal_changeset_merged_updates_integrated_sha() -> None:
     merged: list[str] = []
     closed_ancestors: list[str] = []
 
-    with patch("atelier.worker.finalize.beads.update_changeset_integrated_sha") as update_sha:
+    with patch(
+        "atelier.worker.finalize.worker_store.update_changeset_integrated_sha"
+    ) as update_sha:
         result = finalize.finalize_terminal_changeset(
             changeset_id="at-1.1",
             epic_id="at-1",

@@ -1,7 +1,7 @@
+import datetime as dt
 from pathlib import Path
 from unittest.mock import patch
 
-from atelier import changesets
 from atelier.lib.beads import IssueRecord, SyncBeadsClient
 from atelier.messages import render_message
 from atelier.store import HookRecord, StartupMessageRecord, build_atelier_store
@@ -171,7 +171,7 @@ def test_update_changeset_review_updates_pr_state_via_store(monkeypatch) -> None
 
     worker_store.update_changeset_review(
         "at-epic.1",
-        changesets.ReviewMetadata(pr_state="merged"),
+        pr_state="merged",
         beads_root=Path("/beads"),
         repo_root=Path("/repo"),
     )
@@ -267,6 +267,225 @@ def test_mark_issue_in_progress_transitions_lifecycle_and_reconciles_tickets(mon
         beads_root=Path("/beads"),
         cwd=Path("/repo"),
     )
+    worker_store.clear_bundle_cache()
+
+
+def test_transition_lifecycle_updates_changeset_status(monkeypatch) -> None:
+    builder = IssueFixtureBuilder()
+    _patch_bundle(
+        monkeypatch,
+        issues=(builder.issue("at-epic.1", issue_type="task", status="open"),),
+    )
+
+    worker_store.transition_lifecycle(
+        "at-epic.1",
+        target_status="blocked",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    refreshed = worker_store.show_issue(
+        "at-epic.1",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert refreshed is not None
+    assert refreshed["status"] == "blocked"
+    worker_store.clear_bundle_cache()
+
+
+def test_mark_issue_blocked_updates_status_and_note_together(monkeypatch) -> None:
+    builder = IssueFixtureBuilder()
+    _patch_bundle(
+        monkeypatch,
+        issues=(builder.issue("at-epic.1", issue_type="task", status="open"),),
+    )
+
+    worker_store.mark_issue_blocked(
+        "at-epic.1",
+        reason="missing integration",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    refreshed = worker_store.show_issue(
+        "at-epic.1",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert refreshed is not None
+    assert refreshed["status"] == "blocked"
+    assert "blocked_at:" in str(refreshed.get("description"))
+    assert "missing integration" in str(refreshed.get("description"))
+    worker_store.clear_bundle_cache()
+
+
+def test_mark_issue_blocked_fails_closed_when_combined_update_cannot_be_verified(
+    monkeypatch,
+) -> None:
+    requests = []
+
+    class _FakeSyncClient:
+        def update(self, request):
+            requests.append(request)
+            return IssueRecord(id=request.issue_id, title="Stale", status="open")
+
+    monkeypatch.setattr(
+        worker_store,
+        "_build_store_bundle",
+        lambda **_kwargs: worker_store._StoreBundle(  # pyright: ignore[reportPrivateUsage]
+            store=build_atelier_store(beads=build_in_memory_beads_client()[0]),
+            sync_client=_FakeSyncClient(),
+        ),
+    )
+    monkeypatch.setattr(
+        worker_store,
+        "_show_issue",
+        lambda **_kwargs: {
+            "id": "at-epic.1",
+            "status": "open",
+            "description": "",
+        },
+    )
+    worker_store.clear_bundle_cache()
+
+    try:
+        try:
+            worker_store.mark_issue_blocked(
+                "at-epic.1",
+                reason="missing integration",
+                beads_root=Path("/beads"),
+                repo_root=Path("/repo"),
+            )
+        except RuntimeError as exc:
+            assert "blocked transition could not be verified" in str(exc)
+        else:
+            raise AssertionError("expected blocked transition verification to fail closed")
+    finally:
+        worker_store.clear_bundle_cache()
+
+    assert len(requests) == 5
+    descriptions = {request.description for request in requests}
+    assert len(descriptions) == 1
+    for request in requests:
+        assert request.status == "blocked"
+        assert request.description is not None
+        assert "blocked_at:" in request.description
+        assert "missing integration" in request.description
+        assert request.description.count("blocked_at:") == 1
+
+
+def test_mark_issue_blocked_reuses_same_note_when_retry_reads_partial_state(
+    monkeypatch,
+) -> None:
+    requests = []
+    real_datetime = dt.datetime
+    descriptions = iter(
+        (
+            {"id": "at-epic.1", "status": "open", "description": ""},
+            None,
+            {
+                "id": "at-epic.1",
+                "status": "open",
+                "description": "blocked_at: 2026-03-15T18:28:04+00:00 reason: missing integration\n",
+            },
+            {
+                "id": "at-epic.1",
+                "status": "blocked",
+                "description": "blocked_at: 2026-03-15T18:28:04+00:00 reason: missing integration\n",
+            },
+        )
+    )
+
+    class _FakeSyncClient:
+        def update(self, request):
+            requests.append(request)
+            return IssueRecord(id=request.issue_id, title="Stale", status="open")
+
+    monkeypatch.setattr(
+        worker_store,
+        "_build_store_bundle",
+        lambda **_kwargs: worker_store._StoreBundle(  # pyright: ignore[reportPrivateUsage]
+            store=build_atelier_store(beads=build_in_memory_beads_client()[0]),
+            sync_client=_FakeSyncClient(),
+        ),
+    )
+    monkeypatch.setattr(
+        worker_store,
+        "_show_issue",
+        lambda **_kwargs: next(descriptions),
+    )
+    monkeypatch.setattr(
+        worker_store.dt,
+        "datetime",
+        type(
+            "_FixedDateTime",
+            (),
+            {
+                "now": staticmethod(
+                    lambda tz=None: real_datetime.fromisoformat("2026-03-15T18:28:04+00:00")
+                )
+            },
+        ),
+    )
+    worker_store.clear_bundle_cache()
+
+    try:
+        worker_store.mark_issue_blocked(
+            "at-epic.1",
+            reason="missing integration",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+    finally:
+        worker_store.clear_bundle_cache()
+
+    assert len(requests) == 2
+    assert requests[0].description == requests[1].description
+    assert requests[1].description is not None
+    assert requests[1].description.count("blocked_at:") == 1
+
+
+def test_update_changeset_review_preserves_existing_review_fields(monkeypatch) -> None:
+    builder = IssueFixtureBuilder()
+    _patch_bundle(
+        monkeypatch,
+        issues=(
+            builder.issue(
+                "at-epic.1",
+                issue_type="task",
+                status="open",
+                description=(
+                    "pr_url: https://example.test/pr/1\n"
+                    "pr_number: 1\n"
+                    "pr_state: draft-pr\n"
+                    "review_owner: reviewer-a\n"
+                ),
+            ),
+        ),
+    )
+
+    worker_store.update_changeset_review(
+        "at-epic.1",
+        pr_state="in-review",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        preserve_existing=True,
+    )
+
+    refreshed = worker_store.show_issue(
+        "at-epic.1",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert refreshed is not None
+    assert "pr_url: https://example.test/pr/1" in str(refreshed["description"])
+    assert "pr_number: 1" in str(refreshed["description"])
+    assert "pr_state: in-review" in str(refreshed["description"])
+    assert "review_owner: reviewer-a" in str(refreshed["description"])
     worker_store.clear_bundle_cache()
 
 

@@ -143,7 +143,9 @@ def test_handle_pushed_without_pr_returns_review_pending_when_strategy_blocks(
     }
     marked: list[str] = []
     monkeypatch.setattr(pr_gate.git, "git_ref_exists", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(pr_gate.beads, "update_changeset_review", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        pr_gate.worker_store, "update_changeset_review", lambda *_args, **_kwargs: None
+    )
 
     result = pr_gate.handle_pushed_without_pr(
         issue=issue,
@@ -181,12 +183,11 @@ def test_set_changeset_review_pending_state_fallback_preserves_existing_review_f
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(
-        pr_gate.beads,
+        pr_gate.worker_store,
         "update_changeset_review",
-        lambda changeset_id, metadata, **kwargs: captured.update(
+        lambda changeset_id, **kwargs: captured.update(
             {
                 "changeset_id": changeset_id,
-                "metadata": metadata,
                 **kwargs,
             }
         ),
@@ -207,8 +208,8 @@ def test_set_changeset_review_pending_state_fallback_preserves_existing_review_f
 
     assert marked == ["at-123.1"]
     assert captured["changeset_id"] == "at-123.1"
-    assert captured["metadata"].pr_state == "pr-open"
-    assert captured["preserve_missing"] is True
+    assert captured["pr_state"] == "pr-open"
+    assert captured["preserve_existing"] is True
 
 
 def test_handle_pushed_without_pr_reports_failure_when_pr_create_fails(
@@ -286,11 +287,9 @@ def test_handle_pushed_without_pr_keeps_deeper_dependency_gated(monkeypatch) -> 
     )
     monkeypatch.setattr(pr_gate.git, "git_ref_exists", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
-        pr_gate.beads,
+        pr_gate.worker_store,
         "update_changeset_review",
-        lambda _changeset_id, metadata, **_kwargs: observed_states.append(
-            str(metadata.pr_state or "")
-        ),
+        lambda _changeset_id, **kwargs: observed_states.append(str(kwargs["pr_state"] or "")),
     )
 
     result = pr_gate.handle_pushed_without_pr(
@@ -1127,11 +1126,9 @@ def test_handle_pushed_without_pr_ready_mode_sets_pr_open_fallback(monkeypatch) 
     observed_states: list[str] = []
     monkeypatch.setattr(pr_gate.git, "git_ref_exists", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(
-        pr_gate.beads,
+        pr_gate.worker_store,
         "update_changeset_review",
-        lambda _changeset_id, metadata, **_kwargs: observed_states.append(
-            str(metadata.pr_state or "")
-        ),
+        lambda _changeset_id, **kwargs: observed_states.append(str(kwargs["pr_state"] or "")),
     )
 
     result = pr_gate.handle_pushed_without_pr(
@@ -1172,7 +1169,7 @@ def test_handle_pushed_without_pr_uses_diagnostic_payload_after_create(monkeypat
     applied_payloads: list[dict[str, object] | None] = []
     monkeypatch.setattr(pr_gate.git, "git_ref_exists", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(
-        pr_gate.beads,
+        pr_gate.worker_store,
         "update_changeset_review",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("fallback state should not be used when diagnostic returns a PR payload")

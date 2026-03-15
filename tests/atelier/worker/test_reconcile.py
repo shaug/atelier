@@ -467,8 +467,8 @@ def test_reconcile_blocked_merged_changesets_converges_stale_terminal_metadata_b
         ),
         patch(
             "atelier.worker.reconcile.worker_store.update_changeset_review",
-            side_effect=lambda _changeset_id, metadata, **_kwargs: operations.append(
-                ("review", str(metadata.pr_state))
+            side_effect=lambda _changeset_id, **kwargs: operations.append(
+                ("review", str(kwargs["pr_state"]))
             ),
         ),
         patch(
@@ -550,8 +550,8 @@ def test_reconcile_blocked_merged_changesets_keeps_finalize_integrated_sha_autho
         ),
         patch(
             "atelier.worker.reconcile.worker_store.update_changeset_review",
-            side_effect=lambda _changeset_id, metadata, **_kwargs: operations.append(
-                ("review", str(metadata.pr_state))
+            side_effect=lambda _changeset_id, **kwargs: operations.append(
+                ("review", str(kwargs["pr_state"]))
             ),
         ),
         patch(
