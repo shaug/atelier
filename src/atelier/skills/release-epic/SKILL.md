@@ -15,14 +15,19 @@ description: >-
 
 ## Steps
 
-1. Release the epic:
-   - `bd update <epic_id> --assignee "" --status open --remove-label at:hooked`
-1. Load the agent bead description:
-   - `bd show <agent_bead_id>`
-1. Clear the hook in the agent bead description:
-   - Write a new description with `hook_bead: null` (use `--body-file`).
+1. Release the epic through the worker lifecycle helper:
+   - clear assignee, reset lifecycle to `open` when appropriate, and remove the
+     `at:hooked` label with verification
+1. Clear the agent hook through the store-owned hook mutation for
+   `<agent_bead_id>`.
+1. See [Worker Store Migration Contract] for the worker-side release boundary
+   and the remaining compatibility seams.
 
 ## Verification
 
 - Epic has no assignee and no `at:hooked` label.
-- Agent bead description includes `hook_bead: null`.
+- Agent bead hook resolves to `null`.
+
+<!-- inline reference link definitions. please keep alphabetized -->
+
+[worker store migration contract]: ../../../../docs/worker-store-migration-contract.md

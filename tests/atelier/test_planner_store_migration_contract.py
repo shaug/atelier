@@ -432,7 +432,7 @@ def test_planner_store_migration_docs_publish_boundary_and_deferred_gaps() -> No
     assert "assignee recipient hint" in doc
     assert "plan-promote-epic" in doc
     assert "preview still expands raw issue detail" in doc
-    assert "worker lifecycle and finalization migrations onto `atelier.store`" in doc
+    assert "[Worker Store Migration Contract]" in doc
     assert "publish and integration orchestration migrations onto `atelier.store`" in doc
 
     assert "[Planner Store Migration Contract]" in startup_skill

@@ -291,6 +291,7 @@ def test_store_contract_docs_record_invariants_and_deferred_work() -> None:
     assert "This proof slice leaves only the following work deferred" in store_doc
     assert "planner migrations onto `atelier.store`" in store_doc
     assert "publish/integration migrations onto `atelier.store`" in store_doc
+    assert "[Worker Store Migration Contract]" in store_doc
     assert "The core store contract, discovery methods, mutation methods, and dual-backend" in (
         store_doc
     )
