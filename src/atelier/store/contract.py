@@ -63,6 +63,68 @@ class DependencyMutation(StoreModel):
     requires_integrated_state: bool = True
 
 
+def _validate_create_status(value: LifecycleStatus) -> LifecycleStatus:
+    if value not in {LifecycleStatus.DEFERRED, LifecycleStatus.OPEN}:
+        raise ValueError("create requests only support deferred or open initial status")
+    return value
+
+
+class CreateEpicRequest(StoreModel):
+    """Mutation request for creating one planner-owned epic."""
+
+    title: Identifier
+    description: str | None = None
+    acceptance_criteria: str
+    design: str | None = None
+    labels: tuple[Identifier, ...] = ()
+    initial_status: LifecycleStatus = LifecycleStatus.DEFERRED
+
+    @field_validator("labels")
+    @classmethod
+    def _dedupe_labels(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _dedupe_identifiers(value)
+
+    @field_validator("initial_status")
+    @classmethod
+    def _restrict_initial_status(cls, value: LifecycleStatus) -> LifecycleStatus:
+        return _validate_create_status(value)
+
+
+class CreateChangesetRequest(StoreModel):
+    """Mutation request for creating one planner-owned changeset."""
+
+    epic_id: Identifier
+    title: Identifier
+    acceptance_criteria: str
+    description: str | None = None
+    notes: tuple[str, ...] = ()
+    labels: tuple[Identifier, ...] = ()
+    initial_status: LifecycleStatus = LifecycleStatus.DEFERRED
+
+    @field_validator("notes")
+    @classmethod
+    def _normalize_notes(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for note in value:
+            cleaned = note.strip()
+            if not cleaned or cleaned in seen:
+                continue
+            seen.add(cleaned)
+            normalized.append(cleaned)
+        return tuple(normalized)
+
+    @field_validator("labels")
+    @classmethod
+    def _dedupe_labels(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _dedupe_identifiers(value)
+
+    @field_validator("initial_status")
+    @classmethod
+    def _restrict_initial_status(cls, value: LifecycleStatus) -> LifecycleStatus:
+        return _validate_create_status(value)
+
+
 class CreateMessageRequest(StoreModel):
     """Mutation request for creating one durable coordination message."""
 
@@ -165,6 +227,8 @@ __all__ = [
     "ChangesetQuery",
     "ClaimMessageRequest",
     "ClearHookRequest",
+    "CreateChangesetRequest",
+    "CreateEpicRequest",
     "CreateMessageRequest",
     "DependencyMutation",
     "EpicQuery",

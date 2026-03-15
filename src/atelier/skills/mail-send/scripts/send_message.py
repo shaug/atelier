@@ -28,12 +28,18 @@ from atelier.beads_context import (  # noqa: E402
     resolve_runtime_repo_dir_hint,
     resolve_skill_beads_context,
 )
-from atelier.lib.beads import SubprocessBeadsClient  # noqa: E402
+from atelier.lib.beads import (  # noqa: E402
+    ShowIssueRequest,
+    SubprocessBeadsClient,
+    UpdateIssueRequest,
+)
 from atelier.store import (  # noqa: E402
     CreateMessageRequest,
     MessageThreadKind,
     build_atelier_store,
 )
+
+_MAX_ASSIGNMENT_ATTEMPTS = 3
 
 
 @dataclass(frozen=True)
@@ -98,13 +104,12 @@ def dispatch_message(
     if thread_target not in {"changeset", "epic"}:
         raise RuntimeError("mail-send requires an epic or changeset thread id")
 
-    store = build_atelier_store(
-        beads=SubprocessBeadsClient(
-            cwd=cwd,
-            beads_root=beads_root,
-            env={"BEADS_DIR": str(beads_root)},
-        )
+    client = SubprocessBeadsClient(
+        cwd=cwd,
+        beads_root=beads_root,
+        env={"BEADS_DIR": str(beads_root)},
     )
+    store = build_atelier_store(beads=client)
     message = asyncio.run(
         store.create_message(
             CreateMessageRequest(
@@ -123,7 +128,27 @@ def dispatch_message(
     message_id = str(message.id or "").strip()
     if not message_id:
         raise RuntimeError("created message is missing an id")
+    _assign_recipient_hint(message_id=message_id, recipient=to, beads=client)
     return DispatchOutcome(decision="delivered", issue_id=message_id, recipient=to)
+
+
+def _assign_recipient_hint(*, message_id: str, recipient: str, beads) -> None:
+    normalized_recipient = recipient.strip()
+    if not normalized_recipient:
+        raise RuntimeError("mail-send requires a non-empty recipient")
+    for _attempt in range(_MAX_ASSIGNMENT_ATTEMPTS):
+        asyncio.run(
+            beads.update(
+                UpdateIssueRequest(
+                    issue_id=message_id,
+                    assignee=normalized_recipient,
+                )
+            )
+        )
+        verified = asyncio.run(beads.show(ShowIssueRequest(issue_id=message_id)))
+        if (verified.assignee or "").strip() == normalized_recipient:
+            return
+    raise RuntimeError(f"message routing assignment could not be verified for {message_id}")
 
 
 def _message_kind(*, subject: str, reply_to: str | None) -> str:

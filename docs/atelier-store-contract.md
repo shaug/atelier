@@ -27,6 +27,8 @@ Typed request/query models:
 - `ReadyChangesetQuery`
 - `MessageQuery`
 - `DependencyMutation`
+- `CreateEpicRequest`
+- `CreateChangesetRequest`
 - `CreateMessageRequest`
 - `AppendNotesRequest`
 - `ClaimMessageRequest`
@@ -109,9 +111,9 @@ The store contract is now proven against both supported `Beads` backends:
 The shared proof runs the same `AtelierStore` read and mutation flows over both
 backends. Representative read coverage includes epic discovery, changeset
 listing and ready discovery, message listing, hook lookup, branch metadata, and
-review/dependency state decoding. Representative mutation coverage includes
-review updates, note appends, lifecycle transitions, message create/claim/read,
-and agent hook set/clear.
+review/dependency state decoding. Representative mutation coverage includes epic
+and changeset authoring, review updates, note appends, lifecycle transitions,
+message create/claim/read, and agent hook set/clear.
 
 This proof freezes one architecture shape: a single Atelier-owned store boundary
 implemented on top of multiple `Beads` backends. Future backend additions must
@@ -129,11 +131,12 @@ Downstream epics can rely on the following store surface today:
 - `EpicRecord`, `ChangesetRecord`, `MessageRecord`, `HookRecord`
 - `ReviewMetadata`, `DependencyRecord`, `LifecycleTransition`
 - the request/query models in `atelier.store.contract`, including
-  `AppendNotesRequest`, `UpdateReviewRequest`, `LifecycleTransitionRequest`,
-  `CreateMessageRequest`, `ClaimMessageRequest`, `MarkMessageReadRequest`,
-  `SetHookRequest`, and `ClearHookRequest`
+  `CreateEpicRequest`, `CreateChangesetRequest`, `AppendNotesRequest`,
+  `UpdateReviewRequest`, `LifecycleTransitionRequest`, `CreateMessageRequest`,
+  `ClaimMessageRequest`, `MarkMessageReadRequest`, `SetHookRequest`, and
+  `ClearHookRequest`
 - shared dual-backend parity for discovery/read flows plus notes, review,
-  lifecycle, message, and hook mutations
+  lifecycle, authoring, message, and hook mutations
 
 Downstream code should not:
 

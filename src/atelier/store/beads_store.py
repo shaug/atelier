@@ -30,6 +30,8 @@ from .contract import (
     ChangesetQuery,
     ClaimMessageRequest,
     ClearHookRequest,
+    CreateChangesetRequest,
+    CreateEpicRequest,
     CreateMessageRequest,
     DependencyMutation,
     EpicQuery,
@@ -61,6 +63,7 @@ from .models import (
 
 _DEFAULT_SCAN_LIMIT = 10_000
 _MAX_UPDATE_ATTEMPTS = 5
+_FAIL_CLOSED_REASON = "automatic fail-closed: unable to set deferred status after create"
 _MESSAGE_LABELS = ("at:message", "at:unread")
 _ACTIVE_TOP_LEVEL_DISCOVERY_STATUSES = frozenset(
     {
@@ -590,6 +593,80 @@ class AtelierStore:
             raise RuntimeError(f"dependency removal could not be verified for {mutation.issue_id}")
         return removed
 
+    async def create_epic(self, request: CreateEpicRequest) -> EpicRecord:
+        created = await self._beads.create(
+            CreateIssueRequest(
+                title=request.title,
+                type=WorkItemKind.EPIC.value,
+                description=request.description,
+                design=request.design,
+                acceptance_criteria=request.acceptance_criteria,
+                labels=("at:epic", *request.labels),
+            )
+        )
+        try:
+            if request.initial_status is not LifecycleStatus.OPEN:
+                await self.transition_lifecycle(
+                    LifecycleTransitionRequest(
+                        issue_id=created.id,
+                        target_status=request.initial_status,
+                        expected_current=LifecycleStatus.OPEN,
+                    )
+                )
+        except Exception as exc:
+            if request.initial_status is LifecycleStatus.DEFERRED:
+                await self._fail_closed_created_issue(
+                    issue_id=created.id,
+                    issue_label="epic",
+                    transition_error=exc,
+                )
+            raise
+
+        return await self.get_epic(created.id)
+
+    async def create_changeset(self, request: CreateChangesetRequest) -> ChangesetRecord:
+        state = _ReadState(self)
+        epic = await state.get_issue(request.epic_id)
+        if not (await self._role(epic, state=state)).is_epic:
+            raise LookupError(f"epic not found: {request.epic_id}")
+
+        created = await self._beads.create(
+            CreateIssueRequest(
+                title=request.title,
+                type="task",
+                description=request.description,
+                acceptance_criteria=request.acceptance_criteria,
+                parent_id=request.epic_id,
+                labels=request.labels,
+            )
+        )
+        try:
+            if request.initial_status is not LifecycleStatus.OPEN:
+                await self.transition_lifecycle(
+                    LifecycleTransitionRequest(
+                        issue_id=created.id,
+                        target_status=request.initial_status,
+                        expected_current=LifecycleStatus.OPEN,
+                    )
+                )
+        except Exception as exc:
+            if request.initial_status is LifecycleStatus.DEFERRED:
+                await self._fail_closed_created_issue(
+                    issue_id=created.id,
+                    issue_label="changeset",
+                    transition_error=exc,
+                )
+            raise
+
+        if request.notes:
+            appended = await self.append_notes(
+                AppendNotesRequest(issue_id=created.id, notes=request.notes)
+            )
+            if isinstance(appended, ChangesetRecord):
+                return appended
+
+        return await self.get_changeset(created.id)
+
     async def create_message(self, request: CreateMessageRequest) -> MessageRecord:
         normalized_metadata = messages.normalize_message_metadata(
             {
@@ -993,6 +1070,44 @@ class AtelierStore:
             if verify(refreshed):
                 return refreshed
         raise RuntimeError(failure_message)
+
+    async def _fail_closed_created_issue(
+        self,
+        *,
+        issue_id: str,
+        issue_label: str,
+        transition_error: Exception,
+    ) -> None:
+        transition_detail = str(transition_error).strip() or "status update failed"
+        try:
+            closed = await self._beads.close(
+                CloseIssueRequest(issue_id=issue_id, reason=_FAIL_CLOSED_REASON)
+            )
+        except Exception as close_error:
+            close_detail = str(close_error).strip() or "close command failed"
+            raise RuntimeError(
+                f"created {issue_label} {issue_id} but failed to set status=deferred "
+                f"after {_MAX_UPDATE_ATTEMPTS} attempts; auto-close failed "
+                f"({transition_detail}; {close_detail})"
+            ) from transition_error
+
+        if lifecycle.canonical_lifecycle_status(closed.status) != LifecycleStatus.CLOSED.value:
+            refreshed = await self._show_issue(issue_id)
+            if (
+                lifecycle.canonical_lifecycle_status(refreshed.status)
+                != LifecycleStatus.CLOSED.value
+            ):
+                raise RuntimeError(
+                    f"created {issue_label} {issue_id} but failed to set status=deferred "
+                    f"after {_MAX_UPDATE_ATTEMPTS} attempts; auto-close failed "
+                    f"({transition_detail}; close verification failed)"
+                ) from transition_error
+
+        raise RuntimeError(
+            f"created {issue_label} {issue_id} but failed to set status=deferred "
+            f"after {_MAX_UPDATE_ATTEMPTS} attempts; auto-closed to fail closed "
+            f"({transition_detail})"
+        ) from transition_error
 
     async def _role(
         self,

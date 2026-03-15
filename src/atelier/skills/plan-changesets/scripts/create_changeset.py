@@ -4,8 +4,7 @@
 from __future__ import annotations
 
 import argparse
-import re
-import subprocess
+import asyncio
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -24,160 +23,12 @@ _BOOTSTRAP_REPO_ROOT = bootstrap_projected_atelier_script(
     require_runtime_health=__name__ == "__main__",
 )
 
-from atelier import auto_export, beads  # noqa: E402
+from atelier import auto_export  # noqa: E402
 from atelier.beads_context import resolve_runtime_repo_dir_hint  # noqa: E402
 from atelier.executable_work_validation import (  # noqa: E402
     compact_excerpt,
     validate_executable_work_payload,
 )
-
-_STATUS_UPDATE_ATTEMPTS = 2
-_FAIL_CLOSED_REASON = "automatic fail-closed: unable to set deferred status after create"
-_ISSUE_ID_PATTERN = re.compile(r"\b[a-zA-Z][a-zA-Z0-9_-]*-[a-zA-Z0-9]+(?:\.[a-zA-Z0-9]+)*\b")
-_CREATE_OUTPUT_EXCERPT_MAX = 160
-
-
-def _command_detail(result: subprocess.CompletedProcess[str]) -> str:
-    stderr = (result.stderr or "").strip()
-    if stderr:
-        return stderr
-    return (result.stdout or "").strip()
-
-
-def _list_child_issue_ids(*, epic_id: str, beads_root: Path, cwd: Path) -> set[str]:
-    issues = beads.run_bd_json(
-        ["list", "--parent", epic_id, "--limit", "0"],
-        beads_root=beads_root,
-        cwd=cwd,
-    )
-    ids: set[str] = set()
-    for issue in issues:
-        issue_id = issue.get("id")
-        if isinstance(issue_id, str):
-            cleaned = issue_id.strip()
-            if cleaned:
-                ids.add(cleaned)
-    return ids
-
-
-def _extract_issue_ids_from_output(raw_output: str) -> list[str]:
-    seen: set[str] = set()
-    issue_ids: list[str] = []
-    for match in _ISSUE_ID_PATTERN.findall(raw_output):
-        if match in seen:
-            continue
-        issue_ids.append(match)
-        seen.add(match)
-    return issue_ids
-
-
-def _compact_excerpt(raw_output: str) -> str:
-    compacted = " ".join(str(raw_output).split())
-    if not compacted:
-        return "<empty>"
-    if len(compacted) <= _CREATE_OUTPUT_EXCERPT_MAX:
-        return compacted
-    return f"{compacted[: _CREATE_OUTPUT_EXCERPT_MAX - 3]}..."
-
-
-def _create_output_excerpt(*, create_stdout: str, create_stderr: str) -> str:
-    stdout_excerpt = _compact_excerpt(create_stdout)
-    stderr_excerpt = _compact_excerpt(create_stderr)
-    return f"create output excerpt: stdout='{stdout_excerpt}'; stderr='{stderr_excerpt}'"
-
-
-def _resolve_created_issue_id(
-    *,
-    epic_id: str,
-    create_stdout: str,
-    create_stderr: str,
-    existing_child_ids: set[str],
-    beads_root: Path,
-    cwd: Path,
-) -> str:
-    current_child_ids = _list_child_issue_ids(epic_id=epic_id, beads_root=beads_root, cwd=cwd)
-    newly_created_ids = sorted(current_child_ids - existing_child_ids)
-    if len(newly_created_ids) == 1:
-        return newly_created_ids[0]
-
-    output_issue_ids = _extract_issue_ids_from_output(create_stdout)
-    created_candidates = [
-        issue_id for issue_id in output_issue_ids if issue_id in newly_created_ids
-    ]
-    if len(created_candidates) == 1:
-        return created_candidates[0]
-
-    excerpt = _create_output_excerpt(
-        create_stdout=create_stdout,
-        create_stderr=create_stderr,
-    )
-    if not newly_created_ids:
-        print(
-            "error: create did not produce a new child issue id; refusing to mutate existing "
-            f"changesets ({excerpt})",
-            file=sys.stderr,
-        )
-    else:
-        print(
-            "error: create returned ambiguous child ids; refusing to mutate existing changesets "
-            f"({', '.join(newly_created_ids)}; {excerpt})",
-            file=sys.stderr,
-        )
-    raise SystemExit(1)
-
-
-def _apply_status_with_fail_closed(
-    *,
-    issue_id: str,
-    status: str,
-    beads_root: Path,
-    cwd: Path,
-) -> None:
-    failure_detail = ""
-    for _ in range(_STATUS_UPDATE_ATTEMPTS):
-        status_result = beads.run_bd_command(
-            ["update", issue_id, "--status", status],
-            beads_root=beads_root,
-            cwd=cwd,
-            allow_failure=True,
-        )
-        if status_result.returncode == 0:
-            return
-        failure_detail = _command_detail(status_result)
-
-    if status == "deferred":
-        close_result = beads.run_bd_command(
-            ["close", issue_id, "--reason", _FAIL_CLOSED_REASON],
-            beads_root=beads_root,
-            cwd=cwd,
-            allow_failure=True,
-        )
-        if close_result.returncode == 0:
-            detail = failure_detail or "status update failed"
-            print(
-                f"error: created changeset {issue_id} but failed to set status=deferred "
-                f"after {_STATUS_UPDATE_ATTEMPTS} attempts; auto-closed to fail closed "
-                f"({detail})",
-                file=sys.stderr,
-            )
-            raise SystemExit(1)
-        close_detail = _command_detail(close_result) or "close command failed"
-        detail = failure_detail or "status update failed"
-        print(
-            f"error: created changeset {issue_id} but failed to set status=deferred "
-            f"after {_STATUS_UPDATE_ATTEMPTS} attempts; auto-close failed ({detail}; "
-            f"{close_detail})",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-
-    detail = failure_detail or "status update failed"
-    print(
-        f"error: created changeset {issue_id} but failed to set status={status} "
-        f"after {_STATUS_UPDATE_ATTEMPTS} attempts ({detail})",
-        file=sys.stderr,
-    )
-    raise SystemExit(1)
 
 
 def _fail_invalid_payload(*, title: str, description: str) -> None:
@@ -207,6 +58,18 @@ def _fail_invalid_payload(*, title: str, description: str) -> None:
         file=sys.stderr,
     )
     raise SystemExit(1)
+
+
+def _build_store(*, beads_root: Path, repo_root: Path):
+    from atelier.lib.beads import SubprocessBeadsClient
+    from atelier.store import build_atelier_store
+
+    client = SubprocessBeadsClient(
+        cwd=repo_root,
+        beads_root=beads_root,
+        env={"BEADS_DIR": str(beads_root)},
+    )
+    return build_atelier_store(beads=client)
 
 
 def main() -> None:
@@ -262,56 +125,30 @@ def main() -> None:
     if beads_dir:
         context = replace(context, beads_root=Path(beads_dir))
 
-    create_args = [
-        "create",
-        "--parent",
-        args.epic_id,
-        "--type",
-        "task",
-        "--title",
-        args.title,
-        "--acceptance",
-        args.acceptance,
-        "--silent",
-    ]
-    if description:
-        create_args.extend(["--description", description])
-    if args.no_export:
-        create_args.extend(["--label", "ext:no-export"])
+    store = _build_store(beads_root=context.beads_root, repo_root=context.project_dir)
+    from atelier.store import CreateChangesetRequest, LifecycleStatus
 
-    existing_child_ids = _list_child_issue_ids(
-        epic_id=args.epic_id,
-        beads_root=context.beads_root,
-        cwd=context.project_dir,
-    )
-    result = beads.run_bd_command(
-        create_args,
-        beads_root=context.beads_root,
-        cwd=context.project_dir,
-    )
-    issue_id = _resolve_created_issue_id(
-        epic_id=args.epic_id,
-        create_stdout=(result.stdout or ""),
-        create_stderr=(result.stderr or ""),
-        existing_child_ids=existing_child_ids,
-        beads_root=context.beads_root,
-        cwd=context.project_dir,
-    )
-
-    _apply_status_with_fail_closed(
-        issue_id=issue_id,
-        status=args.status,
-        beads_root=context.beads_root,
-        cwd=context.project_dir,
-    )
-
-    notes = str(args.notes).strip()
-    if notes:
-        beads.run_bd_command(
-            ["update", issue_id, "--notes", notes],
-            beads_root=context.beads_root,
-            cwd=context.project_dir,
+    initial_status = LifecycleStatus(args.status)
+    notes = (str(args.notes).strip(),) if str(args.notes).strip() else ()
+    try:
+        changeset = asyncio.run(
+            store.create_changeset(
+                CreateChangesetRequest(
+                    epic_id=args.epic_id,
+                    title=args.title,
+                    acceptance_criteria=args.acceptance,
+                    description=description or None,
+                    notes=notes,
+                    labels=("ext:no-export",) if args.no_export else (),
+                    initial_status=initial_status,
+                )
+            )
         )
+    except Exception as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
+    issue_id = changeset.id
 
     print(issue_id)
 

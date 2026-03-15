@@ -38,10 +38,31 @@ class _FakeStore:
         return SimpleNamespace(id=self.issue_id)
 
 
+class _FakeBeads:
+    def __init__(self, *, assignee: str) -> None:
+        self.assignee = assignee
+        self.update_request = None
+        self.show_request = None
+
+    async def update(self, request):
+        self.update_request = request
+        return SimpleNamespace(id=request.issue_id, assignee=request.assignee)
+
+    async def show(self, request):
+        self.show_request = request
+        return SimpleNamespace(id=request.issue_id, assignee=self.assignee)
+
+
+def _wire_store(module, *, store: _FakeStore, beads: _FakeBeads) -> None:
+    module.build_atelier_store = lambda **_kwargs: store
+    module.SubprocessBeadsClient = lambda **_kwargs: beads
+
+
 def test_dispatch_message_delivers_store_backed_worker_message() -> None:
     module = _load_script_module()
     fake_store = _FakeStore("at-msg-1")
-    module.build_atelier_store = lambda **_kwargs: fake_store
+    fake_beads = _FakeBeads(assignee="atelier/worker/codex/p101-t1")
+    _wire_store(module, store=fake_store, beads=fake_beads)
 
     result = module.dispatch_message(
         subject="Need follow-up",
@@ -66,12 +87,15 @@ def test_dispatch_message_delivers_store_backed_worker_message() -> None:
     assert request.kind == "reply"
     assert request.reply_to == "at-msg-0"
     assert request.blocking is True
+    assert fake_beads.update_request.assignee == "atelier/worker/codex/p101-t1"
+    assert fake_beads.show_request.issue_id == "at-msg-1"
 
 
 def test_dispatch_message_infers_epic_thread_kind_for_top_level_work_thread() -> None:
     module = _load_script_module()
     fake_store = _FakeStore("at-msg-1")
-    module.build_atelier_store = lambda **_kwargs: fake_store
+    fake_beads = _FakeBeads(assignee="atelier/worker/codex/p101-t1")
+    _wire_store(module, store=fake_store, beads=fake_beads)
 
     result = module.dispatch_message(
         subject="Need follow-up",
@@ -92,7 +116,8 @@ def test_dispatch_message_infers_epic_thread_kind_for_top_level_work_thread() ->
 def test_inactive_worker_threaded_message_is_discoverable_by_later_worker() -> None:
     module = _load_script_module()
     fake_store = _FakeStore("at-msg-6")
-    module.build_atelier_store = lambda **_kwargs: fake_store
+    fake_beads = _FakeBeads(assignee="atelier/worker/codex/p404-t4")
+    _wire_store(module, store=fake_store, beads=fake_beads)
 
     result = module.dispatch_message(
         subject="Resume blocked work",
@@ -152,7 +177,8 @@ def test_dispatch_message_without_thread_fails_closed() -> None:
 def test_dispatch_message_threaded_needs_decision_to_planner_sets_explicit_routing() -> None:
     module = _load_script_module()
     fake_store = _FakeStore("at-msg-3")
-    module.build_atelier_store = lambda **_kwargs: fake_store
+    fake_beads = _FakeBeads(assignee="atelier/planner/codex/p202-t2")
+    _wire_store(module, store=fake_store, beads=fake_beads)
 
     result = module.dispatch_message(
         subject="NEEDS-DECISION: Publish incomplete (at-epic.1)",
@@ -171,3 +197,22 @@ def test_dispatch_message_threaded_needs_decision_to_planner_sets_explicit_routi
     assert request.audience == ("planner",)
     assert request.blocking is True
     assert request.kind == "needs-decision"
+
+
+def test_dispatch_message_fails_closed_when_recipient_hint_cannot_be_verified() -> None:
+    module = _load_script_module()
+    fake_store = _FakeStore("at-msg-9")
+    fake_beads = _FakeBeads(assignee="atelier/worker/codex/p000")
+    _wire_store(module, store=fake_store, beads=fake_beads)
+
+    with pytest.raises(RuntimeError, match="routing assignment could not be verified"):
+        module.dispatch_message(
+            subject="Need follow-up",
+            body="Please investigate.",
+            to="atelier/worker/codex/p101-t1",
+            from_agent="atelier/planner/codex/p202-t2",
+            thread="at-thread-1.1",
+            reply_to=None,
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
