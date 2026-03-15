@@ -935,6 +935,7 @@ def test_beads_store_fails_closed() -> None:
     with pytest.raises(UnsupportedOperationError, match="dep-add"):
         _RUN(store.add_dependency(DependencyMutation(issue_id="at-change", depends_on_id="at-dep")))
 
+
 def test_beads_store_public_message_listing_skips_compatibility_routing() -> None:
     store = _store_for(
         BUILDER.issue(

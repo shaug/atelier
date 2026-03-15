@@ -8,7 +8,9 @@ import asyncio
 import json
 import os
 import sys
+from collections.abc import Callable, Coroutine
 from pathlib import Path
+from typing import Protocol, cast
 
 _SHARED_SCRIPTS_ROOT = Path(__file__).resolve().parents[2] / "shared" / "scripts"
 if str(_SHARED_SCRIPTS_ROOT) not in sys.path:
@@ -29,8 +31,22 @@ from atelier.beads_context import (  # noqa: E402
     resolve_skill_beads_context,
 )
 from atelier.lib.beads import SubprocessBeadsClient  # noqa: E402
-from atelier.store import MessageQuery, build_atelier_store  # noqa: E402
+from atelier.store import MessageQuery, MessageThreadKind, build_atelier_store  # noqa: E402
 from atelier.worker.selection import agent_role  # noqa: E402
+
+
+class _InboxMessageLike(Protocol):
+    """Structural message shape used by the mailbox skill."""
+
+    id: str
+    title: str
+    thread_id: str | None
+    thread_kind: MessageThreadKind | None
+    audience: tuple[str, ...]
+    kind: str | None
+    queue: str | None
+    claimed_by: str | None
+    blocking_roles: tuple[str, ...]
 
 
 def _merge_warnings(*messages: str | None) -> str | None:
@@ -92,6 +108,21 @@ def _render_message_title(record) -> str:
     return f"{title}{detail}"
 
 
+def _list_records(store, *, unread_only: bool):
+    query = MessageQuery(unread_only=unread_only)
+    list_startup_messages = getattr(store, "_list_startup_messages", None)
+    if callable(list_startup_messages):
+        startup_loader = cast(
+            Callable[[MessageQuery], Coroutine[object, object, tuple[_InboxMessageLike, ...]]],
+            list_startup_messages,
+        )
+        return asyncio.run(startup_loader(query))
+    return cast(
+        tuple[_InboxMessageLike, ...],
+        asyncio.run(store.list_messages(query)),
+    )
+
+
 def list_inbox_messages(
     *,
     agent_id: str,
@@ -103,10 +134,11 @@ def list_inbox_messages(
     if runtime_role is None:
         return []
     store = _build_store(beads_root=beads_root, repo_root=repo_root)
-    records = asyncio.run(store.list_messages(MessageQuery(unread_only=unread_only)))
+    records = _list_records(store, unread_only=unread_only)
     matches: list[dict[str, object]] = []
     for record in records:
-        if runtime_role not in set(record.audience) | set(record.blocking_roles):
+        blocking_roles = tuple(getattr(record, "blocking_roles", ()))
+        if runtime_role not in set(record.audience) | set(blocking_roles):
             continue
         matches.append(
             {
@@ -115,7 +147,7 @@ def list_inbox_messages(
                 "thread_id": record.thread_id,
                 "thread_kind": record.thread_kind.value if record.thread_kind else None,
                 "audience": list(record.audience),
-                "blocking_roles": list(record.blocking_roles),
+                "blocking_roles": list(blocking_roles),
                 "queue": record.queue,
                 "claimed_by": record.claimed_by,
             }
