@@ -563,12 +563,6 @@ def _mutation_snapshot(backend: str) -> dict[str, object]:
             "blocking": created_message.blocking,
             "assignee_hint": _RUN(store._show_issue(created_message.id)).assignee,
         },
-        "marked_read": {
-            "id": marked_read.id,
-            "remaining_unread": tuple(
-                record.id for record in _RUN(store.list_messages(MessageQuery(unread_only=True)))
-            ),
-        },
         "claimed": {
             "claimed_by": claimed.claimed_by,
             "queue": claimed.queue,
@@ -711,10 +705,6 @@ def test_store_dual_backend_mutation_snapshot_matches_expected_contract(backend:
             "blocking": True,
             "assignee_hint": None,
         },
-        "marked_read": {
-            "id": "msg-queue",
-            "remaining_unread": ("at-3",),
-        },
         "claimed": {
             "claimed_by": "atelier/planner/codex/p200",
             "queue": "planner",
@@ -722,7 +712,7 @@ def test_store_dual_backend_mutation_snapshot_matches_expected_contract(backend:
         },
         "marked_read": {
             "id": "msg-queue",
-            "unread_messages": ("at-1",),
+            "unread_messages": ("at-3",),
         },
         "hooked": {
             "agent_id": "atelier/worker/agent",

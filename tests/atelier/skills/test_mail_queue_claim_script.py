@@ -29,73 +29,56 @@ def _load_script_module():
 def test_claim_message_uses_store_request(monkeypatch, tmp_path: Path) -> None:
     module = _load_script_module()
     captured: dict[str, object] = {}
-
-    monkeypatch.setattr(
-        module,
-        "_resolve_context",
-        lambda **_kwargs: (tmp_path / ".beads", tmp_path / "repo", None),
-    )
-    monkeypatch.setattr(module, "_resolve_claimed_by", lambda _explicit: "atelier/planner/codex/p1")
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
 
     class FakeStore:
-        async def list_messages(self, query):
-            del query
-            return (SimpleNamespace(id="msg-1", queue="planner"),)
-
         async def claim_message(self, request):
             captured["request"] = request
             return SimpleNamespace(
                 id="msg-1",
                 claimed_by="atelier/planner/codex/p1",
                 queue="planner",
-                status=SimpleNamespace(value="open"),
                 claimed_at="2026-03-14T22:00:00Z",
+                thread_id="at-epic.1",
+                thread_kind=SimpleNamespace(value="changeset"),
             )
 
     monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["claim_message.py", "--message-id", "msg-1", "--queue", "planner"],
-    )
 
-    module.main()
+    result = module.claim_message(
+        message_id="msg-1",
+        claimed_by="atelier/planner/codex/p1",
+        queue="planner",
+        beads_root=beads_root,
+        repo_root=tmp_path / "repo",
+    )
 
     assert captured["request"].message_id == "msg-1"
     assert captured["request"].claimed_by == "atelier/planner/codex/p1"
+    assert captured["request"].queue == "planner"
+    assert result["thread_kind"] == "changeset"
 
 
 def test_claim_message_rejects_queue_mismatch(
     monkeypatch,
-    capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
     module = _load_script_module()
-
-    monkeypatch.setattr(
-        module,
-        "_resolve_context",
-        lambda **_kwargs: (tmp_path / ".beads", tmp_path / "repo", None),
-    )
-    monkeypatch.setattr(module, "_resolve_claimed_by", lambda _explicit: "atelier/planner/codex/p1")
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
 
     class FakeStore:
-        async def list_messages(self, query):
-            del query
-            return (SimpleNamespace(id="msg-1", queue="operator"),)
-
-        async def claim_message(self, request):  # pragma: no cover - defensive
-            raise AssertionError(request)
+        async def claim_message(self, request):
+            raise ValueError(f"message {request.message_id} is not in queue {request.queue!r}")
 
     monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["claim_message.py", "--message-id", "msg-1", "--queue", "planner"],
-    )
 
-    with pytest.raises(SystemExit) as excinfo:
-        module.main()
-
-    assert excinfo.value.code == 1
-    assert "message msg-1 is not in queue 'planner'" in capsys.readouterr().err
+    with pytest.raises(ValueError, match="message msg-1 is not in queue 'planner'"):
+        module.claim_message(
+            message_id="msg-1",
+            claimed_by="atelier/planner/codex/p1",
+            queue="planner",
+            beads_root=beads_root,
+            repo_root=tmp_path / "repo",
+        )

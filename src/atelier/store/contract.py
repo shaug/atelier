@@ -190,12 +190,6 @@ class MarkMessageReadRequest(StoreModel):
     message_id: Identifier
 
 
-class MarkMessageReadRequest(StoreModel):
-    """Mutation request for clearing unread state from one message."""
-
-    message_id: Identifier
-
-
 class SetHookRequest(StoreModel):
     """Mutation request for binding an agent to one epic hook."""
 
