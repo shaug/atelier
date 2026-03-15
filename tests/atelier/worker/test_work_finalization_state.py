@@ -58,12 +58,11 @@ def test_update_changeset_review_from_pr_preserves_existing_review_owner(monkeyp
         lambda _payload, *, pushed, review_requested: "pr-open",
     )
     monkeypatch.setattr(
-        work_finalization_state.beads,
+        work_finalization_state.worker_store,
         "update_changeset_review",
-        lambda changeset_id, metadata, **kwargs: captured.update(
+        lambda changeset_id, **kwargs: captured.update(
             {
                 "changeset_id": changeset_id,
-                "metadata": metadata,
                 **kwargs,
             }
         ),
@@ -78,10 +77,10 @@ def test_update_changeset_review_from_pr_preserves_existing_review_owner(monkeyp
     )
 
     assert captured["changeset_id"] == "at-epic.1"
-    assert captured["metadata"].pr_url == "https://example.test/pr/42"
-    assert captured["metadata"].pr_number == "42"
-    assert captured["metadata"].pr_state == "pr-open"
-    assert captured["preserve_missing"] is True
+    assert captured["pr_url"] == "https://example.test/pr/42"
+    assert captured["pr_number"] == "42"
+    assert captured["pr_state"] == "pr-open"
+    assert captured["preserve_existing"] is True
 
 
 def test_changeset_parent_branch_normalizes_collapsed_root_to_default(monkeypatch) -> None:
@@ -1100,11 +1099,9 @@ def test_handle_pushed_without_pr_uses_injected_create_callback_contract(monkeyp
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        work_finalization_state.beads,
+        work_finalization_state.worker_store,
         "update_changeset_review",
-        lambda _changeset_id, metadata, **_kwargs: review_states.append(
-            str(metadata.pr_state or "")
-        ),
+        lambda _changeset_id, **kwargs: review_states.append(str(kwargs["pr_state"] or "")),
     )
     monkeypatch.setattr(work_finalization_state, "say", lambda _message: None)
 
@@ -1292,11 +1289,9 @@ def test_changeset_stack_integrity_preflight_reconciles_parent_review_metadata(
         lambda *_args, **_kwargs: (None, None),
     )
     monkeypatch.setattr(
-        work_finalization_state.beads,
+        work_finalization_state.worker_store,
         "update_changeset_review",
-        lambda _changeset_id, metadata, **_kwargs: observed_states.append(
-            str(metadata.pr_state or "")
-        ),
+        lambda _changeset_id, **kwargs: observed_states.append(str(kwargs["pr_state"] or "")),
     )
 
     preflight = work_finalization_state.changeset_stack_integrity_preflight(

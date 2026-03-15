@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import cast
 
-from .. import beads, changesets, lifecycle, messages
+from .. import beads, lifecycle, messages
 from ..io import die
 from ..lib.beads import (
     CreateIssueRequest,
@@ -24,6 +24,7 @@ from ..lib.beads import (
     build_sync_beads_client,
 )
 from ..store import (
+    AppendNotesRequest,
     AtelierStore,
     ChangesetQuery,
     ClaimMessageRequest,
@@ -35,12 +36,14 @@ from ..store import (
     MessageQuery,
     MessageThreadKind,
     ReadyChangesetQuery,
-    ReviewMetadata,
     ReviewState,
     SetAgentBeadHookRequest,
     StartupMessageRecord,
     UpdateReviewRequest,
     build_atelier_store,
+)
+from ..store import (
+    ReviewMetadata as StoreReviewMetadata,
 )
 from . import selection as worker_selection
 
@@ -214,83 +217,6 @@ def list_work_children(
     ]
 
 
-def _normalize_review_state(value: str | None) -> ReviewState | None:
-    normalized = lifecycle.normalize_review_state(value)
-    return None if normalized is None else ReviewState(normalized)
-
-
-def _normalized_text(value: str | None) -> str | None:
-    if value is None:
-        return None
-    normalized = value.strip()
-    if not normalized:
-        return None
-    return normalized
-
-
-def _normalize_pr_number(value: str | None) -> int | None:
-    normalized = _normalized_text(value)
-    if normalized is None:
-        return None
-    return int(normalized)
-
-
-def update_changeset_review(
-    changeset_id: str,
-    metadata: changesets.ReviewMetadata,
-    *,
-    beads_root: Path,
-    repo_root: Path,
-) -> dict[str, object]:
-    """Update changeset review metadata through the worker-local store adapter."""
-
-    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
-    record = asyncio.run(
-        bundle.store.update_review(
-            UpdateReviewRequest(
-                changeset_id=changeset_id,
-                review=ReviewMetadata(
-                    pr_url=_normalized_text(metadata.pr_url),
-                    pr_number=_normalize_pr_number(metadata.pr_number),
-                    pr_state=_normalize_review_state(metadata.pr_state),
-                    review_owner=_normalized_text(metadata.review_owner),
-                ),
-            )
-        )
-    )
-    payload = _show_issue(issue_id=record.id, beads_root=beads_root, repo_root=repo_root)
-    return payload or cast(
-        dict[str, object],
-        record.model_dump(mode="json", by_alias=True, exclude_none=True),
-    )
-
-
-def update_changeset_integrated_sha(
-    changeset_id: str,
-    integrated_sha: str,
-    *,
-    beads_root: Path,
-    repo_root: Path,
-) -> dict[str, object]:
-    """Persist integrated SHA metadata through AtelierStore review updates."""
-
-    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
-    record = asyncio.run(
-        bundle.store.update_review(
-            UpdateReviewRequest(
-                changeset_id=changeset_id,
-                preserve_existing=True,
-                review=ReviewMetadata(integrated_sha=_normalized_text(integrated_sha)),
-            )
-        )
-    )
-    payload = _show_issue(issue_id=record.id, beads_root=beads_root, repo_root=repo_root)
-    return payload or cast(
-        dict[str, object],
-        record.model_dump(mode="json", by_alias=True, exclude_none=True),
-    )
-
-
 def mark_issue_in_progress(
     issue_id: str,
     *,
@@ -299,14 +225,11 @@ def mark_issue_in_progress(
 ) -> beads.ExternalTicketReconcileResult:
     """Restore one issue to in-progress using the store lifecycle contract."""
 
-    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
-    asyncio.run(
-        bundle.store.transition_lifecycle(
-            LifecycleTransitionRequest(
-                issue_id=issue_id,
-                target_status=LifecycleStatus.IN_PROGRESS,
-            )
-        )
+    transition_lifecycle(
+        issue_id,
+        target_status=LifecycleStatus.IN_PROGRESS.value,
+        beads_root=beads_root,
+        repo_root=repo_root,
     )
     return beads.reconcile_reopened_issue_exported_github_tickets(
         issue_id,
@@ -510,6 +433,94 @@ def _normalize_labels(value: object) -> tuple[str, ...]:
     return tuple(sorted(lifecycle.normalized_labels(value)))
 
 
+def _normalize_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned or cleaned.lower() == "null":
+        return None
+    return cleaned
+
+
+def _normalize_review_state(value: object) -> ReviewState | None:
+    normalized = lifecycle.normalize_review_state(value)
+    if normalized is None:
+        return None
+    return ReviewState(normalized)
+
+
+def _normalize_pr_number(value: object) -> int | None:
+    if isinstance(value, int):
+        return value if value > 0 else None
+    normalized = _normalize_text(value)
+    if normalized is None or not normalized.isdigit():
+        return None
+    parsed = int(normalized)
+    return parsed if parsed > 0 else None
+
+
+def _normalize_status(value: object) -> str | None:
+    normalized = lifecycle.canonical_lifecycle_status(value)
+    if normalized is not None:
+        return normalized
+    return _normalize_text(value)
+
+
+def _labels_from_payload(value: object) -> set[str]:
+    if not isinstance(value, list):
+        return set()
+    return {str(label) for label in value if label}
+
+
+def _review_metadata(
+    *,
+    pr_url: object = None,
+    pr_number: object = None,
+    pr_state: object = None,
+    review_owner: object = None,
+    integrated_sha: object = None,
+) -> StoreReviewMetadata:
+    return StoreReviewMetadata(
+        pr_url=_normalize_text(pr_url),
+        pr_number=_normalize_pr_number(pr_number),
+        pr_state=_normalize_review_state(pr_state),
+        review_owner=_normalize_text(review_owner),
+        integrated_sha=_normalize_text(integrated_sha),
+    )
+
+
+def _fallback_issue_status_update(
+    issue_id: str,
+    *,
+    target_status: str,
+    beads_root: Path,
+    repo_root: Path,
+    expected_current: str | None = None,
+) -> None:
+    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    for _attempt in range(5):
+        current = _show_issue(issue_id=issue_id, beads_root=beads_root, repo_root=repo_root)
+        if current is None:
+            die(f"issue not found: {issue_id}")
+        current_status = _normalize_status(current.get("status"))
+        if expected_current is not None and current_status != expected_current:
+            raise ValueError(
+                f"lifecycle mismatch for {issue_id}: expected {expected_current!r}, "
+                f"got {current_status!r}"
+            )
+        if _normalize_text(current.get("status")) == target_status:
+            return
+        updated = bundle.sync_client.update(
+            UpdateIssueRequest(issue_id=issue_id, status=target_status)
+        )
+        if _normalize_text(updated.status) == target_status:
+            return
+        refreshed = _show_issue(issue_id=issue_id, beads_root=beads_root, repo_root=repo_root)
+        if refreshed is not None and _normalize_text(refreshed.get("status")) == target_status:
+            return
+    raise RuntimeError(f"lifecycle transition could not be verified for {issue_id}")
+
+
 def _claim_complete(
     issue: dict[str, object],
     *,
@@ -523,6 +534,167 @@ def _claim_complete(
         and lifecycle.canonical_lifecycle_status(issue.get("status")) == "in_progress"
         and beads.has_issue_label(labels, "hooked", beads_root=beads_root)
     )
+
+
+def transition_lifecycle(
+    issue_id: str,
+    *,
+    target_status: str,
+    beads_root: Path,
+    repo_root: Path,
+    expected_current: str | None = None,
+    reason: str | None = None,
+) -> None:
+    """Transition one work item lifecycle through AtelierStore."""
+
+    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    try:
+        current = _show_issue(issue_id=issue_id, beads_root=beads_root, repo_root=repo_root)
+        if (
+            target_status == LifecycleStatus.CLOSED.value
+            and current is not None
+            and _normalize_status(current.get("status")) == LifecycleStatus.CLOSED.value
+            and _normalize_text(current.get("status")) != LifecycleStatus.CLOSED.value
+        ):
+            _fallback_issue_status_update(
+                issue_id,
+                target_status=target_status,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                expected_current=expected_current,
+            )
+            return
+        asyncio.run(
+            bundle.store.transition_lifecycle(
+                LifecycleTransitionRequest(
+                    issue_id=issue_id,
+                    target_status=LifecycleStatus(target_status),
+                    expected_current=LifecycleStatus(expected_current)
+                    if expected_current is not None
+                    else None,
+                    reason=reason,
+                )
+            )
+        )
+    except ValueError as exc:
+        if "lifecycle transitions require work items" not in str(exc):
+            raise
+        _fallback_issue_status_update(
+            issue_id,
+            target_status=target_status,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            expected_current=expected_current,
+        )
+
+
+def append_notes(
+    issue_id: str,
+    *,
+    notes: tuple[str, ...],
+    beads_root: Path,
+    repo_root: Path,
+) -> None:
+    """Append durable notes to one work item through AtelierStore."""
+
+    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    asyncio.run(bundle.store.append_notes(AppendNotesRequest(issue_id=issue_id, notes=notes)))
+
+
+def update_changeset_review(
+    changeset_id: str,
+    *,
+    pr_url: object = None,
+    pr_number: object = None,
+    pr_state: object = None,
+    review_owner: object = None,
+    integrated_sha: object = None,
+    preserve_existing: bool = False,
+    beads_root: Path,
+    repo_root: Path,
+) -> None:
+    """Persist normalized review metadata for one changeset through AtelierStore."""
+
+    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    asyncio.run(
+        bundle.store.update_review(
+            UpdateReviewRequest(
+                changeset_id=changeset_id,
+                review=_review_metadata(
+                    pr_url=pr_url,
+                    pr_number=pr_number,
+                    pr_state=pr_state,
+                    review_owner=review_owner,
+                    integrated_sha=integrated_sha,
+                ),
+                preserve_existing=preserve_existing,
+            )
+        )
+    )
+
+
+def update_changeset_integrated_sha(
+    changeset_id: str,
+    integrated_sha: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+    allow_override: bool = False,
+) -> None:
+    """Persist the integrated SHA for one changeset through AtelierStore."""
+
+    normalized_sha = _normalize_text(integrated_sha)
+    if normalized_sha is None:
+        die("integrated sha must not be empty")
+    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    existing = asyncio.run(bundle.store.get_changeset(changeset_id)).review.integrated_sha
+    if existing and existing != normalized_sha and not allow_override:
+        die("changeset integrated sha already set; override not permitted")
+    if existing == normalized_sha:
+        return
+    update_changeset_review(
+        changeset_id,
+        integrated_sha=normalized_sha,
+        preserve_existing=True,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
+
+
+def update_issue_labels(
+    issue_id: str,
+    *,
+    add_labels: tuple[str, ...] = (),
+    remove_labels: tuple[str, ...] = (),
+    beads_root: Path,
+    repo_root: Path,
+) -> dict[str, object]:
+    """Apply compatibility-label updates with bounded verification retries."""
+
+    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    desired_add = {label for label in add_labels if label}
+    desired_remove = {label for label in remove_labels if label}
+    for _attempt in range(5):
+        current = _show_issue(issue_id=issue_id, beads_root=beads_root, repo_root=repo_root)
+        if current is None:
+            die(f"issue not found: {issue_id}")
+        current_labels = _labels_from_payload(current.get("labels"))
+        desired_labels = tuple(sorted((current_labels | desired_add) - desired_remove))
+        if current_labels == set(desired_labels):
+            return current
+        updated = bundle.sync_client.update(
+            UpdateIssueRequest(issue_id=issue_id, labels=desired_labels)
+        )
+        payload = _issue_payload(updated)
+        updated_labels = _labels_from_payload(payload.get("labels"))
+        if updated_labels == set(desired_labels):
+            return payload
+        refreshed = _show_issue(issue_id=issue_id, beads_root=beads_root, repo_root=repo_root)
+        if refreshed is not None:
+            refreshed_labels = _labels_from_payload(refreshed.get("labels"))
+            if refreshed_labels == set(desired_labels):
+                return refreshed
+    raise RuntimeError(f"label update could not be verified for {issue_id}")
 
 
 def release_epic_assignment(
@@ -1130,6 +1302,7 @@ class WorkerStoreBeadsAdapter:
 __all__ = [
     "WorkerStoreBeadsAdapter",
     "agent_hook_observation",
+    "append_notes",
     "claim_epic",
     "claim_queue_message",
     "clear_agent_hook",
@@ -1151,6 +1324,8 @@ __all__ = [
     "resolve_hooked_epic",
     "set_agent_hook",
     "show_issue",
+    "transition_lifecycle",
     "update_changeset_integrated_sha",
     "update_changeset_review",
+    "update_issue_labels",
 ]

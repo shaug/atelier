@@ -985,7 +985,7 @@ def test_run_finalize_pipeline_closed_status_checks_integration_before_abandon(m
         or FinalizeResult(continue_running=True, reason="changeset_complete")
     )
     monkeypatch.setattr(
-        finalize_pipeline.beads,
+        finalize_pipeline.worker_store,
         "update_changeset_integrated_sha",
         lambda changeset_id, integrated_sha, **_kwargs: updates.append(
             (changeset_id, integrated_sha)
@@ -1030,7 +1030,7 @@ def test_run_finalize_pipeline_updates_missing_integrated_sha(monkeypatch) -> No
 
     updates: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        finalize_pipeline.beads,
+        finalize_pipeline.worker_store,
         "update_changeset_integrated_sha",
         lambda changeset_id, integrated_sha, **_kwargs: updates.append(
             (changeset_id, integrated_sha)
@@ -1076,7 +1076,7 @@ def test_run_finalize_pipeline_preserves_recorded_integrated_sha(monkeypatch) ->
 
     updates: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        finalize_pipeline.beads,
+        finalize_pipeline.worker_store,
         "update_changeset_integrated_sha",
         lambda changeset_id, integrated_sha, **_kwargs: updates.append(
             (changeset_id, integrated_sha)

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import agent_home, beads, changesets, config, git, lifecycle, prs
+from . import changeset_state as worker_changeset_state
 from . import stale_pr_lifecycle
 from . import store_adapter as worker_store
 from .models import FinalizeResult, ReconcileResult
@@ -185,12 +186,10 @@ def _converge_stale_terminal_metadata(
         if stored_state != candidate.terminal_pr_state:
             worker_store.update_changeset_review(
                 changeset_id,
-                changesets.ReviewMetadata(
-                    pr_url=metadata.pr_url,
-                    pr_number=metadata.pr_number,
-                    pr_state=candidate.terminal_pr_state,
-                    review_owner=metadata.review_owner,
-                ),
+                pr_url=metadata.pr_url,
+                pr_number=metadata.pr_number,
+                pr_state=candidate.terminal_pr_state,
+                review_owner=metadata.review_owner,
                 beads_root=beads_root,
                 repo_root=repo_root,
             )

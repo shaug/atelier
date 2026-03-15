@@ -7,6 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .. import beads, lifecycle
+from . import store_adapter as worker_store
 
 
 def issue_labels(issue: dict[str, object]) -> set[str]:
@@ -77,7 +78,13 @@ def _close_guard_allows(
 
 
 def mark_changeset_in_progress(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
-    beads.mark_issue_in_progress(
+    worker_store.transition_lifecycle(
+        changeset_id,
+        target_status="in_progress",
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
+    beads.reconcile_reopened_issue_exported_github_tickets(
         changeset_id,
         beads_root=beads_root,
         cwd=repo_root,
@@ -87,15 +94,11 @@ def mark_changeset_in_progress(changeset_id: str, *, beads_root: Path, repo_root
 def mark_changeset_closed(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
     if not _close_guard_allows(changeset_id, beads_root=beads_root, repo_root=repo_root):
         return
-    beads.run_bd_command(
-        [
-            "update",
-            changeset_id,
-            "--status",
-            "closed",
-        ],
+    worker_store.transition_lifecycle(
+        changeset_id,
+        target_status="closed",
         beads_root=beads_root,
-        cwd=repo_root,
+        repo_root=repo_root,
     )
     beads.reconcile_closed_issue_exported_github_tickets(
         changeset_id,
@@ -107,19 +110,18 @@ def mark_changeset_closed(changeset_id: str, *, beads_root: Path, repo_root: Pat
 def mark_changeset_merged(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
     if not _close_guard_allows(changeset_id, beads_root=beads_root, repo_root=repo_root):
         return
-    beads.run_bd_command(
-        [
-            "update",
-            changeset_id,
-            "--status",
-            "closed",
-            "--add-label",
-            "cs:merged",
-            "--remove-label",
-            "cs:abandoned",
-        ],
+    worker_store.transition_lifecycle(
+        changeset_id,
+        target_status="closed",
         beads_root=beads_root,
-        cwd=repo_root,
+        repo_root=repo_root,
+    )
+    worker_store.update_issue_labels(
+        changeset_id,
+        add_labels=("cs:merged",),
+        remove_labels=("cs:abandoned",),
+        beads_root=beads_root,
+        repo_root=repo_root,
     )
     beads.reconcile_closed_issue_exported_github_tickets(
         changeset_id,
@@ -131,19 +133,18 @@ def mark_changeset_merged(changeset_id: str, *, beads_root: Path, repo_root: Pat
 def mark_changeset_abandoned(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
     if not _close_guard_allows(changeset_id, beads_root=beads_root, repo_root=repo_root):
         return
-    beads.run_bd_command(
-        [
-            "update",
-            changeset_id,
-            "--status",
-            "closed",
-            "--add-label",
-            "cs:abandoned",
-            "--remove-label",
-            "cs:merged",
-        ],
+    worker_store.transition_lifecycle(
+        changeset_id,
+        target_status="closed",
         beads_root=beads_root,
-        cwd=repo_root,
+        repo_root=repo_root,
+    )
+    worker_store.update_issue_labels(
+        changeset_id,
+        add_labels=("cs:abandoned",),
+        remove_labels=("cs:merged",),
+        beads_root=beads_root,
+        repo_root=repo_root,
     )
     beads.reconcile_closed_issue_exported_github_tickets(
         changeset_id,
@@ -157,32 +158,28 @@ def mark_changeset_blocked(
 ) -> None:
     timestamp = dt.datetime.now(tz=dt.timezone.utc).isoformat()
     note = f"blocked_at: {timestamp} reason: {reason}"
-    beads.run_bd_command(
-        [
-            "update",
-            changeset_id,
-            "--status",
-            "blocked",
-            "--append-notes",
-            note,
-        ],
+    worker_store.append_notes(
+        changeset_id,
+        notes=(note,),
         beads_root=beads_root,
-        cwd=repo_root,
+        repo_root=repo_root,
+    )
+    worker_store.transition_lifecycle(
+        changeset_id,
+        target_status="blocked",
+        beads_root=beads_root,
+        repo_root=repo_root,
     )
 
 
 def mark_changeset_children_in_progress(
     changeset_id: str, *, beads_root: Path, repo_root: Path
 ) -> None:
-    beads.run_bd_command(
-        [
-            "update",
-            changeset_id,
-            "--status",
-            "in_progress",
-        ],
+    worker_store.transition_lifecycle(
+        changeset_id,
+        target_status="in_progress",
         beads_root=beads_root,
-        cwd=repo_root,
+        repo_root=repo_root,
     )
 
 
@@ -287,15 +284,11 @@ def promote_planned_descendant_changesets(
         canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
         if canonical_status != "deferred":
             continue
-        beads.run_bd_command(
-            [
-                "update",
-                issue_id,
-                "--status",
-                "open",
-            ],
+        worker_store.transition_lifecycle(
+            issue_id,
+            target_status="open",
             beads_root=beads_root,
-            cwd=repo_root,
+            repo_root=repo_root,
         )
         promoted.append(issue_id)
     return promoted

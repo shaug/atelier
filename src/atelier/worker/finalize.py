@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .. import beads, git
+from . import store_adapter as worker_store
 from .models import FinalizeResult
 
 
@@ -146,11 +147,11 @@ def finalize_terminal_changeset(
     if terminal_state == "merged":
         mark_changeset_merged(changeset_id)
         if integrated_sha and integrated_sha.strip():
-            beads.update_changeset_integrated_sha(
+            worker_store.update_changeset_integrated_sha(
                 changeset_id,
                 integrated_sha.strip(),
                 beads_root=beads_root,
-                cwd=repo_root,
+                repo_root=repo_root,
                 allow_override=True,
             )
     elif terminal_state == "abandoned":

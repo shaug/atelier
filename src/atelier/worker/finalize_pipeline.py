@@ -11,6 +11,7 @@ from .. import beads, git, lifecycle, prs
 from .. import log as atelier_log
 from ..agents import AgentSpec
 from ..models import BranchPrMode
+from . import store_adapter as worker_store
 from .finalize_publish_gate import validate_north_star_review_gate
 from .models import FinalizeResult, PublishSignalDiagnostics
 
@@ -70,11 +71,11 @@ def _persist_integrated_sha(
                 "preserving recorded value"
             )
         return
-    beads.update_changeset_integrated_sha(
+    worker_store.update_changeset_integrated_sha(
         changeset_id,
         normalized_candidate,
         beads_root=beads_root,
-        cwd=repo_root,
+        repo_root=repo_root,
     )
 
 

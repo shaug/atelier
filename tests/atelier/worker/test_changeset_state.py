@@ -1,7 +1,11 @@
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
+from atelier.lib.beads import SyncBeadsClient
+from atelier.store import build_atelier_store
 from atelier.testing.beads import InMemoryBeadsBackend, IssueFixtureBuilder, patch_in_memory_beads
+from atelier.testing.beads.client import InMemoryBeadsClient
 from atelier.worker import changeset_state
 
 
@@ -15,14 +19,32 @@ def _seed_backend(
     return InMemoryBeadsBackend(seeded_issues=issues), beads_root, repo_root
 
 
-def test_mark_changeset_blocked_adds_blocked_state_and_note(tmp_path: Path) -> None:
+@contextmanager
+def _patched_backend(monkeypatch, backend: InMemoryBeadsBackend):
+    async_client = InMemoryBeadsClient(issue_store=backend.state)
+    store = build_atelier_store(beads=async_client)
+    changeset_state.worker_store.clear_bundle_cache()
+    monkeypatch.setattr(
+        changeset_state.worker_store,
+        "_build_store_bundle",
+        lambda **_kwargs: changeset_state.worker_store._StoreBundle(  # pyright: ignore[reportPrivateUsage]
+            store=store,
+            sync_client=SyncBeadsClient(async_client),
+        ),
+    )
+    with patch_in_memory_beads(backend):
+        yield
+    changeset_state.worker_store.clear_bundle_cache()
+
+
+def test_mark_changeset_blocked_adds_blocked_state_and_note(tmp_path: Path, monkeypatch) -> None:
     builder = IssueFixtureBuilder()
     backend, beads_root, repo_root = _seed_backend(
         tmp_path,
         builder.issue("at-1", title="Blocked changeset", status="open"),
     )
 
-    with patch_in_memory_beads(backend):
+    with _patched_backend(monkeypatch, backend):
         changeset_state.mark_changeset_blocked(
             "at-1",
             beads_root=beads_root,
@@ -36,7 +58,9 @@ def test_mark_changeset_blocked_adds_blocked_state_and_note(tmp_path: Path) -> N
     assert "missing integration" in str(issue.get("description"))
 
 
-def test_close_completed_container_changesets_closes_eligible_nodes(tmp_path: Path) -> None:
+def test_close_completed_container_changesets_closes_eligible_nodes(
+    tmp_path: Path, monkeypatch
+) -> None:
     builder = IssueFixtureBuilder()
     backend, beads_root, repo_root = _seed_backend(
         tmp_path,
@@ -64,7 +88,7 @@ def test_close_completed_container_changesets_closes_eligible_nodes(tmp_path: Pa
         ),
     )
 
-    with patch_in_memory_beads(backend):
+    with _patched_backend(monkeypatch, backend):
         closed = changeset_state.close_completed_container_changesets(
             "at-1",
             beads_root=beads_root,
@@ -78,7 +102,9 @@ def test_close_completed_container_changesets_closes_eligible_nodes(tmp_path: Pa
     assert backend.state.show("at-1.3")["status"] == "open"
 
 
-def test_close_completed_container_changesets_reopens_active_pr_changeset(tmp_path: Path) -> None:
+def test_close_completed_container_changesets_reopens_active_pr_changeset(
+    tmp_path: Path, monkeypatch
+) -> None:
     builder = IssueFixtureBuilder()
     backend, beads_root, repo_root = _seed_backend(
         tmp_path,
@@ -93,7 +119,7 @@ def test_close_completed_container_changesets_reopens_active_pr_changeset(tmp_pa
         ),
     )
 
-    with patch_in_memory_beads(backend):
+    with _patched_backend(monkeypatch, backend):
         closed = changeset_state.close_completed_container_changesets(
             "at-1",
             beads_root=beads_root,
@@ -107,6 +133,7 @@ def test_close_completed_container_changesets_reopens_active_pr_changeset(tmp_pa
 
 def test_close_completed_ancestor_container_changesets_closes_claimed_lineage_only(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     builder = IssueFixtureBuilder()
     backend, beads_root, repo_root = _seed_backend(
@@ -117,7 +144,7 @@ def test_close_completed_ancestor_container_changesets_closes_claimed_lineage_on
         builder.issue("at-1.2.1", title="Leaf", parent="at-1.2", status="closed"),
     )
 
-    with patch_in_memory_beads(backend):
+    with _patched_backend(monkeypatch, backend):
         closed = changeset_state.close_completed_ancestor_container_changesets(
             "at-1.2.1",
             beads_root=beads_root,
@@ -132,6 +159,7 @@ def test_close_completed_ancestor_container_changesets_closes_claimed_lineage_on
 
 def test_close_completed_ancestor_container_changesets_stops_when_ancestor_has_open_descendants(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     builder = IssueFixtureBuilder()
     backend, beads_root, repo_root = _seed_backend(
@@ -142,7 +170,7 @@ def test_close_completed_ancestor_container_changesets_stops_when_ancestor_has_o
         builder.issue("at-1.2.1", title="Leaf", parent="at-1.2", status="closed"),
     )
 
-    with patch_in_memory_beads(backend):
+    with _patched_backend(monkeypatch, backend):
         closed = changeset_state.close_completed_ancestor_container_changesets(
             "at-1.2.1",
             beads_root=beads_root,
@@ -155,7 +183,9 @@ def test_close_completed_ancestor_container_changesets_stops_when_ancestor_has_o
     assert backend.state.show("at-1.1")["status"] == "in_progress"
 
 
-def test_promote_planned_descendant_changesets_promotes_deferred_only(tmp_path: Path) -> None:
+def test_promote_planned_descendant_changesets_promotes_deferred_only(
+    tmp_path: Path, monkeypatch
+) -> None:
     builder = IssueFixtureBuilder()
     backend, beads_root, repo_root = _seed_backend(
         tmp_path,
@@ -164,7 +194,7 @@ def test_promote_planned_descendant_changesets_promotes_deferred_only(tmp_path: 
         builder.issue("at-1.2", title="Open child", parent="at-1", status="open"),
     )
 
-    with patch_in_memory_beads(backend):
+    with _patched_backend(monkeypatch, backend):
         promoted = changeset_state.promote_planned_descendant_changesets(
             "at-1", beads_root=beads_root, repo_root=repo_root
         )
@@ -175,23 +205,34 @@ def test_promote_planned_descendant_changesets_promotes_deferred_only(tmp_path: 
 
 
 def test_mark_changeset_in_progress_reconciles_reopened_external_tickets() -> None:
-    with patch(
-        "atelier.worker.changeset_state.beads.mark_issue_in_progress"
-    ) as mark_issue_in_progress:
+    with (
+        patch(
+            "atelier.worker.changeset_state.worker_store.transition_lifecycle"
+        ) as transition_lifecycle,
+        patch(
+            "atelier.worker.changeset_state.beads.reconcile_reopened_issue_exported_github_tickets"
+        ) as reconcile_reopened,
+    ):
         changeset_state.mark_changeset_in_progress(
             "at-1.5",
             beads_root=Path("/beads"),
             repo_root=Path("/repo"),
         )
 
-    mark_issue_in_progress.assert_called_once_with(
+    transition_lifecycle.assert_called_once_with(
+        "at-1.5",
+        target_status="in_progress",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+    reconcile_reopened.assert_called_once_with(
         "at-1.5",
         beads_root=Path("/beads"),
         cwd=Path("/repo"),
     )
 
 
-def test_mark_changeset_merged_reconciles_external_tickets(tmp_path: Path) -> None:
+def test_mark_changeset_merged_reconciles_external_tickets(tmp_path: Path, monkeypatch) -> None:
     builder = IssueFixtureBuilder()
     backend, beads_root, repo_root = _seed_backend(
         tmp_path,
@@ -204,7 +245,7 @@ def test_mark_changeset_merged_reconciles_external_tickets(tmp_path: Path) -> No
         ),
     )
 
-    with patch_in_memory_beads(backend):
+    with _patched_backend(monkeypatch, backend):
         changeset_state.mark_changeset_merged(
             "at-1.1",
             beads_root=beads_root,
@@ -219,6 +260,7 @@ def test_mark_changeset_merged_reconciles_external_tickets(tmp_path: Path) -> No
 
 def test_mark_changeset_abandoned_sets_terminal_marker_and_reconciles_external_tickets(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     builder = IssueFixtureBuilder()
     backend, beads_root, repo_root = _seed_backend(
@@ -232,7 +274,7 @@ def test_mark_changeset_abandoned_sets_terminal_marker_and_reconciles_external_t
         ),
     )
 
-    with patch_in_memory_beads(backend):
+    with _patched_backend(monkeypatch, backend):
         changeset_state.mark_changeset_abandoned(
             "at-1.2",
             beads_root=beads_root,
@@ -245,7 +287,9 @@ def test_mark_changeset_abandoned_sets_terminal_marker_and_reconciles_external_t
     assert "cs:merged" not in issue["labels"]
 
 
-def test_mark_changeset_merged_reopens_when_pr_lifecycle_is_active(tmp_path: Path) -> None:
+def test_mark_changeset_merged_reopens_when_pr_lifecycle_is_active(
+    tmp_path: Path, monkeypatch
+) -> None:
     builder = IssueFixtureBuilder()
     backend, beads_root, repo_root = _seed_backend(
         tmp_path,
@@ -257,7 +301,7 @@ def test_mark_changeset_merged_reopens_when_pr_lifecycle_is_active(tmp_path: Pat
         ),
     )
 
-    with patch_in_memory_beads(backend):
+    with _patched_backend(monkeypatch, backend):
         changeset_state.mark_changeset_merged(
             "at-1.3",
             beads_root=beads_root,
@@ -269,7 +313,9 @@ def test_mark_changeset_merged_reopens_when_pr_lifecycle_is_active(tmp_path: Pat
     assert "cs:merged" not in issue["labels"]
 
 
-def test_mark_changeset_abandoned_reopens_when_pr_lifecycle_is_active(tmp_path: Path) -> None:
+def test_mark_changeset_abandoned_reopens_when_pr_lifecycle_is_active(
+    tmp_path: Path, monkeypatch
+) -> None:
     builder = IssueFixtureBuilder()
     backend, beads_root, repo_root = _seed_backend(
         tmp_path,
@@ -281,7 +327,7 @@ def test_mark_changeset_abandoned_reopens_when_pr_lifecycle_is_active(tmp_path: 
         ),
     )
 
-    with patch_in_memory_beads(backend):
+    with _patched_backend(monkeypatch, backend):
         changeset_state.mark_changeset_abandoned(
             "at-1.4",
             beads_root=beads_root,

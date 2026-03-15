@@ -1,7 +1,6 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from atelier import changesets
 from atelier.lib.beads import IssueRecord, SyncBeadsClient
 from atelier.messages import render_message
 from atelier.store import HookRecord, StartupMessageRecord, build_atelier_store
@@ -171,7 +170,7 @@ def test_update_changeset_review_updates_pr_state_via_store(monkeypatch) -> None
 
     worker_store.update_changeset_review(
         "at-epic.1",
-        changesets.ReviewMetadata(pr_state="merged"),
+        pr_state="merged",
         beads_root=Path("/beads"),
         repo_root=Path("/repo"),
     )
@@ -267,6 +266,72 @@ def test_mark_issue_in_progress_transitions_lifecycle_and_reconciles_tickets(mon
         beads_root=Path("/beads"),
         cwd=Path("/repo"),
     )
+    worker_store.clear_bundle_cache()
+
+
+def test_transition_lifecycle_updates_changeset_status(monkeypatch) -> None:
+    builder = IssueFixtureBuilder()
+    _patch_bundle(
+        monkeypatch,
+        issues=(builder.issue("at-epic.1", issue_type="task", status="open"),),
+    )
+
+    worker_store.transition_lifecycle(
+        "at-epic.1",
+        target_status="blocked",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    refreshed = worker_store.show_issue(
+        "at-epic.1",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert refreshed is not None
+    assert refreshed["status"] == "blocked"
+    worker_store.clear_bundle_cache()
+
+
+def test_update_changeset_review_preserves_existing_review_fields(monkeypatch) -> None:
+    builder = IssueFixtureBuilder()
+    _patch_bundle(
+        monkeypatch,
+        issues=(
+            builder.issue(
+                "at-epic.1",
+                issue_type="task",
+                status="open",
+                description=(
+                    "pr_url: https://example.test/pr/1\n"
+                    "pr_number: 1\n"
+                    "pr_state: draft-pr\n"
+                    "review_owner: reviewer-a\n"
+                ),
+            ),
+        ),
+    )
+
+    worker_store.update_changeset_review(
+        "at-epic.1",
+        pr_state="in-review",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        preserve_existing=True,
+    )
+
+    refreshed = worker_store.show_issue(
+        "at-epic.1",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert refreshed is not None
+    assert "pr_url: https://example.test/pr/1" in str(refreshed["description"])
+    assert "pr_number: 1" in str(refreshed["description"])
+    assert "pr_state: in-review" in str(refreshed["description"])
+    assert "review_owner: reviewer-a" in str(refreshed["description"])
     worker_store.clear_bundle_cache()
 
 
