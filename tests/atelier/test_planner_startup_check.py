@@ -228,6 +228,16 @@ def test_startup_helper_uses_in_memory_backend_for_inbox_queue_and_epic_queries(
                 issue_type="epic",
                 labels=("at:epic",),
                 status="open",
+                dependencies=("at-dep",),
+                extra_fields={
+                    "dependencies": [
+                        {
+                            "issue_id": "at-epic-open",
+                            "depends_on_id": "at-dep",
+                            "type": "blocks",
+                        }
+                    ]
+                },
             ),
             builder.issue(
                 "at-epic-closed",
@@ -235,6 +245,12 @@ def test_startup_helper_uses_in_memory_backend_for_inbox_queue_and_epic_queries(
                 issue_type="epic",
                 labels=("at:epic",),
                 status="closed",
+            ),
+            builder.issue(
+                "at-dep",
+                title="Epic dependency",
+                issue_type="task",
+                status="in_progress",
             ),
         )
     )
@@ -259,6 +275,7 @@ def test_startup_helper_uses_in_memory_backend_for_inbox_queue_and_epic_queries(
     assert queued_messages[0]["claimed_by"] is None
     assert queued_messages[0]["queue"] == "planner"
     assert [issue["id"] for issue in epics] == ["at-epic-open"]
+    assert epics[0]["dependencies"] == [{"id": "at-dep", "status": "in_progress"}]
 
 
 def test_startup_helper_lists_leaf_descendants_with_in_memory_backend(

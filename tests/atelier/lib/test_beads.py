@@ -68,6 +68,26 @@ def test_issue_record_preserves_unknown_fields() -> None:
     assert record.extra_fields["future_field"] == {"nested": True}
 
 
+def test_issue_record_accepts_store_shaped_dependency_payloads() -> None:
+    record = IssueRecord.model_validate(
+        {
+            "id": "at-2",
+            "dependencies": [
+                {
+                    "issue_id": "at-2",
+                    "depends_on_id": "at-1",
+                    "type": "blocks",
+                    "created_at": "2026-03-14T00:00:00Z",
+                }
+            ],
+        }
+    )
+
+    assert record.dependencies[0].id == "at-1"
+    assert record.dependencies[0].extra_fields["issue_id"] == "at-2"
+    assert record.dependencies[0].extra_fields["type"] == "blocks"
+
+
 def test_issue_record_rejects_known_field_type_mismatch() -> None:
     with pytest.raises(ValidationError, match="id"):
         IssueRecord.model_validate({"id": 7})

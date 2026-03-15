@@ -124,7 +124,15 @@ class OperationOutputMode(str, Enum):
 class IssueReference(BeadsModel):
     """Typed issue reference."""
 
-    id: NonBlankStr
+    id: NonBlankStr = Field(
+        validation_alias=AliasChoices(
+            "id",
+            "depends_on_id",
+            "dependsOnId",
+            "issue_id",
+            "issueId",
+        )
+    )
     title: NonBlankStr | None = None
 
     @model_validator(mode="before")
