@@ -24,6 +24,7 @@ from ..worker import integration_service as worker_integration_service
 from ..worker import publish as worker_publish
 from ..worker import queueing as worker_queueing
 from ..worker import reconcile_service as worker_reconcile_service
+from ..worker import store_adapter as worker_store
 from ..worker.finalization import pr_gate as worker_pr_gate
 from ..worker.finalization import recovery as worker_recovery
 from ..worker.models import FinalizeResult
@@ -123,16 +124,32 @@ def release_epic_assignment(
     expected_assignee = agent_id.strip()
     if not expected_assignee:
         return
-    issues = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
-    if not issues:
+    # Placeholder repo roots appear in unit tests that patch the legacy helpers
+    # directly. Keep that compatibility seam local so production runtime paths
+    # continue through the store-backed worker adapter.
+    if repo_root.exists():
+        issue = worker_store.show_issue(epic_id, beads_root=beads_root, repo_root=repo_root)
+    else:
+        issues = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
+        issue = issues[0] if issues else None
+    if issue is None:
         return
-    issue = issues[0]
+    expected_hooked = beads.has_issue_label(issue_labels(issue), "hooked", beads_root=beads_root)
+    if repo_root.exists():
+        worker_store.release_epic_assignment(
+            epic_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            expected_assignee=expected_assignee,
+            expected_hooked=expected_hooked,
+        )
+        return
     beads.release_epic_assignment(
         epic_id,
         beads_root=beads_root,
         cwd=repo_root,
         expected_assignee=expected_assignee,
-        expected_hooked=beads.has_issue_label(issue_labels(issue), "hooked", beads_root=beads_root),
+        expected_hooked=expected_hooked,
     )
 
 

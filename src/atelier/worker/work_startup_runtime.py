@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -15,6 +14,7 @@ from ..worker import queueing as worker_queueing
 from ..worker import review as worker_review
 from ..worker import selection as worker_selection
 from ..worker import stale_pr_lifecycle
+from ..worker import store_adapter as worker_store
 from ..worker.models import StartupContractResult, StartupFinalizePreflightResult
 from ..worker.session import startup as worker_startup
 from .work_finalization_runtime import (
@@ -38,36 +38,6 @@ MergeConflictSelection = worker_review.MergeConflictSelection
 GlobalStartupSelections = worker_review.GlobalStartupSelections
 
 _WORKER_QUEUE_NAME = "worker"
-
-
-def _normalized_text(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    normalized = value.strip()
-    return normalized or None
-
-
-def _extract_hook_from_slot_payload(payload: object) -> str | None:
-    if isinstance(payload, str):
-        return _normalized_text(payload)
-    if isinstance(payload, list):
-        for item in payload:
-            hook = _extract_hook_from_slot_payload(item)
-            if hook:
-                return hook
-        return None
-    if not isinstance(payload, dict):
-        return None
-    if "hook" in payload:
-        return _extract_hook_from_slot_payload(payload.get("hook"))
-    slots = payload.get("slots")
-    if isinstance(slots, dict):
-        return _extract_hook_from_slot_payload(slots.get("hook"))
-    for key in ("id", "issue_id", "bead_id", "bead"):
-        value = _normalized_text(payload.get(key))
-        if value:
-            return value
-    return None
 
 
 def startup_finalize_preflight(
@@ -204,10 +174,11 @@ class _NextChangesetService(worker_startup.NextChangesetService):
         self._repo_root = repo_root
 
     def show_issue(self, issue_id: str) -> dict[str, object] | None:
-        issues = beads.run_bd_json(
-            ["show", issue_id], beads_root=self._beads_root, cwd=self._repo_root
+        return worker_store.show_issue(
+            issue_id,
+            beads_root=self._beads_root,
+            repo_root=self._repo_root,
         )
-        return issues[0] if issues else None
 
     def changeset_waiting_on_review_or_signals(
         self,
@@ -269,10 +240,10 @@ class _NextChangesetService(worker_startup.NextChangesetService):
         *,
         include_closed: bool,
     ) -> list[dict[str, object]]:
-        return beads.list_descendant_changesets(
+        return worker_store.list_descendant_changesets(
             parent_id,
             beads_root=self._beads_root,
-            cwd=self._repo_root,
+            repo_root=self._repo_root,
             include_closed=include_closed,
         )
 
@@ -617,22 +588,12 @@ def resolve_hooked_epic(
     Returns:
         Function result.
     """
-    hook_id = beads.get_agent_hook(agent_bead_id, beads_root=beads_root, cwd=repo_root)
-    if not hook_id:
-        return None
-    issues = beads.run_bd_json(["show", hook_id], beads_root=beads_root, cwd=repo_root)
-    if not issues:
-        return None
-    epic = issues[0]
-    status = str(epic.get("status") or "").lower()
-    if status in {"closed", "done"}:
-        return None
-    assignee = epic.get("assignee")
-    if assignee and assignee != agent_id:
-        return None
-    if assignee != agent_id:
-        return None
-    return hook_id
+    return worker_store.resolve_hooked_epic(
+        agent_bead_id,
+        agent_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
 
 
 def worker_opening_prompt(
@@ -774,19 +735,18 @@ class _StartupContractService(worker_startup.StartupContractService):
         )
 
     def list_epics(self) -> list[dict[str, object]]:
-        return beads.list_epics(
+        return worker_store.list_epics(
             beads_root=self._beads_root,
-            cwd=self._repo_root,
+            repo_root=self._repo_root,
             include_closed=False,
         )
 
     def show_issue(self, issue_id: str) -> dict[str, object] | None:
-        issues = beads.run_bd_json(
-            ["show", issue_id],
+        return worker_store.show_issue(
+            issue_id,
             beads_root=self._beads_root,
-            cwd=self._repo_root,
+            repo_root=self._repo_root,
         )
-        return issues[0] if issues else None
 
     def next_changeset(
         self,
@@ -813,10 +773,10 @@ class _StartupContractService(worker_startup.StartupContractService):
         *,
         include_closed: bool,
     ) -> list[dict[str, object]]:
-        return beads.list_descendant_changesets(
+        return worker_store.list_descendant_changesets(
             parent_id,
             beads_root=self._beads_root,
-            cwd=self._repo_root,
+            repo_root=self._repo_root,
             include_closed=include_closed,
         )
 
@@ -908,56 +868,20 @@ class _StartupContractService(worker_startup.StartupContractService):
     def stale_family_assigned_epics(
         self, issues: list[dict[str, object]], *, agent_id: str
     ) -> list[dict[str, object]]:
-        def find_agent_issue(assignee: str) -> dict[str, object] | None:
-            return beads.find_agent_bead(
-                assignee,
-                beads_root=self._beads_root,
-                cwd=self._repo_root,
-            )
-
-        def get_agent_hook(
-            agent_issue: dict[str, object],
-        ) -> worker_selection.AgentHookObservation:
-            agent_bead_id = _normalized_text(agent_issue.get("id"))
-            if agent_bead_id is None:
-                return worker_selection.AgentHookObservation.unknown("agent_bead_id_missing")
-
-            result = beads.run_bd_command(
-                ["slot", "show", agent_bead_id, "--json"],
-                beads_root=self._beads_root,
-                cwd=self._repo_root,
-                allow_failure=True,
-            )
-            if result.returncode != 0:
-                return worker_selection.AgentHookObservation.unknown("hook_lookup_failed")
-
-            raw = result.stdout.strip() if result.stdout else ""
-            if not raw:
-                return worker_selection.AgentHookObservation.unknown("hook_payload_missing")
-            try:
-                payload = json.loads(raw)
-            except json.JSONDecodeError:
-                return worker_selection.AgentHookObservation.unknown("hook_payload_invalid")
-
-            hook = _extract_hook_from_slot_payload(payload)
-            if hook is not None:
-                return worker_selection.AgentHookObservation.present(hook)
-
-            description = agent_issue.get("description")
-            fields = beads.parse_description_fields(
-                description if isinstance(description, str) else ""
-            )
-            fallback_hook = _normalized_text(fields.get("hook_bead"))
-            if fallback_hook is not None:
-                return worker_selection.AgentHookObservation.present(fallback_hook)
-            return worker_selection.AgentHookObservation.absent()
-
         return worker_selection.stale_family_assigned_epics(
             issues,
             agent_id=agent_id,
             is_session_active=agent_home.is_session_agent_active,
-            find_agent_issue=find_agent_issue,
-            get_agent_hook=get_agent_hook,
+            find_agent_issue=lambda assignee: worker_store.find_agent_bead(
+                assignee,
+                beads_root=self._beads_root,
+                repo_root=self._repo_root,
+            ),
+            get_agent_hook=lambda agent_issue: worker_store.agent_hook_observation(
+                agent_issue,
+                beads_root=self._beads_root,
+                repo_root=self._repo_root,
+            ),
         )
 
     def select_conflicted_changeset(
@@ -996,10 +920,9 @@ class _StartupContractService(worker_startup.StartupContractService):
         )
 
     def ready_changesets_global(self) -> list[dict[str, object]]:
-        return beads.run_bd_json(
-            ["ready"],
+        return worker_store.ready_changesets_global(
             beads_root=self._beads_root,
-            cwd=self._repo_root,
+            repo_root=self._repo_root,
         )
 
     def select_epic_prompt(

@@ -1153,7 +1153,7 @@ def test_run_startup_contract_resumes_unassigned_draft_pr_review_followup() -> N
 
     with (
         patch(
-            "atelier.worker.work_startup_runtime.beads.list_epics",
+            "atelier.worker.work_startup_runtime.worker_store.list_epics",
             return_value=[epic],
         ),
         patch(

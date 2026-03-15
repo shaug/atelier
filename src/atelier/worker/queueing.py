@@ -6,7 +6,7 @@ import datetime as dt
 from collections.abc import Callable
 from pathlib import Path
 
-from .. import beads, messages
+from . import store_adapter as worker_store
 
 EmitFn = Callable[[str], None]
 PromptFn = Callable[[str], str]
@@ -42,19 +42,17 @@ def send_needs_decision(
         dry_run_log(f"Would send message: {subject}")
         dry_run_log(body)
         return
-    beads.create_message_bead(
+    worker_store.create_message(
         subject=subject,
         body=body,
-        metadata={
-            "from": agent_id,
-            "queue": "overseer",
-            "msg_type": "notification",
-            "kind": "needs-decision",
-            "blocking": True,
-            "audience": ["operator"],
-        },
+        sender=agent_id,
+        thread_id=None,
+        audience=("operator",),
+        queue="overseer",
+        kind="needs-decision",
+        blocking=True,
         beads_root=beads_root,
-        cwd=repo_root,
+        repo_root=repo_root,
     )
 
 
@@ -73,29 +71,17 @@ def send_planner_notification(
         dry_run_log(f"Would send message: {subject}")
         dry_run_log(body)
         return
-    metadata: dict[str, object] = {
-        "from": agent_id,
-        "queue": "planner",
-        "msg_type": "notification",
-        "kind": "needs-decision" if subject.startswith("NEEDS-DECISION:") else "notification",
-        "audience": ["planner"],
-        "audiences": ["planner"],
-    }
-    if thread_id:
-        metadata["thread"] = thread_id
-        thread_target = messages.infer_thread_target(thread_id)
-        if thread_target is not None:
-            metadata["thread_kind"] = thread_target
-            metadata["thread_target"] = thread_target
-    if subject.startswith("NEEDS-DECISION:"):
-        metadata["blocking"] = True
-        metadata["blocking_roles"] = ["planner"]
-    beads.create_message_bead(
+    worker_store.create_message(
         subject=subject,
         body=body,
-        metadata=metadata,
+        sender=agent_id,
+        thread_id=thread_id,
+        audience=("planner",),
+        queue="planner",
+        kind="needs-decision" if subject.startswith("NEEDS-DECISION:") else "notification",
+        blocking=True if subject.startswith("NEEDS-DECISION:") else None,
         beads_root=beads_root,
-        cwd=repo_root,
+        repo_root=repo_root,
     )
 
 
@@ -108,7 +94,11 @@ def send_no_ready_changesets(
     dry_run: bool,
     dry_run_log: EmitFn,
 ) -> None:
-    summary = beads.epic_changeset_summary(epic_id, beads_root=beads_root, cwd=repo_root)
+    summary = worker_store.epic_changeset_summary(
+        epic_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
     timestamp = dt.datetime.now(tz=dt.timezone.utc).isoformat()
     subject = f"NEEDS-DECISION: No ready changesets for {epic_id}"
     body = "\n".join(
@@ -140,8 +130,11 @@ def check_inbox_before_claim(
     repo_root: Path,
     emit: EmitFn,
 ) -> bool:
-    inbox = beads.list_inbox_messages(
-        agent_id, beads_root=beads_root, cwd=repo_root, unread_only=True
+    inbox = worker_store.list_inbox_messages(
+        agent_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        unread_only=True,
     )
     if inbox:
         emit(f"Inbox has {len(inbox)} unread message(s); review before claiming work.")
@@ -178,7 +171,12 @@ def prompt_queue_claim(
     if selection not in valid_ids:
         die_fn(f"unknown queue message id: {selection}")
         return False
-    beads.claim_queue_message(selection, agent_id, beads_root=beads_root, cwd=repo_root)
+    worker_store.claim_queue_message(
+        selection,
+        agent_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
     emit(f"Claimed queue message: {selection}")
     return True
 
@@ -197,9 +195,9 @@ def handle_queue_before_claim(
     die_fn: DieFn,
     dry_run_log: EmitFn,
 ) -> bool:
-    queued = beads.list_queue_messages(
+    queued = worker_store.list_queue_messages(
         beads_root=beads_root,
-        cwd=repo_root,
+        repo_root=repo_root,
         queue=queue_name,
         unread_only=True,
     )

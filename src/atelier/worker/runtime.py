@@ -10,13 +10,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
-from .. import agent_home, agents, beads, branching, config, git, prs
+from .. import agent_home, agents, branching, config, git, prs
 from .. import log as atelier_log
 from .. import root_branch as root_branch_module
 from ..config import ProjectConfig
 from ..models import BranchHistory, BranchPrMode, BranchSquashMessage
 from ..work_feedback import ReviewFeedbackSnapshot
 from . import restart_runtime as worker_restart_runtime
+from . import store_adapter as worker_store_adapter
 from . import work_command_helpers as worker_work
 from .models import (
     FinalizeResult,
@@ -693,7 +694,7 @@ def build_worker_runtime_dependencies(
             resolve_current_project_with_repo_root=resolve_current_project_with_repo_root,
             agent_home=agent_home,
             agents=agents,
-            beads=beads,
+            beads=worker_store_adapter.WorkerStoreBeadsAdapter(),
             branching=branching,
             config=config,
             git=git,
