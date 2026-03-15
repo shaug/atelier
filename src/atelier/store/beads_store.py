@@ -65,6 +65,11 @@ _DEFAULT_SCAN_LIMIT = 10_000
 _MAX_UPDATE_ATTEMPTS = 5
 _FAIL_CLOSED_REASON = "automatic fail-closed: unable to set deferred status after create"
 _MESSAGE_LABELS = ("at:message", "at:unread")
+_ISSUE_NOT_FOUND_ERROR_MARKERS = (
+    "got 0",
+    "no issue found matching",
+    "no issues found matching the provided ids",
+)
 _ACTIVE_TOP_LEVEL_DISCOVERY_STATUSES = frozenset(
     {
         LifecycleStatus.OPEN,
@@ -93,6 +98,11 @@ def _normalized_labels(values: tuple[str, ...]) -> set[str]:
 
 def _has_contract_label(labels: set[str], label_name: str) -> bool:
     return label_name in labels or lifecycle.has_namespaced_label(labels, label_name)
+
+
+def _is_missing_issue_error(exc: BeadError) -> bool:
+    detail = str(exc).lower()
+    return any(marker in detail for marker in _ISSUE_NOT_FOUND_ERROR_MARKERS)
 
 
 async def _read_issue_slots(beads: Beads, issue_id: str) -> dict[str, str]:
@@ -1047,7 +1057,7 @@ class AtelierStore:
         except KeyError as exc:
             raise LookupError(f"issue not found: {issue_id}") from exc
         except BeadError as exc:
-            if "got 0" in str(exc):
+            if _is_missing_issue_error(exc):
                 raise LookupError(f"issue not found: {issue_id}") from exc
             raise
 

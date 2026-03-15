@@ -11,6 +11,7 @@ from pydantic import ValidationError
 import atelier.store as public_store
 from atelier.lib.beads import (
     Beads,
+    BeadsCommandError,
     BeadsCommandRequest,
     BeadsCommandResult,
     RecordingBeadsTransport,
@@ -1097,6 +1098,39 @@ def test_store_get_agent_hook_prefers_slot_value_when_available() -> None:
     hook = _RUN(store.get_agent_hook("atelier/worker/agent"))
 
     assert hook == HookRecord(agent_id="atelier/worker/agent", epic_id="at-slot")
+
+
+def test_store_get_agent_hook_falls_back_when_agent_id_show_reports_no_match(
+    monkeypatch,
+) -> None:
+    agent_id = "atelier/worker/codex/p44391-t1773582809511757000"
+    client, issue_store = build_in_memory_beads_client(
+        issues=(
+            BUILDER.issue(
+                "at-agent",
+                title=agent_id,
+                issue_type="agent",
+                labels=("at:agent",),
+                description=f"agent_id: {agent_id}\n",
+            ),
+        )
+    )
+    original_show = client.show
+
+    async def show_with_missing_agent_id(request):
+        if request.issue_id == agent_id:
+            raise BeadsCommandError(
+                f'Error fetching {agent_id}: no issue found matching "{agent_id}"'
+            )
+        return await original_show(request)
+
+    monkeypatch.setattr(client, "show", show_with_missing_agent_id)
+    issue_store.set_slot("at-agent", "hook", "at-epic")
+    store = build_atelier_store(beads=client)
+
+    hook = _RUN(store.get_agent_hook(agent_id))
+
+    assert hook == HookRecord(agent_id=agent_id, epic_id="at-epic")
 
 
 def test_create_epic_fails_closed_when_deferred_transition_fails(monkeypatch) -> None:
