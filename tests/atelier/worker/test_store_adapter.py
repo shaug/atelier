@@ -84,3 +84,40 @@ def test_release_epic_assignment_clears_assignee_and_hook_label(monkeypatch) -> 
     assert not refreshed.get("assignee")
     assert "at:hooked" not in refreshed["labels"]
     worker_store.clear_bundle_cache()
+
+
+def test_list_work_children_filters_non_work_children(monkeypatch) -> None:
+    builder = IssueFixtureBuilder()
+    _patch_bundle(
+        monkeypatch,
+        issues=(
+            builder.issue(
+                "at-epic",
+                issue_type="epic",
+                labels=("at:epic",),
+                children=("at-epic.1", "at-msg"),
+            ),
+            builder.issue(
+                "at-epic.1",
+                issue_type="task",
+                parent="at-epic",
+                status="open",
+            ),
+            builder.issue(
+                "at-msg",
+                issue_type="message",
+                parent="at-epic",
+                status="open",
+            ),
+        ),
+    )
+
+    children = worker_store.list_work_children(
+        "at-epic",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        include_closed=True,
+    )
+
+    assert [child["id"] for child in children] == ["at-epic.1"]
+    worker_store.clear_bundle_cache()

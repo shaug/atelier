@@ -170,6 +170,30 @@ def list_descendant_changesets(
     )
 
 
+def list_work_children(
+    parent_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+    include_closed: bool = False,
+) -> list[dict[str, object]]:
+    """List direct child work items through the worker-local store adapter."""
+
+    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    issues = bundle.sync_client.list(
+        ListIssuesRequest(
+            parent_id=parent_id,
+            include_closed=include_closed,
+            limit=bundle.store.scan_limit,
+        )
+    )
+    return [
+        _issue_payload(issue)
+        for issue in issues
+        if lifecycle.is_work_issue(labels=set(issue.labels), issue_type=issue.type)
+    ]
+
+
 def ready_changesets_global(
     *,
     beads_root: Path,
@@ -781,10 +805,10 @@ def epic_changeset_summary(
         include_closed=True,
     )
     if not changesets:
-        work_children = beads.list_work_children(
+        work_children = list_work_children(
             epic_id,
             beads_root=beads_root,
-            cwd=repo_root,
+            repo_root=repo_root,
             include_closed=True,
         )
         if not work_children:
@@ -992,6 +1016,7 @@ __all__ = [
     "list_epics",
     "list_inbox_messages",
     "list_queue_messages",
+    "list_work_children",
     "mark_message_read",
     "ready_changesets_global",
     "release_epic_assignment",

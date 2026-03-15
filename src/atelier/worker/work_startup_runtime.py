@@ -253,10 +253,10 @@ class _NextChangesetService(worker_startup.NextChangesetService):
         *,
         include_closed: bool,
     ) -> list[dict[str, object]]:
-        return beads.list_work_children(
+        return worker_store.list_work_children(
             parent_id,
             beads_root=self._beads_root,
-            cwd=self._repo_root,
+            repo_root=self._repo_root,
             include_closed=include_closed,
         )
 
@@ -786,10 +786,10 @@ class _StartupContractService(worker_startup.StartupContractService):
         *,
         include_closed: bool,
     ) -> list[dict[str, object]]:
-        return beads.list_work_children(
+        return worker_store.list_work_children(
             parent_id,
             beads_root=self._beads_root,
-            cwd=self._repo_root,
+            repo_root=self._repo_root,
             include_closed=include_closed,
         )
 

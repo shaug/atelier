@@ -57,3 +57,63 @@ def test_resolve_hooked_epic_uses_in_memory_slot_semantics(
 
     assert hooked == "at-epic"
     worker_store.clear_bundle_cache()
+
+
+def test_next_changeset_service_lists_work_children_via_store_adapter(monkeypatch) -> None:
+    expected_child = {"id": "at-epic.1"}
+
+    def _raise_on_raw_beads(*_args, **_kwargs):
+        raise AssertionError("raw beads.list_work_children should not be used during startup")
+
+    monkeypatch.setattr(work_startup_runtime.beads, "list_work_children", _raise_on_raw_beads)
+    monkeypatch.setattr(
+        worker_store,
+        "list_work_children",
+        lambda parent_id, *, beads_root, repo_root, include_closed: (
+            [expected_child]
+            if (
+                parent_id == "at-epic"
+                and beads_root == Path("/beads")
+                and repo_root == Path("/repo")
+                and include_closed is True
+            )
+            else []
+        ),
+    )
+
+    service = work_startup_runtime._NextChangesetService(  # pyright: ignore[reportPrivateUsage]
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert service.list_work_children("at-epic", include_closed=True) == [expected_child]
+
+
+def test_startup_contract_service_lists_work_children_via_store_adapter(monkeypatch) -> None:
+    expected_child = {"id": "at-epic.1"}
+
+    def _raise_on_raw_beads(*_args, **_kwargs):
+        raise AssertionError("raw beads.list_work_children should not be used during startup")
+
+    monkeypatch.setattr(work_startup_runtime.beads, "list_work_children", _raise_on_raw_beads)
+    monkeypatch.setattr(
+        worker_store,
+        "list_work_children",
+        lambda parent_id, *, beads_root, repo_root, include_closed: (
+            [expected_child]
+            if (
+                parent_id == "at-epic"
+                and beads_root == Path("/beads")
+                and repo_root == Path("/repo")
+                and include_closed is False
+            )
+            else []
+        ),
+    )
+
+    service = work_startup_runtime._StartupContractService(  # pyright: ignore[reportPrivateUsage]
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert service.list_work_children("at-epic", include_closed=False) == [expected_child]
