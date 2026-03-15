@@ -21,8 +21,14 @@ description: >-
    - `python3 skills/mail-queue-claim/scripts/claim_message.py <message_id> [--queue "<queue>"] [--claimed-by "<agent_id>"] [--beads-dir "<beads_dir>"] [--repo-dir "<repo_dir>"]`
 1. The script validates queue identity, enforces claim ownership, and persists
    claim metadata through `atelier.store`.
+1. See [Planner Store Migration Contract] for the current planner-side message
+   boundary and deferred gaps.
 
 ## Verification
 
 - The claimed message includes `claimed_by` and `claimed_at`, and later unread
   queue reads show it as claimed.
+
+<!-- inline reference link definitions. please keep alphabetized -->
+
+[planner store migration contract]: ../../../../docs/planner-store-migration-contract.md

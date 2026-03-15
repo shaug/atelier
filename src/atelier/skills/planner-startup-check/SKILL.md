@@ -38,6 +38,12 @@ during startup triage. Do not wait for approval to capture deferred work.
      identity, apply deterministic remediation:
      `bd update <id> --type epic --add-label at:epic`
    - `cs:*` lifecycle labels are not execution gates.
+1. Treat the planner-side startup boundary as store-backed:
+   - `planner_startup_check` and `planner_overview` read through `atelier.store`
+   - startup may still use adapter-local startup compatibility projections for
+     legacy assignee-routed messages
+   - see [Planner Store Migration Contract] for the published boundary and
+     deferred gaps
 
 ## Canonical startup command plan
 
@@ -133,3 +139,7 @@ reject unsupported invocation forms.
   `docs/beads-store-parity.md`.
 - For direct Beads diagnostics, use only supported raw forms:
   `BEADS_DIR="<beads-root>" bd ...` or `bd --db "<beads-root>/beads.db" ...`.
+
+<!-- inline reference link definitions. please keep alphabetized -->
+
+[planner store migration contract]: ../../../../docs/planner-store-migration-contract.md
