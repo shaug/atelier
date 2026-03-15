@@ -27,6 +27,7 @@ from atelier.lib.beads import (
     CreateIssueRequest,
     DependencyMutationRequest,
     IssueRecord,
+    IssueReference,
     ListIssuesRequest,
     OperationContract,
     OperationOutputMode,
@@ -86,6 +87,11 @@ def test_issue_record_accepts_store_shaped_dependency_payloads() -> None:
     assert record.dependencies[0].id == "at-1"
     assert record.dependencies[0].extra_fields["issue_id"] == "at-2"
     assert record.dependencies[0].extra_fields["type"] == "blocks"
+
+
+def test_issue_reference_requires_canonical_reference_id_field() -> None:
+    with pytest.raises(ValidationError, match="id"):
+        IssueReference.model_validate({"issue_id": "at-2", "title": "Source issue"})
 
 
 def test_issue_record_rejects_known_field_type_mismatch() -> None:
