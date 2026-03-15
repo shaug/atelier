@@ -52,3 +52,24 @@ def test_list_epics_accepts_store_shaped_dependency_payloads(
     assert issues[0]["id"] == "at-epic"
     assert issues[0]["dependencies"] == [{"id": "at-dep", "status": "in_progress"}]
     assert "Blocked epics:" in planner_overview.render_epics(issues, show_drafts=True)
+
+
+def test_list_epics_requests_epic_records_without_changesets(monkeypatch, tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    repo_root = tmp_path / "repo"
+    beads_root.mkdir()
+    repo_root.mkdir()
+    captured_query = None
+
+    class _FakeStore:
+        async def list_epics(self, query):
+            nonlocal captured_query
+            captured_query = query
+            return ()
+
+    monkeypatch.setattr(planner_overview, "_build_store", lambda **_kwargs: _FakeStore())
+
+    assert planner_overview.list_epics(beads_root=beads_root, repo_root=repo_root) == []
+    assert captured_query is not None
+    assert captured_query.include_closed is False
+    assert captured_query.include_changesets is False

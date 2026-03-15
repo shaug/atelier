@@ -52,7 +52,7 @@ def list_epics(*, beads_root: Path, repo_root: Path) -> list[dict[str, object]]:
         Epic issue payloads derived from the Atelier store.
     """
     store = _build_store(beads_root=beads_root, repo_root=repo_root)
-    epics = asyncio.run(store.list_epics(EpicQuery(include_closed=False)))
+    epics = asyncio.run(store.list_epics(EpicQuery(include_closed=False, include_changesets=False)))
     return [_epic_issue_payload(epic) for epic in epics]
 
 

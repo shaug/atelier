@@ -14,6 +14,7 @@ from atelier.lib.beads import (
     BeadsCommandError,
     BeadsCommandRequest,
     BeadsCommandResult,
+    ListIssuesRequest,
     RecordingBeadsTransport,
     ScriptedBeadsTransport,
     SubprocessBeadsClient,
@@ -33,6 +34,7 @@ from atelier.store import (
     CreateMessageRequest,
     DependencyMutation,
     DependencyRecord,
+    EpicQuery,
     EpicRecord,
     HookRecord,
     LifecycleStatus,
@@ -696,6 +698,50 @@ def test_store_epic_discovery_parity_reports_missing_identity(backend: str) -> N
         "bd update at-missing --type epic --add-label at:epic"
     )
     assert parity.missing_from_index == ()
+
+
+def test_list_epics_skips_descendant_scans_when_changesets_not_requested(monkeypatch) -> None:
+    issues = (
+        BUILDER.issue("at-epic", title="Indexed epic", issue_type="epic", labels=("at:epic",)),
+        *(BUILDER.issue(f"at-task-{index}", title=f"Task {index}") for index in range(12)),
+    )
+    client, _ = build_in_memory_beads_client(issues=issues)
+    recorded_requests: list[ListIssuesRequest] = []
+    original_list = client.list
+
+    async def _recording_list(request: ListIssuesRequest):
+        recorded_requests.append(request)
+        return await original_list(request)
+
+    monkeypatch.setattr(client, "list", _recording_list)
+    store = build_atelier_store(beads=client)
+
+    epics = _RUN(store.list_epics(EpicQuery(include_changesets=False)))
+
+    assert tuple(epic.id for epic in epics) == ("at-epic",)
+    assert all(request.parent_id is None for request in recorded_requests)
+
+
+def test_epic_discovery_parity_avoids_child_lookup_per_scanned_issue(monkeypatch) -> None:
+    issues = (
+        BUILDER.issue("at-epic", title="Indexed epic", issue_type="epic", labels=("at:epic",)),
+        *(BUILDER.issue(f"at-task-{index}", title=f"Task {index}") for index in range(12)),
+    )
+    client, _ = build_in_memory_beads_client(issues=issues)
+    recorded_requests: list[ListIssuesRequest] = []
+    original_list = client.list
+
+    async def _recording_list(request: ListIssuesRequest):
+        recorded_requests.append(request)
+        return await original_list(request)
+
+    monkeypatch.setattr(client, "list", _recording_list)
+    store = build_atelier_store(beads=client)
+
+    parity = _RUN(store.epic_discovery_parity())
+
+    assert parity.indexed_active_epic_count == 1
+    assert all(request.parent_id is None for request in recorded_requests)
 
 
 @pytest.mark.parametrize("backend", _BACKENDS)

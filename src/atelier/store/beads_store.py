@@ -364,12 +364,18 @@ class AtelierStore:
             if query.assignee is not None and issue.assignee != query.assignee:
                 continue
             if await self._is_indexed_epic(issue, state=state):
-                records.append(await self._epic_record(issue, state=state))
+                records.append(
+                    await self._epic_record(
+                        issue,
+                        state=state,
+                        include_changesets=query.include_changesets,
+                    )
+                )
         return tuple(records)
 
     async def epic_discovery_parity(self) -> EpicDiscoveryParity:
         state = _ReadState(self)
-        issues = await state.scan_issues(include_closed=True)
+        issues = await state.scan_issues(include_closed=False)
 
         active_top_level: list[IssueRecord] = []
         indexed_active_ids: set[str] = set()
@@ -1232,7 +1238,13 @@ class AtelierStore:
         )
 
     async def _is_indexed_epic(self, issue: IssueRecord, *, state: _ReadState) -> bool:
-        role = await self._role(issue, state=state)
+        del state
+        role = lifecycle.infer_work_role(
+            labels=_normalized_labels(issue.labels),
+            issue_type=issue.type,
+            parent_id=_parent_id(issue),
+            has_work_children=False,
+        )
         return role.is_epic and _has_contract_label(_normalized_labels(issue.labels), "epic")
 
     def _matches_issue_kind(self, issue: IssueRecord, kind: str) -> bool:
@@ -1380,16 +1392,24 @@ class AtelierStore:
             return (epic,)
         return ()
 
-    async def _epic_record(self, issue: IssueRecord, *, state: _ReadState) -> EpicRecord:
-        descendant_changesets = await self._descendant_changesets(
-            issue,
-            state=state,
-            include_closed=True,
-        )
-        changesets = tuple(
-            WorkRef(id=changeset.id, title=changeset.title, kind=WorkItemKind.CHANGESET)
-            for changeset in descendant_changesets
-        )
+    async def _epic_record(
+        self,
+        issue: IssueRecord,
+        *,
+        state: _ReadState,
+        include_changesets: bool = True,
+    ) -> EpicRecord:
+        changesets: tuple[WorkRef, ...] = ()
+        if include_changesets:
+            descendant_changesets = await self._descendant_changesets(
+                issue,
+                state=state,
+                include_closed=True,
+            )
+            changesets = tuple(
+                WorkRef(id=changeset.id, title=changeset.title, kind=WorkItemKind.CHANGESET)
+                for changeset in descendant_changesets
+            )
         return EpicRecord(
             id=issue.id,
             title=issue.title or issue.id,
