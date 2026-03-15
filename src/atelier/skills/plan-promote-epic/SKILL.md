@@ -77,6 +77,8 @@ description: >-
      `python skills/plan-promote-epic/scripts/promote_epic.py --epic-id "<epic_id>" [--beads-dir "<beads_dir>"] [--repo-dir "<repo_dir>"]`
    - apply promotion after explicit user confirmation:
      `python skills/plan-promote-epic/scripts/promote_epic.py --epic-id "<epic_id>" --yes [--beads-dir "<beads_dir>"] [--repo-dir "<repo_dir>"]`
+   - lifecycle promotion runs through `atelier.store`, but the preview still
+     expands raw issue detail until a richer planner preview model lands
 1. On approval, set epic status to `open`.
 1. Promote each fully-defined child changeset from `deferred` to `open`
    regardless of current dependency blockers (dependency graph still gates
@@ -97,6 +99,8 @@ description: >-
 - If the epic has no child changesets, the epic is the executable leaf work unit
   (changeset by graph inference) and status `open`.
 - Any one-child decomposition has explicit rationale in notes/description.
+- See [Planner Store Migration Contract] for the current planner-side boundary
+  and the remaining preview gap.
 
 ## Example clarification prompt
 
@@ -108,3 +112,7 @@ Before promotion I still need the following clarified in the bead:
 
 Only ask for promotion after those answers are written into the previewed epic
 or child changesets.
+
+<!-- inline reference link definitions. please keep alphabetized -->
+
+[planner store migration contract]: ../../../../docs/planner-store-migration-contract.md

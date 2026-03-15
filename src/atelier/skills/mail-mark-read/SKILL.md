@@ -16,7 +16,13 @@ description: >-
 1. Run the mark-read script:
    - `python3 skills/mail-mark-read/scripts/mark_read.py <message_id> [--beads-dir "<beads_dir>"] [--repo-dir "<repo_dir>"]`
 1. The script verifies the unread transition through `atelier.store`.
+1. See [Planner Store Migration Contract] for the current planner-side message
+   boundary and deferred gaps.
 
 ## Verification
 
 - Message is no longer returned by unread-only store queries.
+
+<!-- inline reference link definitions. please keep alphabetized -->
+
+[planner store migration contract]: ../../../../docs/planner-store-migration-contract.md

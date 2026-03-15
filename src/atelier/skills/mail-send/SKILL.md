@@ -29,6 +29,7 @@ current runtime.
 1. `mail-send` requires `--thread <epic-or-changeset>`:
    - the script writes the durable store contract fields for `thread`,
      `thread_kind`, `audience`, and default `kind`
+   - the durable write goes through `atelier.store.CreateMessageRequest`
    - worker-targeted threaded messages still block the worker runtime
 1. Do not create planner-to-worker message beads directly with `bd create`.
 1. Treat work-threaded delivery as the durable model:
@@ -36,9 +37,12 @@ current runtime.
      `thread_kind`, `audience`, `kind`, `delivery`)
    - the message stays attached to that original epic or changeset even when no
      worker is currently active
-   - recipient-specific assignee routing is not the durable coordination path
+   - recipient-specific assignee routing is not the durable coordination path;
+     the post-create assignee hint is compatibility-only metadata
 1. If no epic or changeset exists yet, do not use `mail-send` as a durable
    coordination path. Select or create the owning work item first.
+1. See [Planner Store Migration Contract] for the exact store-backed planner
+   boundary and deferred gaps.
 
 ## Verification
 
@@ -50,3 +54,7 @@ current runtime.
   agent-addressed coordination message.
 - Follow `docs/work-threaded-message-migration.md` for planner/worker/operator
   migration guidance.
+
+<!-- inline reference link definitions. please keep alphabetized -->
+
+[planner store migration contract]: ../../../../docs/planner-store-migration-contract.md

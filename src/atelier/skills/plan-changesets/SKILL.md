@@ -62,6 +62,9 @@ create/edit deferred work.
 
 1. For each changeset, create a bead with the script:
    - `python skills/plan-changesets/scripts/create_changeset.py --epic-id <epic_id> --title "<title>" --acceptance "<acceptance>" [--status deferred|open] [--description "<scope/guardrails>"] [--notes "<notes>"] [--beads-dir "<beads_dir>"] [--repo-dir "<repo_dir>"] [--no-export]`
+   - The script is a thin planner wrapper over
+     `atelier.store.CreateChangesetRequest`; planner code should not build raw
+     `bd create` argv for changeset authoring.
 1. If decomposition would produce exactly one child changeset, stop and either:
    - keep the epic as the executable changeset, or
    - record explicit decomposition rationale in epic/changeset notes before
@@ -80,6 +83,8 @@ create/edit deferred work.
 1. Record guardrails in the changeset description or notes.
 1. The script creates the bead, applies auto-export when enabled by project
    config, and prints non-fatal retry instructions if export fails.
+1. See [Planner Store Migration Contract] for the exact planner-side store
+   boundary and the remaining deferred preview gap.
 
 ## Example (Cross-cutting lifecycle bug)
 
@@ -109,3 +114,7 @@ Scenario: `Prevent premature close of active-PR changesets`.
   acceptance criteria or `done_definition`.
 - When auto-export is enabled and not opted out, each changeset gets its own
   exported external ticket link.
+
+<!-- inline reference link definitions. please keep alphabetized -->
+
+[planner store migration contract]: ../../../../docs/planner-store-migration-contract.md

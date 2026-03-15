@@ -24,8 +24,14 @@ description: >-
      thread
    - startup/finalize flows may surface threaded blocking messages even without
      a matching assignee
+1. See [Planner Store Migration Contract] for the current planner-side message
+   boundary and deferred gaps.
 
 ## Verification
 
 - Returned list includes only store-backed threaded messages for the agent
   runtime role.
+
+<!-- inline reference link definitions. please keep alphabetized -->
+
+[planner store migration contract]: ../../../../docs/planner-store-migration-contract.md

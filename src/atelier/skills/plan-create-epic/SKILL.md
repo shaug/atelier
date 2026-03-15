@@ -27,6 +27,9 @@ Do not request approval to create or edit deferred beads.
    - `python skills/plan-create-epic/scripts/create_epic.py --title "<title>" --scope "<scope>" --acceptance "<acceptance>" [--changeset-strategy "<changeset_strategy>"] [--design "<design>"] [--beads-dir "<beads_dir>"] [--repo-dir "<repo_dir>"] [--no-export]`
    - This is the canonical top-level executable-work creation path; it sets both
      `issue_type=epic` and the required `at:epic` discovery label.
+   - The script is a thin planner wrapper over
+     `atelier.store.CreateEpicRequest`; planner code should not compose raw
+     `bd create` argv for this flow.
 1. Refine the epic into the executable-path authoring contract immediately:
    - Record explicit `intent`, `rationale`, `non_goals`, `constraints`,
      `edge_cases`, and `related_context` fields in description/notes/design.
@@ -41,6 +44,8 @@ Do not request approval to create or edit deferred beads.
    `open` is the approval gate.
 1. Use `--notes` or `--append-notes` for addendums instead of rewriting the
    description.
+1. See [Planner Store Migration Contract] for the exact planner-side store
+   boundary and the remaining deferred preview gap.
 
 ## Verification
 
@@ -54,3 +59,7 @@ Do not request approval to create or edit deferred beads.
   with `direction=exported` and `sync_mode=export`.
 - If startup diagnostics report identity drift, remediation is deterministic:
   `bd update <epic-id> --type epic --add-label at:epic`.
+
+<!-- inline reference link definitions. please keep alphabetized -->
+
+[planner store migration contract]: ../../../../docs/planner-store-migration-contract.md
