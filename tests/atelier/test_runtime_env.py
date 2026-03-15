@@ -87,7 +87,7 @@ def test_projected_repo_python_command_prefers_repo_venv_python(tmp_path: Path) 
         current_executable="/usr/bin/python3",
     )
 
-    assert command == (str(python_path.resolve()),)
+    assert command == (str(python_path),)
 
 
 def test_projected_repo_python_command_returns_none_when_current_matches_repo_venv(
@@ -101,10 +101,29 @@ def test_projected_repo_python_command_returns_none_when_current_matches_repo_ve
 
     command = runtime_env.projected_repo_python_command(
         repo_root=repo_root,
-        current_executable=str(python_path.resolve()),
+        current_executable=str(python_path),
     )
 
     assert command is None
+
+
+def test_projected_repo_python_command_does_not_treat_base_python_as_repo_venv(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    python_path = repo_root / ".venv" / "bin" / "python3"
+    python_path.parent.mkdir(parents=True)
+    target = tmp_path / "python3"
+    target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    target.chmod(target.stat().st_mode | 0o111)
+    python_path.symlink_to(target)
+
+    command = runtime_env.projected_repo_python_command(
+        repo_root=repo_root,
+        current_executable=str(target),
+    )
+
+    assert command == (str(python_path),)
 
 
 def test_ensure_projected_runtime_dependency_returns_when_import_succeeds(

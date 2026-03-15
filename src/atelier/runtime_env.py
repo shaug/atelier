@@ -389,7 +389,7 @@ def _repo_python_candidate(repo_root: Path) -> Path | None:
     ):
         candidate = repo_root / relative_path
         if candidate.is_file() and os.access(candidate, os.X_OK):
-            return candidate.resolve()
+            return candidate
     return None
 
 
@@ -398,8 +398,21 @@ def _same_executable_path(current_executable: str, candidate: Path) -> bool:
     if not current:
         return False
     try:
-        return Path(current).resolve() == candidate.resolve()
+        current_path = Path(current)
+        if current_path == candidate:
+            return True
+
+        if current_path.resolve() != candidate.resolve():
+            return False
+        if candidate.parent.name not in {"bin", "Scripts"}:
+            return True
+
+        venv_root = candidate.parent.parent
+        current_path.relative_to(venv_root)
+        return True
     except OSError:
+        return False
+    except ValueError:
         return False
 
 

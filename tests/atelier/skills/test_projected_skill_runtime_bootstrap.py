@@ -109,7 +109,17 @@ def _fake_mixed_runtime_site_packages(
 def _link_repo_python(repo_root: Path) -> None:
     repo_python = repo_root / ".venv" / "bin" / "python3"
     repo_python.parent.mkdir(parents=True, exist_ok=True)
-    repo_python.symlink_to(Path(sys.executable).resolve())
+    repo_python.write_text(
+        "\n".join(
+            [
+                "#!/bin/sh",
+                f'exec "{Path(sys.executable)}" "$@"',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    repo_python.chmod(repo_python.stat().st_mode | 0o111)
 
 
 def _write_repo_python_without_site_packages(repo_root: Path) -> None:
