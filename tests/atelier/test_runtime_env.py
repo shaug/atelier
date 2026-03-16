@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import types
 from pathlib import Path
 
 import pytest
@@ -95,6 +96,37 @@ def test_format_ambient_pythonpath_warning_includes_removed_entries() -> None:
     assert "/tmp/one" in warning
     assert "/tmp/two" in warning
     assert "selected-runtime import roots" in warning
+
+
+def test_selected_runtime_pythonpath_entries_preserves_loaded_module_roots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    atelier_module = types.ModuleType("atelier")
+    atelier_module.__file__ = "/tmp/tool-runtime/atelier/__init__.py"
+    runtime_module = types.ModuleType("atelier.runtime_env")
+    runtime_module.__file__ = "/tmp/tool-runtime/atelier/runtime_env.py"
+    pydantic_module = types.ModuleType("pydantic")
+    pydantic_module.__file__ = "/tmp/tool-runtime/pydantic/__init__.py"
+    pydantic_core_module = types.ModuleType("pydantic_core")
+    pydantic_core_module.__file__ = "/tmp/tool-extensions/pydantic_core/__init__.py"
+
+    monkeypatch.setitem(runtime_env.sys.modules, "atelier", atelier_module)
+    monkeypatch.setitem(runtime_env.sys.modules, "atelier.runtime_env", runtime_module)
+    monkeypatch.setitem(runtime_env.sys.modules, "pydantic", pydantic_module)
+    monkeypatch.setitem(runtime_env.sys.modules, "pydantic_core", pydantic_core_module)
+
+    preserved = runtime_env.selected_runtime_pythonpath_entries(
+        (
+            "/tmp/foreign",
+            "/tmp/tool-runtime",
+            "/tmp/tool-extensions",
+        )
+    )
+
+    assert preserved == (
+        "/tmp/tool-runtime",
+        "/tmp/tool-extensions",
+    )
 
 
 def test_sanitize_subprocess_environment_empty_mapping_does_not_inherit_ambient(

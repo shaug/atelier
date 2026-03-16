@@ -377,6 +377,7 @@ def ensure_projected_runtime_dependency(
         SystemExit: If the dependency cannot be imported in the selected
             interpreter.
     """
+    env = dict(os.environ if base_env is None else base_env)
     try:
         imported_modules = tuple(
             (module_name, importlib.import_module(module_name))
@@ -385,7 +386,13 @@ def ensure_projected_runtime_dependency(
     except Exception as exc:
         dependency_error = exc
     else:
-        provenance_issues = _projected_runtime_provenance_issues(imported_modules)
+        selected_pythonpath_entries = selected_runtime_pythonpath_entries(
+            _pythonpath_entries(env.get(_PYTHONPATH_ENV))
+        )
+        provenance_issues = _projected_runtime_provenance_issues(
+            imported_modules,
+            allowed_pythonpath_entries=selected_pythonpath_entries,
+        )
         if not provenance_issues:
             return
         provenance_issue = provenance_issues[0]
@@ -440,7 +447,6 @@ def ensure_projected_runtime_dependency(
         )
         raise SystemExit(1)
 
-    env = dict(os.environ if base_env is None else base_env)
     current = str(current_executable or sys.executable or "").strip()
     command = (
         projected_repo_python_command(
@@ -579,12 +585,63 @@ def reset_current_process_pythonpath(
         preserve_paths: Explicit paths that must remain in ``sys.path`` even if
             they also appeared in ``entries``.
     """
-    os.environ.pop(_PYTHONPATH_ENV, None)
+    preserved_ordered = tuple(dict.fromkeys(entry for entry in preserve_paths if entry))
     removed = {entry for entry in entries if entry}
     if not removed:
         return
-    preserved = {entry for entry in preserve_paths if entry}
+    preserved = set(preserved_ordered)
     sys.path[:] = [entry for entry in sys.path if entry not in removed or entry in preserved]
+
+
+def selected_runtime_pythonpath_entries(
+    pythonpath_entries: Iterable[str],
+    *,
+    module_names: Iterable[str] = (
+        "atelier",
+        "atelier.runtime_env",
+        *_PROJECTED_RUNTIME_PROVENANCE_MODULES,
+    ),
+) -> tuple[str, ...]:
+    """Return candidate ``PYTHONPATH`` entries proven to belong to this runtime.
+
+    Args:
+        pythonpath_entries: Candidate ``PYTHONPATH`` entries to validate.
+        module_names: Loaded modules whose origins prove the selected runtime's
+            import roots.
+
+    Returns:
+        Ordered subset of ``pythonpath_entries`` containing the loaded modules.
+    """
+    candidates: list[tuple[str, Path]] = []
+    seen_entries: set[str] = set()
+    for entry in pythonpath_entries:
+        normalized = str(entry).strip()
+        if not normalized or normalized in seen_entries:
+            continue
+        seen_entries.add(normalized)
+        try:
+            resolved = Path(normalized).resolve()
+        except OSError:
+            resolved = Path(normalized)
+        candidates.append((normalized, resolved))
+
+    preserved: list[str] = []
+    seen_preserved: set[str] = set()
+    for module_name in module_names:
+        module = sys.modules.get(str(module_name).strip())
+        if module is None:
+            continue
+        module_path = _module_origin_path(module)
+        if module_path is None:
+            continue
+        for original, resolved in candidates:
+            if original in seen_preserved:
+                continue
+            if not _path_within_roots(module_path, (resolved,)):
+                continue
+            preserved.append(original)
+            seen_preserved.add(original)
+    return tuple(preserved)
 
 
 def _projected_runtime_dependency_modules(dependency: str) -> tuple[str, ...]:
@@ -601,8 +658,12 @@ def _projected_runtime_dependency_modules(dependency: str) -> tuple[str, ...]:
 
 def _projected_runtime_provenance_issues(
     imported_modules: Sequence[tuple[str, object]],
+    *,
+    allowed_pythonpath_entries: Iterable[str] = (),
 ) -> tuple[_ProjectedRuntimeProvenanceIssue, ...]:
-    allowed_roots = _current_runtime_dependency_roots()
+    allowed_roots = _current_runtime_dependency_roots(
+        allowed_pythonpath_entries=allowed_pythonpath_entries
+    )
     expected_roots = tuple(str(root) for root in allowed_roots)
     issues: list[_ProjectedRuntimeProvenanceIssue] = []
     for module_name, module in imported_modules:
@@ -621,13 +682,26 @@ def _projected_runtime_provenance_issues(
     return tuple(issues)
 
 
-def _current_runtime_dependency_roots() -> tuple[Path, ...]:
+def _current_runtime_dependency_roots(
+    *,
+    allowed_pythonpath_entries: Iterable[str] = (),
+) -> tuple[Path, ...]:
     roots: list[Path] = []
     for key in ("purelib", "platlib"):
         raw_path = str(sysconfig.get_path(key) or "").strip()
         if not raw_path:
             continue
         resolved = Path(raw_path).resolve()
+        if resolved not in roots:
+            roots.append(resolved)
+    for raw_path in allowed_pythonpath_entries:
+        normalized = str(raw_path).strip()
+        if not normalized:
+            continue
+        try:
+            resolved = Path(normalized).resolve()
+        except OSError:
+            resolved = Path(normalized)
         if resolved not in roots:
             roots.append(resolved)
     return tuple(roots)

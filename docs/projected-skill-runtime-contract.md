@@ -25,8 +25,8 @@ consumed by `src/atelier/skills/shared/scripts/projected_bootstrap.py`.
 ## Inherited `PYTHONPATH` rules
 
 1. Do not trust inherited `PYTHONPATH` as ambient input. Before runtime health
-   checks, clear it or reduce it to import roots already proven to belong to
-   the selected runtime.
+   checks, clear it or reduce it to import roots already proven to belong to the
+   selected runtime.
 1. In `active-interpreter` mode, inherited `PYTHONPATH` entries may remain only
    when they are the active interpreter's required dependency roots and
    bootstrap has not yet replaced them with equivalent explicit paths.
