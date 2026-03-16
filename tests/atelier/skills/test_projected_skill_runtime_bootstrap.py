@@ -97,12 +97,16 @@ def _fake_mixed_runtime_site_packages(
     atelier_modules: dict[str, str],
 ) -> Path:
     installed_root = _fake_installed_package(tmp_path, modules=atelier_modules)
+    _write_fake_module(installed_root / "platformdirs" / "__init__.py", "")
     _write_fake_module(installed_root / "pydantic" / "__init__.py", "__version__ = 'installed'\n")
     _write_fake_module(
         installed_root / "pydantic_core" / "__init__.py",
         "from . import _pydantic_core\n",
     )
     _write_fake_module(installed_root / "pydantic_core" / "_pydantic_core.py", "")
+    _write_fake_module(installed_root / "questionary" / "__init__.py", "")
+    _write_fake_module(installed_root / "rich" / "__init__.py", "")
+    _write_fake_module(installed_root / "typer" / "__init__.py", "")
     return installed_root
 
 
@@ -431,6 +435,92 @@ def test_projected_create_epic_preserves_tool_runtime_when_repo_root_is_unresolv
     assert completed.returncode == 0
     assert sentinel_path.read_text(encoding="utf-8") == str(
         installed_root / "atelier" / "auto_export.py"
+    )
+
+
+def test_projected_create_epic_preserves_split_tool_runtime_roots_when_repo_root_is_unresolved(
+    tmp_path: Path,
+) -> None:
+    agent_home, projected_script = _install_projected_script(
+        tmp_path,
+        skill_name="plan-create-epic",
+        script_name="create_epic.py",
+    )
+    source_root = _project_repo_root() / "src" / "atelier"
+    core_runtime_root = _fake_installed_package(
+        tmp_path / "core-runtime",
+        modules={
+            "runtime_env.py": (source_root / "runtime_env.py").read_text(encoding="utf-8"),
+            "auto_export.py": (
+                "from pathlib import Path\n"
+                "import os\n"
+                "import rich\n"
+                "\n"
+                "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text(\n"
+                "    rich.__file__ or '',\n"
+                "    encoding='utf-8',\n"
+                ")\n"
+                "\n"
+                "def resolve_auto_export_context(*_args, **_kwargs):\n"
+                "    return None\n"
+                "\n"
+                "def auto_export_issue(*_args, **_kwargs):\n"
+                "    return None\n"
+            ),
+            "beads_context.py": (
+                "def resolve_runtime_repo_dir_hint(*, repo_dir=None, cwd=None, env=None):\n"
+                "    return (repo_dir, None)\n"
+            ),
+            "executable_work_validation.py": (
+                "def compact_excerpt(value):\n"
+                "    return str(value)\n"
+                "def validate_executable_work_payload(**_kwargs):\n"
+                "    return []\n"
+            ),
+        },
+    )
+    _write_fake_module(
+        core_runtime_root / "pydantic" / "__init__.py",
+        "__version__ = 'installed'\n",
+    )
+    _write_fake_module(
+        core_runtime_root / "pydantic_core" / "__init__.py",
+        "from . import _pydantic_core\n",
+    )
+    _write_fake_module(core_runtime_root / "pydantic_core" / "_pydantic_core.py", "")
+    _write_fake_module(core_runtime_root / "platformdirs" / "__init__.py", "")
+    _write_fake_module(core_runtime_root / "questionary" / "__init__.py", "")
+    _write_fake_module(core_runtime_root / "typer" / "__init__.py", "")
+
+    rich_runtime_root = tmp_path / "rich-runtime"
+    _write_fake_module(
+        rich_runtime_root / "rich" / "__init__.py",
+        "__version__ = 'installed'\n",
+    )
+
+    isolated_python = tmp_path / "bin" / "python3"
+    _write_python_without_site_packages(isolated_python)
+    sentinel_path = tmp_path / "create-epic-split-tool-runtime-sentinel.txt"
+
+    completed = subprocess.run(
+        [
+            str(isolated_python),
+            str(projected_script),
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=agent_home,
+        env={
+            "BOOTSTRAP_SENTINEL": str(sentinel_path),
+            "PYTHONPATH": os.pathsep.join([str(core_runtime_root), str(rich_runtime_root)]),
+        },
+    )
+
+    assert completed.returncode == 0
+    assert sentinel_path.read_text(encoding="utf-8") == str(
+        rich_runtime_root / "rich" / "__init__.py"
     )
 
 

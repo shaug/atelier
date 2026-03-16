@@ -116,7 +116,6 @@ def bootstrap_projected_atelier_script(
         projected_runtime_contract,
         reset_current_process_pythonpath,
         sanitize_pythonpath_environment,
-        selected_runtime_pythonpath_entries,
     )
 
     contract = projected_runtime_contract(repo_root=repo_root)
@@ -158,7 +157,7 @@ def bootstrap_projected_atelier_script(
                 argv=resolved_argv,
                 base_env=resolved_env,
             )
-            ensure_projected_runtime_dependency(
+            preserve_paths = ensure_projected_runtime_dependency(
                 repo_root=repo_root,
                 script_path=script_path,
                 base_env=resolved_env,
@@ -166,7 +165,6 @@ def bootstrap_projected_atelier_script(
             resolved_env, removed_pythonpath = sanitize_pythonpath_environment(
                 base_env=resolved_env
             )
-            preserve_paths = selected_runtime_pythonpath_entries(removed_pythonpath)
             if preserve_paths:
                 resolved_env["PYTHONPATH"] = os.pathsep.join(preserve_paths)
             reset_current_process_pythonpath(

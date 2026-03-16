@@ -114,18 +114,23 @@ def test_selected_runtime_pythonpath_entries_preserves_loaded_module_roots(
     monkeypatch.setitem(runtime_env.sys.modules, "atelier.runtime_env", runtime_module)
     monkeypatch.setitem(runtime_env.sys.modules, "pydantic", pydantic_module)
     monkeypatch.setitem(runtime_env.sys.modules, "pydantic_core", pydantic_core_module)
+    rich_module = types.ModuleType("rich")
+    rich_module.__file__ = "/tmp/tool-ui/rich/__init__.py"
+    monkeypatch.setitem(runtime_env.sys.modules, "rich", rich_module)
 
     preserved = runtime_env.selected_runtime_pythonpath_entries(
         (
             "/tmp/foreign",
             "/tmp/tool-runtime",
             "/tmp/tool-extensions",
+            "/tmp/tool-ui",
         )
     )
 
     assert preserved == (
         "/tmp/tool-runtime",
         "/tmp/tool-extensions",
+        "/tmp/tool-ui",
     )
 
 
@@ -228,7 +233,7 @@ def test_ensure_projected_runtime_dependency_returns_when_import_succeeds(
 
     monkeypatch.setattr(runtime_env.importlib, "import_module", _fake_import_module)
 
-    runtime_env.ensure_projected_runtime_dependency(
+    preserved = runtime_env.ensure_projected_runtime_dependency(
         repo_root=Path("/repo"),
         script_path=Path("/repo/skills/example.py"),
     )
@@ -238,6 +243,46 @@ def test_ensure_projected_runtime_dependency_returns_when_import_succeeds(
         "pydantic_core",
         "pydantic_core._pydantic_core",
     ]
+    assert preserved == ()
+
+
+def test_ensure_projected_runtime_dependency_preserves_split_tool_runtime_roots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module_files = {
+        "pydantic": "/tmp/tool-runtime/pydantic/__init__.py",
+        "pydantic_core": "/tmp/tool-runtime/pydantic_core/__init__.py",
+        "pydantic_core._pydantic_core": ("/tmp/tool-runtime/pydantic_core/_pydantic_core.so"),
+        "platformdirs": "/tmp/tool-runtime/platformdirs/__init__.py",
+        "questionary": "/tmp/tool-runtime/questionary/__init__.py",
+        "rich": "/tmp/tool-ui/rich/__init__.py",
+        "typer": "/tmp/tool-runtime/typer/__init__.py",
+    }
+
+    class _FakeModule:
+        def __init__(self, module_file: str) -> None:
+            self.__file__ = module_file
+
+    def _fake_import_module(name: str) -> object:
+        module = _FakeModule(module_files[name])
+        monkeypatch.setitem(runtime_env.sys.modules, name, module)
+        return module
+
+    monkeypatch.setattr(runtime_env.importlib, "import_module", _fake_import_module)
+    monkeypatch.setenv(
+        "PYTHONPATH",
+        "/tmp/tool-runtime:/tmp/tool-ui",
+    )
+
+    preserved = runtime_env.ensure_projected_runtime_dependency(
+        repo_root=None,
+        script_path=Path("/tmp/agent-home/skills/example.py"),
+    )
+
+    assert preserved == (
+        "/tmp/tool-runtime",
+        "/tmp/tool-ui",
+    )
 
 
 def test_ensure_projected_runtime_dependency_fails_closed_for_provenance_mismatch(

@@ -21,6 +21,12 @@ _PROJECTED_RUNTIME_PROVENANCE_MODULES: tuple[str, ...] = (
     "pydantic_core",
     _PROJECTED_RUNTIME_DEPENDENCY,
 )
+_PROJECTED_RUNTIME_SUPPORT_MODULES: tuple[str, ...] = (
+    "platformdirs",
+    "questionary",
+    "rich",
+    "typer",
+)
 _INSTALLED_TOOL_RUNTIME_MARKERS: tuple[str, ...] = (
     "/.local/share/uv/tools/atelier/",
     "/Library/Application Support/uv/tools/atelier/",
@@ -357,7 +363,7 @@ def ensure_projected_runtime_dependency(
     dependency: str = _PROJECTED_RUNTIME_DEPENDENCY,
     base_env: Mapping[str, str] | None = None,
     current_executable: str | None = None,
-) -> None:
+) -> tuple[str, ...]:
     """Fail closed when a projected helper runtime lacks compiled dependencies.
 
     Projected planner helpers are expected to either re-exec into the repo
@@ -373,28 +379,40 @@ def ensure_projected_runtime_dependency(
         base_env: Optional environment mapping used for runtime resolution.
         current_executable: Optional interpreter path override for testing.
 
+    Returns:
+        Ordered ``PYTHONPATH`` roots that were proven to belong to the selected
+        runtime while validating dependency health.
+
     Raises:
         SystemExit: If the dependency cannot be imported in the selected
             interpreter.
     """
     env = dict(os.environ if base_env is None else base_env)
+    initial_module_names = frozenset(sys.modules)
     try:
         imported_modules = tuple(
             (module_name, importlib.import_module(module_name))
-            for module_name in _projected_runtime_dependency_modules(dependency)
+            for module_name in _projected_runtime_probe_modules(
+                repo_root=repo_root,
+                dependency=dependency,
+            )
         )
     except Exception as exc:
         dependency_error = exc
     else:
         selected_pythonpath_entries = selected_runtime_pythonpath_entries(
-            _pythonpath_entries(env.get(_PYTHONPATH_ENV))
+            _pythonpath_entries(env.get(_PYTHONPATH_ENV)),
+            modules=_projected_runtime_proof_modules(
+                initial_module_names=initial_module_names,
+                imported_modules=imported_modules,
+            ),
         )
         provenance_issues = _projected_runtime_provenance_issues(
             imported_modules,
             allowed_pythonpath_entries=selected_pythonpath_entries,
         )
         if not provenance_issues:
-            return
+            return selected_pythonpath_entries
         provenance_issue = provenance_issues[0]
         command = (
             projected_repo_python_command(
@@ -596,16 +614,20 @@ def reset_current_process_pythonpath(
 def selected_runtime_pythonpath_entries(
     pythonpath_entries: Iterable[str],
     *,
+    modules: Iterable[object] | None = None,
     module_names: Iterable[str] = (
         "atelier",
         "atelier.runtime_env",
         *_PROJECTED_RUNTIME_PROVENANCE_MODULES,
+        *_PROJECTED_RUNTIME_SUPPORT_MODULES,
     ),
 ) -> tuple[str, ...]:
     """Return candidate ``PYTHONPATH`` entries proven to belong to this runtime.
 
     Args:
         pythonpath_entries: Candidate ``PYTHONPATH`` entries to validate.
+        modules: Optional loaded module objects whose origins prove the
+            selected runtime's import roots.
         module_names: Loaded modules whose origins prove the selected runtime's
             import roots.
 
@@ -627,10 +649,17 @@ def selected_runtime_pythonpath_entries(
 
     preserved: list[str] = []
     seen_preserved: set[str] = set()
-    for module_name in module_names:
-        module = sys.modules.get(str(module_name).strip())
-        if module is None:
-            continue
+    proof_modules: list[object] = []
+    if modules is not None:
+        proof_modules.extend(module for module in modules if module is not None)
+    else:
+        for module_name in module_names:
+            module = sys.modules.get(str(module_name).strip())
+            if module is None:
+                continue
+            proof_modules.append(module)
+
+    for module in proof_modules:
         module_path = _module_origin_path(module)
         if module_path is None:
             continue
@@ -644,16 +673,52 @@ def selected_runtime_pythonpath_entries(
     return tuple(preserved)
 
 
-def _projected_runtime_dependency_modules(dependency: str) -> tuple[str, ...]:
+def _projected_runtime_probe_modules(
+    *,
+    repo_root: Path | None,
+    dependency: str,
+) -> tuple[str, ...]:
     names: list[str] = []
     seen: set[str] = set()
-    for module_name in (*_PROJECTED_RUNTIME_PROVENANCE_MODULES, dependency):
+    contract = projected_runtime_contract(repo_root=repo_root)
+    module_names: tuple[str, ...] = _PROJECTED_RUNTIME_PROVENANCE_MODULES
+    if contract.preferred_mode is ProjectedRuntimeMode.ACTIVE_INTERPRETER:
+        module_names = (*module_names, *_PROJECTED_RUNTIME_SUPPORT_MODULES)
+    for module_name in (*module_names, dependency):
         normalized = str(module_name).strip()
         if not normalized or normalized in seen:
             continue
         seen.add(normalized)
         names.append(normalized)
     return tuple(names)
+
+
+def _projected_runtime_proof_modules(
+    *,
+    initial_module_names: frozenset[str],
+    imported_modules: Sequence[tuple[str, object]],
+) -> tuple[object, ...]:
+    proof_modules: list[object] = []
+    seen_ids: set[int] = set()
+
+    def _append(module: object | None) -> None:
+        if module is None or _module_origin_path(module) is None:
+            return
+        module_id = id(module)
+        if module_id in seen_ids:
+            return
+        seen_ids.add(module_id)
+        proof_modules.append(module)
+
+    for module_name in ("atelier", "atelier.runtime_env"):
+        _append(sys.modules.get(module_name))
+    for _module_name, module in imported_modules:
+        _append(module)
+    for module_name, module in sorted(sys.modules.items()):
+        if module_name in initial_module_names:
+            continue
+        _append(module)
+    return tuple(proof_modules)
 
 
 def _projected_runtime_provenance_issues(

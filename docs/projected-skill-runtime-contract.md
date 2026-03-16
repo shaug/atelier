@@ -21,6 +21,9 @@ consumed by `src/atelier/skills/shared/scripts/projected_bootstrap.py`.
    `src/atelier` is available to the projected script.
 1. Runtime health checks must prove transitive dependencies, not just partial
    `atelier` importability, before projected scripts import heavier modules.
+1. In `active-interpreter` mode, the shared runtime health probe must prove the
+   selected runtime's direct Atelier support dependencies as well, so split
+   tool-runtime roots survive later sanitization.
 
 ## Inherited `PYTHONPATH` rules
 
