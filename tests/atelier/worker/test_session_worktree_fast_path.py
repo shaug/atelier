@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from atelier import worktrees
 from atelier.worker.session import worktree_fast_path
@@ -96,6 +96,37 @@ def test_validate_selected_scope_reports_local_create_when_selected_mapping_has_
     assert result.signals[0].code == "selected-scope-create-locally"
 
 
+def test_validate_selected_scope_local_create_skips_branch_lookup_without_lineage(
+    tmp_path: Path,
+) -> None:
+    worktrees.write_mapping(
+        worktrees.mapping_path(tmp_path, "at-epic"),
+        worktrees.WorktreeMapping(
+            epic_id="at-epic",
+            worktree_path="worktrees/at-epic",
+            root_branch="feat/root",
+            changesets={},
+            changeset_worktrees={},
+        ),
+    )
+    current_branch = Mock(name="git_current_branch")
+
+    with (
+        patch(
+            "atelier.worker.session.worktree_fast_path.beads.run_bd_json",
+            return_value=[_issue()],
+        ),
+        patch(
+            "atelier.worker.session.worktree_fast_path.git.git_current_branch",
+            current_branch,
+        ),
+    ):
+        result = worktree_fast_path.validate_selected_scope(context=_context(tmp_path))
+
+    assert result.outcome is worktree_fast_path.SelectedScopeValidationOutcome.LOCAL_CREATE
+    current_branch.assert_not_called()
+
+
 def test_validate_selected_scope_requires_fallback_when_metadata_exists_without_mapping(
     tmp_path: Path,
 ) -> None:
@@ -110,6 +141,40 @@ def test_validate_selected_scope_requires_fallback_when_metadata_exists_without_
     )
     assert result.mapping_epic_id is None
     assert result.signals[0].code == "selected-scope-metadata-without-mapping"
+
+
+def test_validate_selected_scope_root_mismatch_falls_back_before_branch_lookup(
+    tmp_path: Path,
+) -> None:
+    worktrees.write_mapping(
+        worktrees.mapping_path(tmp_path, "at-epic"),
+        worktrees.WorktreeMapping(
+            epic_id="at-epic",
+            worktree_path="worktrees/at-epic",
+            root_branch="feat/legacy",
+            changesets={"at-epic.1": "feat/legacy-at-epic.1"},
+            changeset_worktrees={"at-epic.1": "worktrees/at-epic.1"},
+        ),
+    )
+    current_branch = Mock(name="git_current_branch")
+
+    with (
+        patch(
+            "atelier.worker.session.worktree_fast_path.beads.run_bd_json",
+            return_value=[_issue(root_branch="feat/root", work_branch="feat/root-at-epic.1")],
+        ),
+        patch(
+            "atelier.worker.session.worktree_fast_path.git.git_current_branch",
+            current_branch,
+        ),
+    ):
+        result = worktree_fast_path.validate_selected_scope(context=_context(tmp_path))
+
+    assert (
+        result.outcome is worktree_fast_path.SelectedScopeValidationOutcome.REQUIRES_FALLBACK_REPAIR
+    )
+    assert result.signals[0].code == "selected-scope-root-branch-mismatch"
+    current_branch.assert_not_called()
 
 
 def test_validate_selected_scope_requires_fallback_when_mapped_worktree_is_missing(

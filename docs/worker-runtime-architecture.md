@@ -4,7 +4,9 @@ This document describes the worker runtime contracts used by `atelier work`.
 
 For service/use-case tier boundaries and migration sequencing, see
 `docs/service-tier-proposal.md`. For hotspot decomposition boundaries and
-complexity guardrails, see `docs/hotspot-architecture-contract.md`.
+complexity guardrails, see `docs/hotspot-architecture-contract.md`. For the
+selected-scope worktree startup contract, see
+[Worker Worktree Startup Contract].
 
 ## Goals
 
@@ -127,3 +129,7 @@ Lifecycle authority:
 - The stricter prose width keeps runtime contracts readable in terminals and
   review tools, while 100-character code lines avoid excessive wrapping for
   typed signatures.
+
+<!-- inline reference link definitions. please keep alphabetized -->
+
+[worker worktree startup contract]: ./worker-worktree-startup-contract.md
