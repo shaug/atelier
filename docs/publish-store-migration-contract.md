@@ -69,9 +69,8 @@ store-owned operation.
 
 That gap is explicit rather than accidental: the current store models publish
 durable review, integration-proof, and external-ticket metadata, but not a
-composite "publish or persist this changeset" semantic that can evaluate
-project config, mutate git refs, and reconcile provider PR state in one typed
-request.
+composite "publish or persist this changeset" semantic that can evaluate project
+config, mutate git refs, and reconcile provider PR state in one typed request.
 
 Until that richer publish semantic lands in `atelier.store`, keep orchestration
 in the skill/runtime layer and do not treat it as a reason to bypass the store
@@ -85,8 +84,8 @@ This publish migration slice leaves the following work deferred:
   git, and provider decisions
 - store-owned branch/worktree metadata mutations for publish setup and lineage
   repair
-- provider refresh/reconciliation after remote merges, closures, or review
-  state drift
+- provider refresh/reconciliation after remote merges, closures, or review state
+  drift
 - a richer PR-authoring read model in `atelier.store` so publish and PR-draft
   flows can drop compatibility issue payload reads
 
