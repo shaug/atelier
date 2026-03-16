@@ -119,25 +119,67 @@ def bootstrap_projected_atelier_script(
     )
 
     contract = projected_runtime_contract(repo_root=repo_root)
-    resolved_env, removed_pythonpath = sanitize_pythonpath_environment(base_env=resolved_env)
-    preserve_paths: tuple[str, ...] = ()
-    if contract.preferred_mode is ProjectedRuntimeMode.REPO_SOURCE and repo_root is not None:
-        preserve_paths = (str(repo_root / "src"),)
-    reset_current_process_pythonpath(
-        removed_pythonpath,
-        preserve_paths=preserve_paths,
-    )
+
+    def _set_current_process_pythonpath(paths: Sequence[str]) -> None:
+        explicit_paths = tuple(dict.fromkeys(path for path in paths if path))
+        if explicit_paths:
+            os.environ["PYTHONPATH"] = os.pathsep.join(explicit_paths)
+            return
+        os.environ.pop("PYTHONPATH", None)
 
     if require_runtime_health:
-        maybe_reexec_projected_repo_runtime(
-            repo_root=repo_root,
-            script_path=script_path,
-            argv=resolved_argv,
-            base_env=resolved_env,
-        )
-        ensure_projected_runtime_dependency(
-            repo_root=repo_root,
-            script_path=script_path,
-            base_env=resolved_env,
+        if contract.preferred_mode is ProjectedRuntimeMode.REPO_SOURCE and repo_root is not None:
+            resolved_env, removed_pythonpath = sanitize_pythonpath_environment(
+                base_env=resolved_env
+            )
+            preserve_paths = (str(repo_root / "src"),)
+            resolved_env["PYTHONPATH"] = os.pathsep.join(preserve_paths)
+            reset_current_process_pythonpath(
+                removed_pythonpath,
+                preserve_paths=preserve_paths,
+            )
+            _set_current_process_pythonpath(preserve_paths)
+            maybe_reexec_projected_repo_runtime(
+                repo_root=repo_root,
+                script_path=script_path,
+                argv=resolved_argv,
+                base_env=resolved_env,
+            )
+            ensure_projected_runtime_dependency(
+                repo_root=repo_root,
+                script_path=script_path,
+                base_env=resolved_env,
+            )
+        else:
+            maybe_reexec_projected_repo_runtime(
+                repo_root=repo_root,
+                script_path=script_path,
+                argv=resolved_argv,
+                base_env=resolved_env,
+            )
+            preserve_paths = ensure_projected_runtime_dependency(
+                repo_root=repo_root,
+                script_path=script_path,
+                base_env=resolved_env,
+            )
+            resolved_env, removed_pythonpath = sanitize_pythonpath_environment(
+                base_env=resolved_env
+            )
+            if preserve_paths:
+                resolved_env["PYTHONPATH"] = os.pathsep.join(preserve_paths)
+            reset_current_process_pythonpath(
+                removed_pythonpath,
+                preserve_paths=preserve_paths,
+            )
+            _set_current_process_pythonpath(preserve_paths)
+    else:
+        resolved_env, removed_pythonpath = sanitize_pythonpath_environment(base_env=resolved_env)
+        preserve_paths: tuple[str, ...] = ()
+        if contract.preferred_mode is ProjectedRuntimeMode.REPO_SOURCE and repo_root is not None:
+            preserve_paths = (str(repo_root / "src"),)
+            resolved_env["PYTHONPATH"] = os.pathsep.join(preserve_paths)
+        reset_current_process_pythonpath(
+            removed_pythonpath,
+            preserve_paths=preserve_paths,
         )
     return repo_root

@@ -148,6 +148,7 @@ def test_prepare_agent_session_does_not_warn_for_self_scoped_agent_id(monkeypatc
     monkeypatch.setattr(
         session_agent.agents, "get_agent", lambda _name: _FakeAgentSpec(name="codex")
     )
+    monkeypatch.delenv("PYTHONPATH", raising=False)
     for key in list(os.environ):
         if key.startswith("ATELIER_"):
             monkeypatch.delenv(key, raising=False)
@@ -185,6 +186,7 @@ def test_prepare_agent_session_warns_for_cross_session_agent_id(monkeypatch) -> 
     monkeypatch.setattr(
         session_agent.agents, "get_agent", lambda _name: _FakeAgentSpec(name="codex")
     )
+    monkeypatch.delenv("PYTHONPATH", raising=False)
     monkeypatch.setenv("ATELIER_AGENT_ID", "atelier/worker/codex/p999")
     agent = agent_home.AgentHome(
         name="codex",
