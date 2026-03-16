@@ -606,7 +606,7 @@ def test_worker_store_migration_docs_publish_boundary_and_deferred_gaps() -> Non
     assert "thread_id=None" in doc
     assert "worktree and branch metadata writes still go through" in doc
     assert "epic-close and lineage-repair fallback reads still use" in doc
-    assert "publish/integration orchestration migrations onto `atelier.store`" in doc
+    assert "publish/orchestration migrations onto `atelier.store` beyond the now" in doc
     assert "`work-done` still closes epics through the deterministic Beads helper" in doc
 
     assert "[Worker Store Migration Contract]" in planner_doc

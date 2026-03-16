@@ -839,11 +839,11 @@ class _StartupContractService(worker_startup.StartupContractService):
         )
 
     def update_changeset_integrated_sha(self, changeset_id: str, integrated_sha: str) -> None:
-        beads.update_changeset_integrated_sha(
+        worker_store.update_changeset_integrated_sha(
             changeset_id,
             integrated_sha,
             beads_root=self._beads_root,
-            cwd=self._repo_root,
+            repo_root=self._repo_root,
             allow_override=True,
         )
 

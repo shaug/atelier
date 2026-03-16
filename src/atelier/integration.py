@@ -5,9 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import beads, git
 from . import exec as exec_util
+from . import git
 from .io import die
+from .worker import store_adapter as worker_store
 
 
 @dataclass(frozen=True)
@@ -70,11 +71,11 @@ def integrate_changeset(
     if result.returncode != 0:
         die("root branch moved; rebase required")
 
-    beads.update_changeset_integrated_sha(
+    worker_store.update_changeset_integrated_sha(
         changeset_id,
         new_head,
         beads_root=beads_root,
-        cwd=repo_root,
+        repo_root=repo_root,
     )
     return IntegrationResult(
         root_branch=root_branch,

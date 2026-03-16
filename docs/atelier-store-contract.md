@@ -180,14 +180,16 @@ This proof slice leaves only the following work deferred:
 
 - planner migrations onto `atelier.store`; that remains deferred to
   [GitHub issue #582]
-- publish/integration migrations onto `atelier.store`; that remains deferred to
+- publish/orchestration migrations onto `atelier.store` beyond the store-backed
+  integration-proof persistence seam; that remains deferred to
   [GitHub issue #584]
 - dependency add/remove parity in the in-memory backend so those mutations can
   graduate from process-backed-only coverage into the shared proof suite
 
 Worker lifecycle migrations now follow the [Worker Store Migration Contract].
-Remaining worker-side deferred work stays on publish/integration orchestration
-plus richer worktree and epic-close store semantics.
+Remaining worker-side deferred work stays on publish/orchestration work above
+the integration-proof persistence seam plus richer worktree and epic-close store
+semantics.
 
 The core store contract, discovery methods, mutation methods, and dual-backend
 proof are no longer deferred work. Downstream epics should build on that landed

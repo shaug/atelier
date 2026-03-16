@@ -117,3 +117,32 @@ def test_startup_contract_service_lists_work_children_via_store_adapter(monkeypa
     )
 
     assert service.list_work_children("at-epic", include_closed=False) == [expected_child]
+
+
+def test_startup_contract_service_updates_integrated_sha_via_store_adapter(monkeypatch) -> None:
+    def _raise_on_raw_beads(*_args, **_kwargs):
+        raise AssertionError(
+            "raw beads.update_changeset_integrated_sha should not be used during startup"
+        )
+
+    calls: list[tuple[str, str, Path, Path, bool]] = []
+    monkeypatch.setattr(
+        work_startup_runtime.beads,
+        "update_changeset_integrated_sha",
+        _raise_on_raw_beads,
+    )
+    monkeypatch.setattr(
+        worker_store,
+        "update_changeset_integrated_sha",
+        lambda changeset_id, integrated_sha, *, beads_root, repo_root, allow_override=False: (
+            calls.append((changeset_id, integrated_sha, beads_root, repo_root, allow_override))
+        ),
+    )
+
+    service = work_startup_runtime._StartupContractService(  # pyright: ignore[reportPrivateUsage]
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+    service.update_changeset_integrated_sha("at-epic.1", "abc1234")
+
+    assert calls == [("at-epic.1", "abc1234", Path("/beads"), Path("/repo"), True)]

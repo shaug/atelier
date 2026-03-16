@@ -16,8 +16,9 @@ Worker code can treat the following paths as store-backed today:
   `release-epic`, and `hook-status`
 - worker inbox and queue reads plus queue claim/read mutations in
   `startup-contract`, `mail-queue-claim`, and `mail-mark-read`
-- lifecycle and review metadata mutations in `changeset_state`, `finalize`,
-  `reconcile`, and `work_finalization_state`
+- lifecycle, review, and integration-proof mutations in `changeset_state`,
+  `finalize`, `integration`, `reconcile`, `work_finalization_state`, and
+  `work_startup_runtime`
 - descendant changeset discovery and lifecycle summaries used for startup
   selection, no-ready notifications, and reconcile corrections
 
@@ -75,7 +76,8 @@ store for worker claim, queue, hook, or changeset lifecycle work.
 
 This worker migration slice leaves the following work deferred:
 
-- publish/integration orchestration migrations onto `atelier.store`
+- publish/orchestration migrations onto `atelier.store` beyond the now
+  store-backed integration-proof persistence seam
 - store-owned worktree and branch metadata mutations for worker session setup
   and teardown
 - a store-owned epic-close/finalize semantic so `work-done` can drop its
@@ -97,7 +99,9 @@ worker-facing entry points over both supported Beads backends:
   `work_startup_runtime` and `store_adapter`
 - epic claim and agent hook set/clear through `store_adapter`
 - threaded queue claim/read and lifecycle notes through `store_adapter`
-- merged/finalize lifecycle persistence through `changeset_state` and `finalize`
+- merged/finalize lifecycle persistence plus integration-proof persistence
+  through `changeset_state`, `finalize`, `integration`, and
+  `work_startup_runtime`
 
 Use this document together with the broader [Atelier Store Contract] when
 planning future worker, publish, or review migrations.
