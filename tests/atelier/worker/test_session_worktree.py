@@ -500,6 +500,7 @@ def test_prepare_worktrees_creates_selected_scope_before_repair(tmp_path: Path) 
     logs: list[str] = []
     repo_root = tmp_path / "repo"
     repo_root.mkdir(parents=True)
+    epic_worktree_path = tmp_path / "worktrees" / "at-epic"
     changeset_worktree_path = tmp_path / "worktrees" / "at-epic.1"
     changeset_worktree_path.mkdir(parents=True)
     validation = worktree_fast_path.SelectedScopeValidation(
@@ -534,7 +535,10 @@ def test_prepare_worktrees_creates_selected_scope_before_repair(tmp_path: Path) 
         patch(
             "atelier.worker.session.worktree.worktrees.reconcile_mapping_ownership"
         ) as reconcile_mapping,
-        patch("atelier.worker.session.worktree.worktrees.ensure_git_worktree") as ensure_epic,
+        patch(
+            "atelier.worker.session.worktree.worktrees.ensure_git_worktree",
+            return_value=epic_worktree_path,
+        ) as ensure_epic,
         patch(
             "atelier.worker.session.worktree.worktrees.ensure_changeset_branch",
             return_value=("feat/root-at-epic.1", mapping),
@@ -575,7 +579,13 @@ def test_prepare_worktrees_creates_selected_scope_before_repair(tmp_path: Path) 
     preflight.assert_not_called()
     ownership_lookup.assert_not_called()
     reconcile_mapping.assert_not_called()
-    ensure_epic.assert_not_called()
+    ensure_epic.assert_called_once_with(
+        tmp_path,
+        repo_root,
+        "at-epic",
+        root_branch="feat/root",
+        git_path="git",
+    )
     ensure_branch.assert_called_once_with(
         tmp_path,
         "at-epic",
@@ -619,7 +629,7 @@ def test_prepare_worktrees_creates_selected_scope_before_repair(tmp_path: Path) 
         cwd=repo_root,
         allow_override=False,
     )
-    assert result.epic_worktree_path == tmp_path / "worktrees" / "at-epic"
+    assert result.epic_worktree_path == epic_worktree_path
     assert result.changeset_worktree_path == changeset_worktree_path
     assert result.branch == "feat/root-at-epic.1"
     assert any("Selected-scope validation: selected-scope-create-locally" in line for line in logs)

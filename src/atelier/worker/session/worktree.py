@@ -814,8 +814,12 @@ def _prepare_selected_scope_fast_path(
             )
             changeset_worktree_path = epic_worktree_path
         else:
-            epic_worktree_path = _resolve_worktree_path(
-                context.project_data_dir, mapping.worktree_path
+            epic_worktree_path = worktrees.ensure_git_worktree(
+                context.project_data_dir,
+                context.repo_root,
+                selected_epic,
+                root_branch=root_branch_value,
+                git_path=git_path,
             )
             changeset_worktree_path = worktrees.ensure_changeset_worktree(
                 context.project_data_dir,
