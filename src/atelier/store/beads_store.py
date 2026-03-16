@@ -172,7 +172,7 @@ def _review_metadata(issue: IssueRecord) -> ReviewMetadata:
         pr_number=normalized_pr_number,
         pr_state=_REVIEW_STATE_MAP.get(review_state) if review_state else None,
         review_owner=review.review_owner,
-        integrated_sha=_clean_text(fields.get("changeset.integrated_sha")),
+        integrated_sha=_normalize_description_field_value(fields.get("changeset.integrated_sha")),
     )
 
 
@@ -192,11 +192,11 @@ def _issue_external_ticket_labels(issue: IssueRecord) -> set[str]:
 def _changeset_branches(issue: IssueRecord) -> ChangesetBranches | None:
     fields = beads_metadata.parse_description_fields(issue.description or "")
     branches = ChangesetBranches(
-        root_branch=_clean_text(fields.get("changeset.root_branch")),
-        parent_branch=_clean_text(fields.get("changeset.parent_branch")),
-        work_branch=_clean_text(fields.get("changeset.work_branch")),
-        root_base=_clean_text(fields.get("changeset.root_base")),
-        parent_base=_clean_text(fields.get("changeset.parent_base")),
+        root_branch=_normalize_description_field_value(fields.get("changeset.root_branch")),
+        parent_branch=_normalize_description_field_value(fields.get("changeset.parent_branch")),
+        work_branch=_normalize_description_field_value(fields.get("changeset.work_branch")),
+        root_base=_normalize_description_field_value(fields.get("changeset.root_base")),
+        parent_base=_normalize_description_field_value(fields.get("changeset.parent_base")),
     )
     if all(value is None for value in branches.model_dump().values()):
         return None
@@ -205,7 +205,7 @@ def _changeset_branches(issue: IssueRecord) -> ChangesetBranches | None:
 
 def _epic_root_branch(issue: IssueRecord) -> str | None:
     fields = beads_metadata.parse_description_fields(issue.description or "")
-    return _clean_text(fields.get("workspace.root_branch"))
+    return _normalize_description_field_value(fields.get("workspace.root_branch"))
 
 
 def _epic_label_for_issue(issue: IssueRecord) -> str:

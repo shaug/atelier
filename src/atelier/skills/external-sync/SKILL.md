@@ -19,6 +19,7 @@ description: >-
 
 ## Steps
 
+1. Read [Publish Store Migration Contract] before mutating ticket metadata.
 1. Show the bead and parse `external_tickets` entries.
 1. For each entry, optionally call provider-specific tooling (e.g., GitHub or
    Linear skills) to fetch current state/content if the user asks for it.
@@ -27,8 +28,14 @@ description: >-
 1. When `include_body` or `include_notes` is true, update cached
    `title`/`summary`/`body`/`notes` plus `content_updated_at` and
    `notes_updated_at` as appropriate.
-1. Write the updated description with `bd update <issue_id> --body-file <path>`.
+1. Persist the refreshed `external_tickets` payload through
+   `atelier.store.UpdateExternalTicketsRequest` rather than writing the
+   description directly with `bd update`.
 
 ## Verification
 
 - `external_tickets` entries reflect the updated state.
+
+<!-- inline reference link definitions. please keep alphabetized -->
+
+[publish store migration contract]: ../../../docs/publish-store-migration-contract.md

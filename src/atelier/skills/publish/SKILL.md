@@ -27,6 +27,8 @@ description: >-
 1. Read policy sources: `repo/AGENTS.md`.
 1. Load [references/publish-policy.md](references/publish-policy.md) for
    semantics, invariants, and recovery rules.
+1. Read [Publish Store Migration Contract] to keep store-owned persistence
+   separate from git and provider orchestration.
 1. Resolve publish settings from project config:
    - Use `branch.pr_mode`, `branch.history`, and the project default branch.
 1. Resolve changeset metadata (root/parent/work branches) from bead descriptions
@@ -57,11 +59,13 @@ description: >-
        (rebase/merge/squash).
      - Push the updated `root_branch`.
 1. Persist integration metadata on the changeset bead:
-   - If integration occurred (non-PR flow) or a PR merged (PR flow), set
-     `changeset.integrated_sha` to the integrated commit SHA in the bead
-     description using `bd update --body-file ...`.
+   - If integration occurred (non-PR flow) or a PR merged (PR flow), persist
+     `changeset.integrated_sha` through the store-backed review/integration
+     update path (`atelier.store.UpdateReviewRequest` or the worker adapter that
+     wraps it).
    - Do not set `changeset.integrated_sha` for `persist` runs that did not
      integrate or merge.
+   - Do not rewrite `changeset.integrated_sha` with raw description edits.
    - If the integrated SHA cannot be determined, send `NEEDS-DECISION` and stop.
 1. Enforce lifecycle protocol:
    - Use canonical lifecycle statuses:
@@ -95,3 +99,7 @@ description: >-
 - If push or integration fails, follow recovery steps in
   [references/publish-policy.md](references/publish-policy.md).
 - Do not merge a PR unless explicitly requested.
+
+<!-- inline reference link definitions. please keep alphabetized -->
+
+[publish store migration contract]: ../../../docs/publish-store-migration-contract.md

@@ -29,8 +29,11 @@ Branch mode mapping:
 
 Changeset metadata:
 
+- Persist review, integration-proof, and external-ticket metadata through
+  `atelier.store`-owned update paths rather than raw description rewrites.
 - After a successful integration or merged PR, update the changeset bead field
-  `changeset.integrated_sha` to the integrated commit SHA.
+  `changeset.integrated_sha` to the integrated commit SHA through that
+  store-backed path.
 - For non-integrating persist runs, do not set `changeset.integrated_sha`.
 - If you cannot determine the integrated SHA deterministically, send
   `NEEDS-DECISION` and stop.

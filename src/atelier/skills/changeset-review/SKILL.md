@@ -20,8 +20,10 @@ description: >-
 
 1. Show the changeset bead:
    - `bd show <changeset_id>`
+1. Read [Publish Store Migration Contract] before mutating review metadata.
 1. Persist the review metadata through AtelierStore-owned review update
-   operations rather than editing Beads-shaped description fields directly.
+   operations (`atelier.store.UpdateReviewRequest`) rather than editing
+   Beads-shaped description fields directly.
 1. Keep lifecycle status authoritative
    (`deferred|open|in_progress|blocked|closed`). `cs:*` lifecycle labels are not
    execution gates.
@@ -31,3 +33,7 @@ description: >-
 ## Verification
 
 - The changeset bead description includes the updated review metadata fields.
+
+<!-- inline reference link definitions. please keep alphabetized -->
+
+[publish store migration contract]: ../../../docs/publish-store-migration-contract.md
