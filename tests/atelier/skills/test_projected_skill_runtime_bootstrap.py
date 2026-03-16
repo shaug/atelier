@@ -1074,7 +1074,12 @@ def test_projected_refresh_overview_fails_closed_when_repo_runtime_is_dependency
     assert completed.returncode == 1
     assert not sentinel_path.exists()
     assert "planner helper runtime is unhealthy" in completed.stderr
-    assert "runtime: ambient" in completed.stderr
+    assert "runtime_provenance: ambient" in completed.stderr
+    assert "selected_mode: repo-source" in completed.stderr
+    assert "repo_runtime_status: available" in completed.stderr
+    assert "repo_runtime_command:" in completed.stderr
+    assert f"pythonpath_removed: {installed_root}, {repo_root / 'src'}" in completed.stderr
+    assert f"pythonpath_preserved: {repo_root / 'src'}" in completed.stderr
     assert "dependency: pydantic_core._pydantic_core" in completed.stderr
     assert "repair the selected repo runtime or rerun explicitly via" in completed.stderr
 
@@ -1156,6 +1161,11 @@ def test_projected_check_issue_ownership_fails_closed_when_repo_runtime_is_depen
     assert completed.returncode == 1
     assert not sentinel_path.exists()
     assert "planner helper runtime is unhealthy" in completed.stderr
-    assert "runtime: ambient" in completed.stderr
+    assert "runtime_provenance: ambient" in completed.stderr
+    assert "selected_mode: repo-source" in completed.stderr
+    assert "repo_runtime_status: available" in completed.stderr
+    assert "repo_runtime_command:" in completed.stderr
+    assert f"pythonpath_removed: {installed_root}, {repo_root / 'src'}" in completed.stderr
+    assert f"pythonpath_preserved: {repo_root / 'src'}" in completed.stderr
     assert "dependency: pydantic_core._pydantic_core" in completed.stderr
     assert "repair the selected repo runtime or rerun explicitly via" in completed.stderr
