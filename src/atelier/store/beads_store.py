@@ -42,6 +42,7 @@ from .contract import (
     ReadyChangesetQuery,
     SetAgentBeadHookRequest,
     SetHookRequest,
+    UpdateExternalTicketsRequest,
     UpdateReviewRequest,
 )
 from .models import (
@@ -51,6 +52,7 @@ from .models import (
     EpicDiscoveryParity,
     EpicIdentityViolation,
     EpicRecord,
+    ExternalTicketLink,
     HookRecord,
     LifecycleStatus,
     LifecycleTransition,
@@ -172,6 +174,19 @@ def _review_metadata(issue: IssueRecord) -> ReviewMetadata:
         review_owner=review.review_owner,
         integrated_sha=_clean_text(fields.get("changeset.integrated_sha")),
     )
+
+
+def _external_ticket_links(issue: IssueRecord) -> tuple[ExternalTicketLink, ...]:
+    tickets = beads_metadata.parse_external_tickets(issue.description or "")
+    return tuple(ExternalTicketLink.from_external_ref(ticket) for ticket in tickets)
+
+
+def _external_ticket_labels(tickets: tuple[ExternalTicketLink, ...]) -> set[str]:
+    return {f"ext:{ticket.provider}" for ticket in tickets}
+
+
+def _issue_external_ticket_labels(issue: IssueRecord) -> set[str]:
+    return {label for label in _normalized_labels(issue.labels) if label.startswith("ext:")}
 
 
 def _changeset_branches(issue: IssueRecord) -> ChangesetBranches | None:
@@ -448,6 +463,12 @@ class AtelierStore:
         if not (await self._role(issue, state=state)).is_changeset:
             raise LookupError(f"changeset not found: {changeset_id}")
         return await self._changeset_record(issue, state=state)
+
+    async def get_external_tickets(self, issue_id: str) -> tuple[ExternalTicketLink, ...]:
+        """Return persisted external ticket metadata for one issue."""
+
+        issue = await self._show_issue(issue_id)
+        return _external_ticket_links(issue)
 
     async def list_changesets(
         self,
@@ -1062,6 +1083,61 @@ class AtelierStore:
         )
         updated_state = _ReadState(self, issue_cache={updated.id: updated})
         return await self._changeset_record(updated, state=updated_state)
+
+    async def update_external_tickets(
+        self,
+        request: UpdateExternalTicketsRequest,
+    ) -> tuple[ExternalTicketLink, ...]:
+        """Replace persisted external ticket metadata for one issue."""
+
+        issue = await self._show_issue(request.issue_id)
+        desired_tickets = request.tickets
+        desired_labels = _external_ticket_labels(desired_tickets)
+        if (
+            _external_ticket_links(issue) == desired_tickets
+            and _issue_external_ticket_labels(issue) == desired_labels
+        ):
+            return desired_tickets
+
+        payload = [
+            beads_metadata.external_ticket_payload(ticket.to_external_ref())
+            for ticket in desired_tickets
+        ]
+        serialized = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
+        def build_request(current: IssueRecord) -> UpdateIssueRequest:
+            current_labels = _normalized_labels(current.labels)
+            description = _apply_description_fields(
+                current.description or "",
+                fields={"external_tickets": serialized},
+            )
+            labels = tuple(
+                sorted(
+                    {label for label in current_labels if not label.startswith("ext:")}
+                    | desired_labels
+                )
+            )
+            return UpdateIssueRequest(
+                issue_id=current.id,
+                description=description,
+                labels=labels,
+            )
+
+        def verify(updated_issue: IssueRecord) -> bool:
+            return (
+                _external_ticket_links(updated_issue) == desired_tickets
+                and _issue_external_ticket_labels(updated_issue) == desired_labels
+            )
+
+        updated = await self._update_issue_until_verified(
+            request.issue_id,
+            build_request=build_request,
+            verify=verify,
+            failure_message=(
+                f"external ticket metadata update could not be verified for {request.issue_id}"
+            ),
+        )
+        return _external_ticket_links(updated)
 
     async def append_notes(
         self,

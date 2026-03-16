@@ -18,6 +18,7 @@ from .contract import (
     ReadyChangesetQuery,
     SetAgentBeadHookRequest,
     SetHookRequest,
+    UpdateExternalTicketsRequest,
     UpdateReviewRequest,
 )
 from .models import (
@@ -27,6 +28,7 @@ from .models import (
     EpicDiscoveryParity,
     EpicIdentityViolation,
     EpicRecord,
+    ExternalTicketLink,
     HookRecord,
     LifecycleStatus,
     LifecycleTransition,
@@ -58,6 +60,7 @@ __all__ = [
     "EpicIdentityViolation",
     "EpicQuery",
     "EpicRecord",
+    "ExternalTicketLink",
     "HookRecord",
     "LifecycleStatus",
     "LifecycleTransition",
@@ -73,6 +76,7 @@ __all__ = [
     "SetAgentBeadHookRequest",
     "SetHookRequest",
     "StartupMessageRecord",
+    "UpdateExternalTicketsRequest",
     "UpdateReviewRequest",
     "WorkItemKind",
     "WorkRef",

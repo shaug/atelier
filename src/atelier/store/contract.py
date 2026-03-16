@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import field_validator, model_validator
 
 from .models import (
+    ExternalTicketLink,
     Identifier,
     LifecycleStatus,
     MessageDelivery,
@@ -229,6 +230,29 @@ class UpdateReviewRequest(StoreModel):
     preserve_existing: bool = False
 
 
+class UpdateExternalTicketsRequest(StoreModel):
+    """Mutation request for replacing persisted external ticket metadata."""
+
+    issue_id: Identifier
+    tickets: tuple[ExternalTicketLink, ...]
+
+    @field_validator("tickets")
+    @classmethod
+    def _dedupe_tickets(
+        cls,
+        value: tuple[ExternalTicketLink, ...],
+    ) -> tuple[ExternalTicketLink, ...]:
+        normalized: list[ExternalTicketLink] = []
+        seen: set[tuple[str, str]] = set()
+        for ticket in value:
+            key = (ticket.provider, ticket.ticket_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(ticket)
+        return tuple(normalized)
+
+
 class LifecycleTransitionRequest(StoreModel):
     """Mutation request for canonical lifecycle changes."""
 
@@ -255,5 +279,6 @@ __all__ = [
     "ReadyChangesetQuery",
     "SetAgentBeadHookRequest",
     "SetHookRequest",
+    "UpdateExternalTicketsRequest",
     "UpdateReviewRequest",
 ]

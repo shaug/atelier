@@ -27,6 +27,10 @@ contracts.
 ## Canonical linkage model
 
 `external_tickets` remains a JSON list stored in bead description fields.
+Atelier store operations own persistence of that normalized list and its `ext:*`
+provider labels. Provider adapters own remote import, export, close, and sync
+behavior, then hand normalized metadata back to the store boundary for durable
+persistence.
 
 Recommended per-entry fields:
 

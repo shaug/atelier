@@ -6090,40 +6090,29 @@ def test_parse_external_tickets_reads_json() -> None:
 
 
 def test_update_external_tickets_updates_labels() -> None:
-    state = {"description": "scope: demo\n"}
-    issue = {"id": "issue-1", "description": state["description"], "labels": ["ext:github"]}
-    captured: dict[str, object] = {"commands": []}
+    captured: dict[str, object] = {}
 
-    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
-        return [{**issue, "description": state["description"]}]
-
-    def fake_command(args: list[str], *, beads_root: Path, cwd: Path) -> None:
-        captured["commands"].append(args)
-
-    def fake_update(issue_id: str, description: str, *, beads_root: Path, cwd: Path) -> None:
-        captured["description"] = description
-        state["description"] = description
+    class FakeStore:
+        async def update_external_tickets(self, request) -> None:
+            captured["request"] = request
 
     with (
-        patch("atelier.beads.run_bd_json", side_effect=fake_json),
-        patch("atelier.beads.run_bd_command", side_effect=fake_command),
-        patch("atelier.beads._update_issue_description", side_effect=fake_update),
+        patch("atelier.store.build_atelier_store", return_value=FakeStore()),
+        patch("atelier.beads.run_bd_json", return_value=[{"id": "issue-1"}]),
     ):
-        beads.update_external_tickets(
+        result = beads.update_external_tickets(
             "issue-1",
             [beads.ExternalTicketRef(provider="jira", ticket_id="J-1")],
             beads_root=Path("/beads"),
             cwd=Path("/repo"),
         )
 
-    assert "external_tickets:" in str(captured.get("description", ""))
-    update_calls = [cmd for cmd in captured["commands"] if cmd and cmd[0] == "update"]
-    assert update_calls
-    combined = " ".join(update_calls[0])
-    assert "--add-label" in combined
-    assert "ext:jira" in combined
-    assert "--remove-label" in combined
-    assert "ext:github" in combined
+    request = captured["request"]
+    assert request.issue_id == "issue-1"
+    assert len(request.tickets) == 1
+    assert request.tickets[0].provider == "jira"
+    assert request.tickets[0].ticket_id == "J-1"
+    assert result == {"id": "issue-1"}
 
 
 def test_reconcile_closed_issue_exported_github_tickets_closes_and_updates() -> None:

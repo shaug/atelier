@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
 from pydantic import (
     BaseModel,
@@ -12,6 +12,19 @@ from pydantic import (
     StringConstraints,
     field_validator,
     model_validator,
+)
+
+from ..external_tickets import (
+    ExternalTicketRef,
+    normalize_direction,
+    normalize_identifier,
+    normalize_on_close,
+    normalize_optional_string,
+    normalize_relation,
+    normalize_slug,
+    normalize_state,
+    normalize_sync_mode,
+    normalize_timestamp,
 )
 
 Identifier = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, strict=True)]
@@ -96,6 +109,152 @@ class ReviewMetadata(StoreModel):
     pr_state: ReviewState | None = None
     review_owner: Identifier | None = None
     integrated_sha: Identifier | None = None
+
+
+class ExternalTicketLink(StoreModel):
+    """Store-owned persisted metadata for one external ticket link."""
+
+    provider: Identifier
+    ticket_id: Identifier
+    url: str | None = None
+    title: str | None = None
+    summary: str | None = None
+    body: str | None = None
+    notes: str | None = None
+    relation: Literal["primary", "secondary", "context", "derived"] | None = None
+    direction: Literal["imported", "exported", "linked"] | None = None
+    sync_mode: Literal["manual", "import", "export", "sync"] | None = None
+    state: Literal["open", "in_progress", "blocked", "in_review", "closed", "unknown"] | None = None
+    raw_state: str | None = None
+    state_updated_at: str | None = None
+    parent_id: Identifier | None = None
+    on_close: Literal["none", "comment", "close", "sync"] | None = None
+    content_updated_at: str | None = None
+    notes_updated_at: str | None = None
+    last_synced_at: str | None = None
+
+    @field_validator("provider", mode="before")
+    @classmethod
+    def _normalize_provider(cls, value: object) -> object:
+        return normalize_slug(value)
+
+    @field_validator("ticket_id", "parent_id", mode="before")
+    @classmethod
+    def _normalize_identifiers(cls, value: object) -> object:
+        return normalize_identifier(value)
+
+    @field_validator(
+        "url",
+        "title",
+        "summary",
+        "body",
+        "notes",
+        "raw_state",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_optional_strings(cls, value: object) -> object:
+        return normalize_optional_string(value)
+
+    @field_validator("relation", mode="before")
+    @classmethod
+    def _normalize_relation(cls, value: object) -> object:
+        return normalize_relation(value)
+
+    @field_validator("direction", mode="before")
+    @classmethod
+    def _normalize_direction(cls, value: object) -> object:
+        return normalize_direction(value)
+
+    @field_validator("sync_mode", mode="before")
+    @classmethod
+    def _normalize_sync_mode(cls, value: object) -> object:
+        return normalize_sync_mode(value)
+
+    @field_validator("state", mode="before")
+    @classmethod
+    def _normalize_state(cls, value: object) -> object:
+        return normalize_state(value)
+
+    @field_validator("on_close", mode="before")
+    @classmethod
+    def _normalize_on_close(cls, value: object) -> object:
+        return normalize_on_close(value)
+
+    @field_validator(
+        "state_updated_at",
+        "content_updated_at",
+        "notes_updated_at",
+        "last_synced_at",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_timestamps(cls, value: object) -> object:
+        return normalize_timestamp(value)
+
+    @classmethod
+    def from_external_ref(cls, ref: ExternalTicketRef) -> "ExternalTicketLink":
+        """Build a store model from one compatibility-layer ticket reference."""
+
+        return cls(
+            provider=ref.provider,
+            ticket_id=ref.ticket_id,
+            url=ref.url,
+            title=ref.title,
+            summary=ref.summary,
+            body=ref.body,
+            notes=ref.notes,
+            relation=cast(
+                Literal["primary", "secondary", "context", "derived"] | None,
+                ref.relation,
+            ),
+            direction=cast(
+                Literal["imported", "exported", "linked"] | None,
+                ref.direction,
+            ),
+            sync_mode=cast(
+                Literal["manual", "import", "export", "sync"] | None,
+                ref.sync_mode,
+            ),
+            state=cast(
+                Literal["open", "in_progress", "blocked", "in_review", "closed", "unknown"] | None,
+                ref.state,
+            ),
+            raw_state=ref.raw_state,
+            state_updated_at=ref.state_updated_at,
+            parent_id=ref.parent_id,
+            on_close=cast(
+                Literal["none", "comment", "close", "sync"] | None,
+                ref.on_close,
+            ),
+            content_updated_at=ref.content_updated_at,
+            notes_updated_at=ref.notes_updated_at,
+            last_synced_at=ref.last_synced_at,
+        )
+
+    def to_external_ref(self) -> ExternalTicketRef:
+        """Project the store model into the compatibility ticket shape."""
+
+        return ExternalTicketRef(
+            provider=self.provider,
+            ticket_id=self.ticket_id,
+            url=self.url,
+            title=self.title,
+            summary=self.summary,
+            body=self.body,
+            notes=self.notes,
+            relation=self.relation,
+            direction=self.direction,
+            sync_mode=self.sync_mode,
+            state=self.state,
+            raw_state=self.raw_state,
+            state_updated_at=self.state_updated_at,
+            parent_id=self.parent_id,
+            on_close=self.on_close,
+            content_updated_at=self.content_updated_at,
+            notes_updated_at=self.notes_updated_at,
+            last_synced_at=self.last_synced_at,
+        )
 
 
 class ChangesetBranches(StoreModel):
@@ -254,6 +413,7 @@ __all__ = [
     "EpicDiscoveryParity",
     "EpicIdentityViolation",
     "EpicRecord",
+    "ExternalTicketLink",
     "HookRecord",
     "Identifier",
     "LifecycleStatus",

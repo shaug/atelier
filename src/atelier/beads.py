@@ -4939,33 +4939,33 @@ def update_external_tickets(
     beads_root: Path,
     cwd: Path,
 ) -> dict[str, object]:
-    """Update external ticket references and labels on a bead."""
-    with _issue_write_lock(issue_id, beads_root=beads_root):
-        issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
-        if not issues:
-            die(f"issue not found: {issue_id}")
-        issue = issues[0]
-        payload = [external_ticket_payload(ticket) for ticket in tickets]
-        serialized = json.dumps(payload, separators=(",", ":"), sort_keys=True)
-        desired_labels = {external_label(ticket.provider) for ticket in tickets}
-        labels = sorted(_issue_labels(issue))
-        remove_labels = [
-            label for label in labels if label.startswith("ext:") and label not in desired_labels
-        ]
-        add_labels = [label for label in desired_labels if label not in labels]
-        if add_labels or remove_labels:
-            args = ["update", issue_id]
-            for label in add_labels:
-                args.extend(["--add-label", label])
-            for label in remove_labels:
-                args.extend(["--remove-label", label])
-            run_bd_command(args, beads_root=beads_root, cwd=cwd)
-        return _update_description_fields_optimistic(
-            issue_id,
-            fields={EXTERNAL_TICKETS_KEY: serialized},
-            beads_root=beads_root,
-            cwd=cwd,
+    """Update external ticket references through the Atelier store contract."""
+
+    from .lib.beads import SubprocessBeadsClient
+    from .store import (
+        ExternalTicketLink,
+        UpdateExternalTicketsRequest,
+        build_atelier_store,
+    )
+
+    client = SubprocessBeadsClient(
+        cwd=cwd,
+        beads_root=beads_root,
+        env={"BEADS_DIR": str(beads_root)},
+    )
+    store = build_atelier_store(beads=client)
+    asyncio.run(
+        store.update_external_tickets(
+            UpdateExternalTicketsRequest(
+                issue_id=issue_id,
+                tickets=tuple(ExternalTicketLink.from_external_ref(ticket) for ticket in tickets),
+            )
         )
+    )
+    issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        die(f"issue not found: {issue_id}")
+    return issues[0]
 
 
 def clear_agent_hook(
