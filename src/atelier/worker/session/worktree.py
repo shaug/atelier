@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Protocol
 
 from ... import beads, changeset_fields, git, prefix_migration_drift, prs, worktrees
+from . import worktree_fast_path
 
 
 @dataclass(frozen=True)
@@ -81,7 +82,7 @@ def _startup_worktree_preflight(
     allow_parent_branch_override: bool,
     git_path: str | None,
 ) -> None:
-    """Auto-heal recoverable drift and fail closed on unresolved startup blockers."""
+    """Auto-heal recoverable drift and fail closed on startup blockers."""
     repo_slug = prs.github_repo_slug(git.git_origin_url(repo_root))
     target_changesets = {selected_epic.strip(), changeset_id.strip()}
     target_changesets.discard("")
@@ -374,6 +375,20 @@ def _sync_child_workspace_parent_branch(
         allow_override=bool(current_parent and current_parent == root_branch_value),
     )
     control.say(f"Aligned workspace.parent_branch for {changeset_id}: {normalized_epic_parent}")
+
+
+def _resolve_worktree_path(project_data_dir: Path, relpath: str) -> Path:
+    candidate = Path(relpath)
+    if candidate.is_absolute():
+        return candidate
+    return project_data_dir / candidate
+
+
+def _selected_epic_worktree_path(project_data_dir: Path, selected_epic: str) -> Path:
+    mapping = worktrees.load_mapping(worktrees.mapping_path(project_data_dir, selected_epic))
+    if mapping is None or not mapping.worktree_path:
+        return worktrees.worktree_dir(project_data_dir, selected_epic)
+    return _resolve_worktree_path(project_data_dir, mapping.worktree_path)
 
 
 def _reconcile_epic_changeset_lineage(
@@ -678,6 +693,172 @@ def _repair_non_epic_changeset_lineage(
     return decision.work_branch, updated_mapping
 
 
+def _complete_worktree_preparation(
+    *,
+    selected_epic: str,
+    changeset_id: str,
+    root_branch_value: str,
+    changeset_parent_branch: str,
+    allow_parent_branch_override: bool,
+    epic_parent_branch: str,
+    beads_root: Path,
+    repo_root: Path,
+    git_path: str | None,
+    control: WorktreePreparationControl,
+    epic_worktree_path: Path,
+    changeset_worktree_path: Path,
+    branch: str,
+) -> WorktreePreparation:
+    if changeset_id:
+        _sync_child_workspace_parent_branch(
+            selected_epic=selected_epic,
+            changeset_id=changeset_id,
+            root_branch_value=root_branch_value,
+            epic_parent_branch=epic_parent_branch,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            control=control,
+        )
+        root_base = git.git_rev_parse(changeset_worktree_path, root_branch_value, git_path=git_path)
+        parent_base = git.git_rev_parse(
+            changeset_worktree_path,
+            changeset_parent_branch,
+            git_path=git_path,
+        )
+        beads.update_changeset_branch_metadata(
+            changeset_id,
+            root_branch=root_branch_value,
+            parent_branch=changeset_parent_branch,
+            work_branch=branch,
+            root_base=None if allow_parent_branch_override else root_base,
+            parent_base=parent_base,
+            beads_root=beads_root,
+            cwd=repo_root,
+            allow_override=allow_parent_branch_override,
+        )
+    control.say(f"Epic worktree: {epic_worktree_path}")
+    control.say(f"Changeset worktree: {changeset_worktree_path}")
+    control.say(f"Changeset branch: {branch}")
+    return WorktreePreparation(
+        epic_worktree_path=epic_worktree_path,
+        changeset_worktree_path=changeset_worktree_path,
+        branch=branch,
+    )
+
+
+def _prepare_selected_scope_fast_path(
+    *,
+    context: WorktreePreparationContext,
+    control: WorktreePreparationControl,
+) -> WorktreePreparation | None:
+    validation = worktree_fast_path.validate_selected_scope(
+        context=worktree_fast_path.SelectedScopeValidationContext(
+            project_data_dir=context.project_data_dir,
+            repo_root=context.repo_root,
+            beads_root=context.beads_root,
+            selected_epic=context.selected_epic,
+            changeset_id=context.changeset_id,
+            root_branch=context.root_branch_value,
+            git_path=context.git_path,
+        )
+    )
+    if validation.outcome not in {
+        worktree_fast_path.SelectedScopeValidationOutcome.SAFE_REUSE,
+        worktree_fast_path.SelectedScopeValidationOutcome.LOCAL_CREATE,
+    }:
+        return None
+
+    selected_signal = validation.signals[0]
+    control.say(f"Selected-scope validation: {selected_signal.code} ({selected_signal.summary})")
+
+    selected_epic = context.selected_epic
+    changeset_id = context.changeset_id
+    root_branch_value = context.root_branch_value
+    changeset_parent_branch = context.changeset_parent_branch
+    allow_parent_branch_override = context.allow_parent_branch_override
+    git_path = context.git_path
+    epic_parent_branch = context.epic_parent_branch
+    epic_is_changeset = bool(changeset_id) and changeset_id == selected_epic
+
+    if validation.outcome is worktree_fast_path.SelectedScopeValidationOutcome.SAFE_REUSE:
+        branch = validation.expected_work_branch
+        changeset_worktree_path = validation.worktree_path
+        epic_worktree_path = (
+            changeset_worktree_path
+            if epic_is_changeset
+            else _selected_epic_worktree_path(context.project_data_dir, selected_epic)
+        )
+        mapping = worktrees.load_mapping(
+            worktrees.mapping_path(context.project_data_dir, selected_epic)
+        )
+        if mapping is None:
+            raise RuntimeError(
+                "selected-scope validation reported reusable state without a selected mapping"
+            )
+    else:
+        branch, mapping = worktrees.ensure_changeset_branch(
+            context.project_data_dir,
+            selected_epic,
+            changeset_id,
+            root_branch=root_branch_value,
+            repo_root=context.repo_root,
+            git_path=git_path,
+        )
+        if epic_is_changeset:
+            epic_worktree_path = worktrees.ensure_git_worktree(
+                context.project_data_dir,
+                context.repo_root,
+                selected_epic,
+                root_branch=root_branch_value,
+                git_path=git_path,
+            )
+            changeset_worktree_path = epic_worktree_path
+        else:
+            epic_worktree_path = _resolve_worktree_path(
+                context.project_data_dir, mapping.worktree_path
+            )
+            changeset_worktree_path = worktrees.ensure_changeset_worktree(
+                context.project_data_dir,
+                context.repo_root,
+                selected_epic,
+                changeset_id,
+                branch=branch,
+                root_branch=root_branch_value,
+                parent_branch=changeset_parent_branch,
+                git_path=git_path,
+            )
+        worktrees.ensure_changeset_checkout(
+            changeset_worktree_path,
+            branch,
+            root_branch=root_branch_value,
+            parent_branch=changeset_parent_branch,
+            git_path=git_path,
+        )
+
+    beads.update_worktree_path(
+        selected_epic,
+        mapping.worktree_path,
+        beads_root=context.beads_root,
+        cwd=context.repo_root,
+        allow_override=True,
+    )
+    return _complete_worktree_preparation(
+        selected_epic=selected_epic,
+        changeset_id=changeset_id,
+        root_branch_value=root_branch_value,
+        changeset_parent_branch=changeset_parent_branch,
+        allow_parent_branch_override=allow_parent_branch_override,
+        epic_parent_branch=epic_parent_branch,
+        beads_root=context.beads_root,
+        repo_root=context.repo_root,
+        git_path=git_path,
+        control=control,
+        epic_worktree_path=epic_worktree_path,
+        changeset_worktree_path=changeset_worktree_path,
+        branch=branch,
+    )
+
+
 def prepare_worktrees(
     *,
     context: WorktreePreparationContext,
@@ -746,6 +927,10 @@ def prepare_worktrees(
             changeset_worktree_path=changeset_worktree_path,
             branch=branch,
         )
+
+    fast_path_preparation = _prepare_selected_scope_fast_path(context=context, control=control)
+    if fast_path_preparation is not None:
+        return fast_path_preparation
 
     _startup_worktree_preflight(
         project_data_dir=project_data_dir,
@@ -852,37 +1037,17 @@ def prepare_worktrees(
         parent_branch=changeset_parent_branch,
         git_path=git_path,
     )
-    _sync_child_workspace_parent_branch(
+    return _complete_worktree_preparation(
         selected_epic=selected_epic,
         changeset_id=changeset_id,
         root_branch_value=root_branch_value,
+        changeset_parent_branch=changeset_parent_branch,
+        allow_parent_branch_override=allow_parent_branch_override,
         epic_parent_branch=epic_parent_branch,
         beads_root=beads_root,
         repo_root=repo_root,
+        git_path=git_path,
         control=control,
-    )
-    if changeset_id:
-        root_base = git.git_rev_parse(changeset_worktree_path, root_branch_value, git_path=git_path)
-        parent_base = git.git_rev_parse(
-            changeset_worktree_path,
-            changeset_parent_branch,
-            git_path=git_path,
-        )
-        beads.update_changeset_branch_metadata(
-            changeset_id,
-            root_branch=root_branch_value,
-            parent_branch=changeset_parent_branch,
-            work_branch=branch,
-            root_base=None if allow_parent_branch_override else root_base,
-            parent_base=parent_base,
-            beads_root=beads_root,
-            cwd=repo_root,
-            allow_override=allow_parent_branch_override,
-        )
-    control.say(f"Epic worktree: {epic_worktree_path}")
-    control.say(f"Changeset worktree: {changeset_worktree_path}")
-    control.say(f"Changeset branch: {branch}")
-    return WorktreePreparation(
         epic_worktree_path=epic_worktree_path,
         changeset_worktree_path=changeset_worktree_path,
         branch=branch,

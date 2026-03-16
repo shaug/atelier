@@ -6,7 +6,7 @@ from unittest.mock import ANY, Mock, call, patch
 import pytest
 
 from atelier import worktrees
-from atelier.worker.session import worktree
+from atelier.worker.session import worktree, worktree_fast_path
 
 
 class _TestControl:
@@ -387,6 +387,242 @@ def test_startup_worktree_preflight_ignores_non_actionable_prefix_drift() -> Non
 
     scan_drift.assert_called_once()
     assert plan_repairs.call_count == 2
+
+
+def test_prepare_worktrees_reuses_selected_scope_before_repair(tmp_path: Path) -> None:
+    logs: list[str] = []
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True)
+    selected_worktree = tmp_path / "worktrees" / "at-epic.1"
+    selected_worktree.mkdir(parents=True)
+    (selected_worktree / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
+    worktrees.write_mapping(
+        worktrees.mapping_path(tmp_path, "at-epic"),
+        worktrees.WorktreeMapping(
+            epic_id="at-epic",
+            worktree_path="worktrees/at-epic",
+            root_branch="feat/root",
+            changesets={"at-epic.1": "feat/root-at-epic.1"},
+            changeset_worktrees={"at-epic.1": "worktrees/at-epic.1"},
+        ),
+    )
+    validation = worktree_fast_path.SelectedScopeValidation(
+        outcome=worktree_fast_path.SelectedScopeValidationOutcome.SAFE_REUSE,
+        mapping_epic_id="at-epic",
+        worktree_path=selected_worktree,
+        expected_work_branch="feat/root-at-epic.1",
+        checked_out_branch="feat/root-at-epic.1",
+        signals=(
+            worktree_fast_path.SelectedScopeValidationSignal(
+                code="selected-scope-reusable",
+                summary="selected mapping, worktree, and branch state are coherent",
+                details={},
+            ),
+        ),
+    )
+
+    with (
+        patch(
+            "atelier.worker.session.worktree.worktree_fast_path.validate_selected_scope",
+            return_value=validation,
+        ),
+        patch("atelier.worker.session.worktree._startup_worktree_preflight") as preflight,
+        patch("atelier.worker.session.worktree._mapping_ownership_from_beads") as ownership_lookup,
+        patch(
+            "atelier.worker.session.worktree.worktrees.reconcile_mapping_ownership"
+        ) as reconcile_mapping,
+        patch("atelier.worker.session.worktree.worktrees.ensure_git_worktree") as ensure_epic,
+        patch("atelier.worker.session.worktree.worktrees.ensure_changeset_branch") as ensure_branch,
+        patch(
+            "atelier.worker.session.worktree.worktrees.ensure_changeset_worktree"
+        ) as ensure_changeset_worktree,
+        patch(
+            "atelier.worker.session.worktree.worktrees.ensure_changeset_checkout"
+        ) as ensure_checkout,
+        patch("atelier.worker.session.worktree._sync_child_workspace_parent_branch"),
+        patch("atelier.worker.session.worktree.beads.update_worktree_path") as update_worktree_path,
+        patch(
+            "atelier.worker.session.worktree.beads.update_changeset_branch_metadata"
+        ) as update_metadata,
+        patch(
+            "atelier.worker.session.worktree.git.git_rev_parse",
+            side_effect=["root-base", "parent-base"],
+        ),
+    ):
+        result = worktree.prepare_worktrees(
+            context=worktree.WorktreePreparationContext(
+                dry_run=False,
+                project_data_dir=tmp_path,
+                repo_root=repo_root,
+                beads_root=tmp_path / ".beads",
+                selected_epic="at-epic",
+                changeset_id="at-epic.1",
+                root_branch_value="feat/root",
+                changeset_parent_branch="feat/root",
+                allow_parent_branch_override=False,
+                git_path="git",
+            ),
+            control=_TestControl(logs),
+        )
+
+    preflight.assert_not_called()
+    ownership_lookup.assert_not_called()
+    reconcile_mapping.assert_not_called()
+    ensure_epic.assert_not_called()
+    ensure_branch.assert_not_called()
+    ensure_changeset_worktree.assert_not_called()
+    ensure_checkout.assert_not_called()
+    update_worktree_path.assert_called_once_with(
+        "at-epic",
+        "worktrees/at-epic",
+        beads_root=tmp_path / ".beads",
+        cwd=repo_root,
+        allow_override=True,
+    )
+    update_metadata.assert_called_once_with(
+        "at-epic.1",
+        root_branch="feat/root",
+        parent_branch="feat/root",
+        work_branch="feat/root-at-epic.1",
+        root_base="root-base",
+        parent_base="parent-base",
+        beads_root=tmp_path / ".beads",
+        cwd=repo_root,
+        allow_override=False,
+    )
+    assert result.epic_worktree_path == tmp_path / "worktrees" / "at-epic"
+    assert result.changeset_worktree_path == selected_worktree
+    assert result.branch == "feat/root-at-epic.1"
+    assert any("Selected-scope validation: selected-scope-reusable" in line for line in logs)
+
+
+def test_prepare_worktrees_creates_selected_scope_before_repair(tmp_path: Path) -> None:
+    logs: list[str] = []
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True)
+    changeset_worktree_path = tmp_path / "worktrees" / "at-epic.1"
+    changeset_worktree_path.mkdir(parents=True)
+    validation = worktree_fast_path.SelectedScopeValidation(
+        outcome=worktree_fast_path.SelectedScopeValidationOutcome.LOCAL_CREATE,
+        mapping_epic_id=None,
+        worktree_path=changeset_worktree_path,
+        expected_work_branch="feat/root-at-epic.1",
+        checked_out_branch=None,
+        signals=(
+            worktree_fast_path.SelectedScopeValidationSignal(
+                code="selected-scope-create-locally",
+                summary="no selected-scope mapping or worktree exists yet",
+                details={},
+            ),
+        ),
+    )
+    mapping = worktrees.WorktreeMapping(
+        epic_id="at-epic",
+        worktree_path="worktrees/at-epic",
+        root_branch="feat/root",
+        changesets={"at-epic.1": "feat/root-at-epic.1"},
+        changeset_worktrees={"at-epic.1": "worktrees/at-epic.1"},
+    )
+
+    with (
+        patch(
+            "atelier.worker.session.worktree.worktree_fast_path.validate_selected_scope",
+            return_value=validation,
+        ),
+        patch("atelier.worker.session.worktree._startup_worktree_preflight") as preflight,
+        patch("atelier.worker.session.worktree._mapping_ownership_from_beads") as ownership_lookup,
+        patch(
+            "atelier.worker.session.worktree.worktrees.reconcile_mapping_ownership"
+        ) as reconcile_mapping,
+        patch("atelier.worker.session.worktree.worktrees.ensure_git_worktree") as ensure_epic,
+        patch(
+            "atelier.worker.session.worktree.worktrees.ensure_changeset_branch",
+            return_value=("feat/root-at-epic.1", mapping),
+        ) as ensure_branch,
+        patch(
+            "atelier.worker.session.worktree.worktrees.ensure_changeset_worktree",
+            return_value=changeset_worktree_path,
+        ) as ensure_changeset_worktree,
+        patch(
+            "atelier.worker.session.worktree.worktrees.ensure_changeset_checkout"
+        ) as ensure_checkout,
+        patch("atelier.worker.session.worktree._sync_child_workspace_parent_branch"),
+        patch("atelier.worker.session.worktree.beads.update_worktree_path") as update_worktree_path,
+        patch(
+            "atelier.worker.session.worktree.beads.update_changeset_branch_metadata"
+        ) as update_metadata,
+        patch(
+            "atelier.worker.session.worktree.git.git_rev_parse",
+            side_effect=["root-base", "parent-base"],
+        ),
+    ):
+        result = worktree.prepare_worktrees(
+            context=worktree.WorktreePreparationContext(
+                dry_run=False,
+                project_data_dir=tmp_path,
+                repo_root=repo_root,
+                beads_root=tmp_path / ".beads",
+                selected_epic="at-epic",
+                changeset_id="at-epic.1",
+                root_branch_value="feat/root",
+                changeset_parent_branch="feat/root",
+                allow_parent_branch_override=False,
+                git_path="git",
+            ),
+            control=_TestControl(logs),
+        )
+
+    preflight.assert_not_called()
+    ownership_lookup.assert_not_called()
+    reconcile_mapping.assert_not_called()
+    ensure_epic.assert_not_called()
+    ensure_branch.assert_called_once_with(
+        tmp_path,
+        "at-epic",
+        "at-epic.1",
+        root_branch="feat/root",
+        repo_root=repo_root,
+        git_path="git",
+    )
+    ensure_changeset_worktree.assert_called_once_with(
+        tmp_path,
+        repo_root,
+        "at-epic",
+        "at-epic.1",
+        branch="feat/root-at-epic.1",
+        root_branch="feat/root",
+        parent_branch="feat/root",
+        git_path="git",
+    )
+    ensure_checkout.assert_called_once_with(
+        changeset_worktree_path,
+        "feat/root-at-epic.1",
+        root_branch="feat/root",
+        parent_branch="feat/root",
+        git_path="git",
+    )
+    update_worktree_path.assert_called_once_with(
+        "at-epic",
+        "worktrees/at-epic",
+        beads_root=tmp_path / ".beads",
+        cwd=repo_root,
+        allow_override=True,
+    )
+    update_metadata.assert_called_once_with(
+        "at-epic.1",
+        root_branch="feat/root",
+        parent_branch="feat/root",
+        work_branch="feat/root-at-epic.1",
+        root_base="root-base",
+        parent_base="parent-base",
+        beads_root=tmp_path / ".beads",
+        cwd=repo_root,
+        allow_override=False,
+    )
+    assert result.epic_worktree_path == tmp_path / "worktrees" / "at-epic"
+    assert result.changeset_worktree_path == changeset_worktree_path
+    assert result.branch == "feat/root-at-epic.1"
+    assert any("Selected-scope validation: selected-scope-create-locally" in line for line in logs)
 
 
 def test_prepare_worktrees_reconciles_ownership_before_worktree_setup(tmp_path: Path) -> None:
