@@ -70,6 +70,34 @@ def _format_drift_values(raw: object) -> str:
     return json.dumps(dict(sorted(normalized.items())), sort_keys=True, separators=(",", ":"))
 
 
+def _format_selected_scope_validation(
+    validation: worktree_fast_path.SelectedScopeValidation,
+) -> str:
+    diagnostics: list[str] = []
+    for signal in validation.signals:
+        detail_text = ", ".join(f"{key}={value}" for key, value in sorted(signal.details.items()))
+        if detail_text:
+            diagnostics.append(f"{signal.code} ({signal.summary}; {detail_text})")
+        else:
+            diagnostics.append(f"{signal.code} ({signal.summary})")
+    return "; ".join(diagnostics)
+
+
+def _gate_selected_scope_fallback(
+    *,
+    validation: worktree_fast_path.SelectedScopeValidation,
+    control: WorktreePreparationControl,
+) -> None:
+    diagnostic = _format_selected_scope_validation(validation)
+    if (
+        validation.outcome
+        is worktree_fast_path.SelectedScopeValidationOutcome.REQUIRES_FALLBACK_REPAIR
+    ):
+        control.say(f"Selected-scope fallback repair: {diagnostic}")
+        return
+    raise RuntimeError(f"selected-scope validation blocked worktree preparation: {diagnostic}")
+
+
 def _startup_worktree_preflight(
     *,
     project_data_dir: Path,
@@ -750,18 +778,8 @@ def _prepare_selected_scope_fast_path(
     *,
     context: WorktreePreparationContext,
     control: WorktreePreparationControl,
+    validation: worktree_fast_path.SelectedScopeValidation,
 ) -> WorktreePreparation | None:
-    validation = worktree_fast_path.validate_selected_scope(
-        context=worktree_fast_path.SelectedScopeValidationContext(
-            project_data_dir=context.project_data_dir,
-            repo_root=context.repo_root,
-            beads_root=context.beads_root,
-            selected_epic=context.selected_epic,
-            changeset_id=context.changeset_id,
-            root_branch=context.root_branch_value,
-            git_path=context.git_path,
-        )
-    )
     if validation.outcome not in {
         worktree_fast_path.SelectedScopeValidationOutcome.SAFE_REUSE,
         worktree_fast_path.SelectedScopeValidationOutcome.LOCAL_CREATE,
@@ -932,9 +950,25 @@ def prepare_worktrees(
             branch=branch,
         )
 
-    fast_path_preparation = _prepare_selected_scope_fast_path(context=context, control=control)
+    validation = worktree_fast_path.validate_selected_scope(
+        context=worktree_fast_path.SelectedScopeValidationContext(
+            project_data_dir=project_data_dir,
+            repo_root=repo_root,
+            beads_root=beads_root,
+            selected_epic=selected_epic,
+            changeset_id=changeset_id,
+            root_branch=root_branch_value,
+            git_path=git_path,
+        )
+    )
+    fast_path_preparation = _prepare_selected_scope_fast_path(
+        context=context,
+        control=control,
+        validation=validation,
+    )
     if fast_path_preparation is not None:
         return fast_path_preparation
+    _gate_selected_scope_fallback(validation=validation, control=control)
 
     _startup_worktree_preflight(
         project_data_dir=project_data_dir,
