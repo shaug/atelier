@@ -20,6 +20,33 @@ class _TestControl:
         self.logs.append(message)
 
 
+def _selected_scope_validation(
+    outcome: worktree_fast_path.SelectedScopeValidationOutcome,
+    *,
+    code: str,
+    summary: str,
+    details: dict[str, str] | None = None,
+    mapping_epic_id: str | None = None,
+    worktree_path: Path = Path("/project/worktrees/at-epic.1"),
+    expected_work_branch: str = "feat/root-at-epic.1",
+    checked_out_branch: str | None = None,
+) -> worktree_fast_path.SelectedScopeValidation:
+    return worktree_fast_path.SelectedScopeValidation(
+        outcome=outcome,
+        mapping_epic_id=mapping_epic_id,
+        worktree_path=worktree_path,
+        expected_work_branch=expected_work_branch,
+        checked_out_branch=checked_out_branch,
+        signals=(
+            worktree_fast_path.SelectedScopeValidationSignal(
+                code=code,
+                summary=summary,
+                details=details or {},
+            ),
+        ),
+    )
+
+
 def test_prepare_worktrees_dry_run_derives_changeset_branch(tmp_path: Path) -> None:
     logs: list[str] = []
 
@@ -137,6 +164,19 @@ def test_prepare_worktrees_blocks_before_mutations_on_prefix_drift_for_selected_
 
     with (
         patch(
+            "atelier.worker.session.worktree.worktree_fast_path.validate_selected_scope",
+            return_value=_selected_scope_validation(
+                worktree_fast_path.SelectedScopeValidationOutcome.REQUIRES_FALLBACK_REPAIR,
+                code="selected-scope-checked-out-branch-mismatch",
+                summary="selected worktree branch disagrees with the selected mapping",
+                details={
+                    "checked_out_branch": "at/legacy-at-epic.1",
+                    "expected_work_branch": "feat/new-at-epic.1",
+                },
+                expected_work_branch="feat/new-at-epic.1",
+            ),
+        ),
+        patch(
             "atelier.worker.session.worktree.prefix_migration_drift.repair_prefix_migration_drift",
             plan_repairs,
         ),
@@ -210,7 +250,10 @@ def test_prepare_worktrees_blocks_before_mutations_on_prefix_drift_for_selected_
     reconcile_mapping.assert_not_called()
     ensure_epic_worktree.assert_not_called()
     ensure_changeset_branch.assert_not_called()
-    assert not logs
+    assert any(
+        "Selected-scope fallback repair: selected-scope-checked-out-branch-mismatch" in line
+        for line in logs
+    )
 
 
 def test_prepare_worktrees_blocks_before_mutations_on_targeted_metadata_read_failure() -> None:
@@ -236,6 +279,16 @@ def test_prepare_worktrees_blocks_before_mutations_on_targeted_metadata_read_fai
     plan_repairs = Mock(side_effect=[[], []])
 
     with (
+        patch(
+            "atelier.worker.session.worktree.worktree_fast_path.validate_selected_scope",
+            return_value=_selected_scope_validation(
+                worktree_fast_path.SelectedScopeValidationOutcome.REQUIRES_FALLBACK_REPAIR,
+                code="selected-changeset-metadata-unreadable",
+                summary="selected changeset metadata could not be read",
+                details={"bd_exit_code": "7", "changeset_id": "at-epic.1"},
+                expected_work_branch="feat/new-at-epic.1",
+            ),
+        ),
         patch(
             "atelier.worker.session.worktree.prefix_migration_drift.repair_prefix_migration_drift",
             plan_repairs,
@@ -310,7 +363,10 @@ def test_prepare_worktrees_blocks_before_mutations_on_targeted_metadata_read_fai
     reconcile_mapping.assert_not_called()
     ensure_epic_worktree.assert_not_called()
     ensure_changeset_branch.assert_not_called()
-    assert not logs
+    assert any(
+        "Selected-scope fallback repair: selected-changeset-metadata-unreadable" in line
+        for line in logs
+    )
 
 
 def test_startup_worktree_preflight_ignores_non_actionable_prefix_drift() -> None:
@@ -698,6 +754,21 @@ def test_prepare_worktrees_reconciles_ownership_before_worktree_setup(tmp_path: 
         return []
 
     with (
+        patch(
+            "atelier.worker.session.worktree.worktree_fast_path.validate_selected_scope",
+            return_value=_selected_scope_validation(
+                worktree_fast_path.SelectedScopeValidationOutcome.REQUIRES_FALLBACK_REPAIR,
+                code="selected-scope-metadata-without-mapping",
+                summary="changeset branch metadata exists without a selected mapping",
+                details={
+                    "changeset_id": "at-gnc.1",
+                    "metadata_root": "feat/gnc",
+                    "metadata_work": "feat/gnc-at-gnc.1",
+                    "selected_epic": "at-gnc",
+                },
+                expected_work_branch="feat/gnc-at-gnc.1",
+            ),
+        ),
         patch("atelier.worker.session.worktree.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch(
             "atelier.worker.session.worktree.beads.list_descendant_changesets",
@@ -756,6 +827,7 @@ def test_prepare_worktrees_reconciles_ownership_before_worktree_setup(tmp_path: 
         },
         synthesis_diagnostics=ANY,
     )
+    assert any("Selected-scope fallback repair:" in line for line in logs)
     assert any("Reconciled mapping ownership: at-1my, at-gnc" in line for line in logs)
 
 
@@ -836,6 +908,21 @@ def test_prepare_worktrees_review_feedback_resume_logs_lineage_mapping_path_synt
         return ("ts-new",)
 
     with (
+        patch(
+            "atelier.worker.session.worktree.worktree_fast_path.validate_selected_scope",
+            return_value=_selected_scope_validation(
+                worktree_fast_path.SelectedScopeValidationOutcome.REQUIRES_FALLBACK_REPAIR,
+                code="selected-scope-metadata-without-mapping",
+                summary="changeset branch metadata exists without a selected mapping",
+                details={
+                    "changeset_id": "ts-new.1",
+                    "metadata_root": "feat/new",
+                    "metadata_work": "feat/new-ts-new.1",
+                    "selected_epic": "ts-new",
+                },
+                expected_work_branch="feat/new-ts-new.1",
+            ),
+        ),
         patch("atelier.worker.session.worktree.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch(
             "atelier.worker.session.worktree.beads.list_descendant_changesets",
@@ -878,6 +965,7 @@ def test_prepare_worktrees_review_feedback_resume_logs_lineage_mapping_path_synt
             control=_TestControl(logs),
         )
 
+    assert any("Selected-scope fallback repair:" in line for line in logs)
     assert any("Reconciled mapping ownership: ts-new" in line for line in logs)
     assert any(
         "Mapping path synthesis for ts-new: preserved from source mapping lineage "
@@ -927,6 +1015,19 @@ def test_prepare_worktrees_allows_epic_worktree_path_override_after_drift_repair
         return {}
 
     with (
+        patch(
+            "atelier.worker.session.worktree.worktree_fast_path.validate_selected_scope",
+            return_value=_selected_scope_validation(
+                worktree_fast_path.SelectedScopeValidationOutcome.REQUIRES_FALLBACK_REPAIR,
+                code="selected-scope-root-branch-mismatch",
+                summary="selected mapping root branch disagrees with the selected root branch",
+                details={
+                    "mapping_root_branch": "feat/legacy",
+                    "selected_root_branch": "feat/new",
+                },
+                expected_work_branch="feat/new-ts-new.1",
+            ),
+        ),
         patch("atelier.worker.session.worktree._startup_worktree_preflight"),
         patch(
             "atelier.worker.session.worktree._mapping_ownership_from_beads",
@@ -1104,6 +1205,20 @@ def test_prepare_worktrees_aligns_child_workspace_parent_branch_from_epic(tmp_pa
         return []
 
     with (
+        patch(
+            "atelier.worker.session.worktree.worktree_fast_path.validate_selected_scope",
+            return_value=_selected_scope_validation(
+                worktree_fast_path.SelectedScopeValidationOutcome.REQUIRES_FALLBACK_REPAIR,
+                code="selected-scope-metadata-without-mapping",
+                summary="changeset branch metadata exists without a selected mapping",
+                details={
+                    "changeset_id": "at-epic.1",
+                    "metadata_root": "feat/epic",
+                    "selected_epic": "at-epic",
+                },
+                expected_work_branch="feat/epic-at-epic.1",
+            ),
+        ),
         patch("atelier.worker.session.worktree.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch(
             "atelier.worker.session.worktree.beads.list_descendant_changesets",
@@ -1209,6 +1324,20 @@ def test_prepare_worktrees_preserves_existing_non_root_child_workspace_parent_br
         return []
 
     with (
+        patch(
+            "atelier.worker.session.worktree.worktree_fast_path.validate_selected_scope",
+            return_value=_selected_scope_validation(
+                worktree_fast_path.SelectedScopeValidationOutcome.REQUIRES_FALLBACK_REPAIR,
+                code="selected-scope-metadata-without-mapping",
+                summary="changeset branch metadata exists without a selected mapping",
+                details={
+                    "changeset_id": "at-epic.1",
+                    "metadata_root": "feat/epic",
+                    "selected_epic": "at-epic",
+                },
+                expected_work_branch="feat/epic-at-epic.1",
+            ),
+        ),
         patch("atelier.worker.session.worktree.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch(
             "atelier.worker.session.worktree.beads.list_descendant_changesets",
@@ -1304,6 +1433,16 @@ def test_prepare_worktrees_skips_child_workspace_parent_alignment_on_beads_looku
         return []
 
     with (
+        patch(
+            "atelier.worker.session.worktree.worktree_fast_path.validate_selected_scope",
+            return_value=_selected_scope_validation(
+                worktree_fast_path.SelectedScopeValidationOutcome.REQUIRES_FALLBACK_REPAIR,
+                code="selected-changeset-metadata-unreadable",
+                summary="selected changeset metadata could not be read",
+                details={"bd_exit_code": "1", "changeset_id": "at-epic.1"},
+                expected_work_branch="feat/epic-at-epic.1",
+            ),
+        ),
         patch("atelier.worker.session.worktree.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch(
             "atelier.worker.session.worktree.beads.list_descendant_changesets",
@@ -1402,6 +1541,20 @@ def test_prepare_worktrees_fail_closed_when_epic_changeset_lineage_drift_is_dete
         raise AssertionError(f"unexpected bd command: {args!r}")
 
     with (
+        patch(
+            "atelier.worker.session.worktree.worktree_fast_path.validate_selected_scope",
+            return_value=_selected_scope_validation(
+                worktree_fast_path.SelectedScopeValidationOutcome.REQUIRES_FALLBACK_REPAIR,
+                code="selected-scope-metadata-work-mismatch",
+                summary="changeset metadata work branch disagrees with the selected mapping",
+                details={
+                    "expected_work_branch": "feat/root",
+                    "metadata_work_branch": "feat/old",
+                },
+                worktree_path=Path("/project/worktrees/at-epic"),
+                expected_work_branch="feat/root",
+            ),
+        ),
         patch("atelier.worker.session.worktree.worktrees.ensure_git_worktree") as ensure_epic,
         patch("atelier.worker.session.worktree.worktrees.ensure_changeset_branch") as ensure_branch,
         patch("atelier.worker.session.worktree.beads.update_worktree_path"),
@@ -1447,7 +1600,10 @@ def test_prepare_worktrees_fail_closed_when_epic_changeset_lineage_drift_is_dete
     )
     ensure_epic.assert_not_called()
     ensure_branch.assert_not_called()
-    assert not logs
+    assert any(
+        "Selected-scope fallback repair: selected-scope-metadata-work-mismatch" in line
+        for line in logs
+    )
 
 
 def test_prepare_worktrees_blocks_ambiguous_epic_changeset_lineage_drift() -> None:
@@ -1492,6 +1648,20 @@ def test_prepare_worktrees_blocks_ambiguous_epic_changeset_lineage_drift() -> No
 
     with (
         patch(
+            "atelier.worker.session.worktree.worktree_fast_path.validate_selected_scope",
+            return_value=_selected_scope_validation(
+                worktree_fast_path.SelectedScopeValidationOutcome.REQUIRES_FALLBACK_REPAIR,
+                code="selected-scope-metadata-root-mismatch",
+                summary="changeset metadata root branch disagrees with the selected root branch",
+                details={
+                    "metadata_root_branch": "feat/one",
+                    "selected_root_branch": "feat/root",
+                },
+                worktree_path=Path("/project/worktrees/at-epic"),
+                expected_work_branch="feat/root",
+            ),
+        ),
+        patch(
             "atelier.worker.session.worktree.worktrees.ensure_git_worktree",
             return_value=Path("/project/worktrees/at-epic"),
         ),
@@ -1535,3 +1705,52 @@ def test_prepare_worktrees_blocks_ambiguous_epic_changeset_lineage_drift() -> No
         allow_override=True,
     )
     checkout.assert_not_called()
+
+
+def test_prepare_worktrees_fails_closed_on_ambiguous_selected_scope_validation() -> None:
+    logs: list[str] = []
+
+    with (
+        patch(
+            "atelier.worker.session.worktree.worktree_fast_path.validate_selected_scope",
+            return_value=_selected_scope_validation(
+                worktree_fast_path.SelectedScopeValidationOutcome.AMBIGUOUS,
+                code="selected-scope-mapping-epic-mismatch",
+                summary="selected epic mapping file points at a different epic",
+                details={
+                    "mapping_epic_id": "at-shadow",
+                    "selected_epic": "at-epic",
+                },
+                mapping_epic_id="at-shadow",
+            ),
+        ),
+        patch("atelier.worker.session.worktree._startup_worktree_preflight") as preflight,
+        patch("atelier.worker.session.worktree._mapping_ownership_from_beads") as ownership_lookup,
+        patch(
+            "atelier.worker.session.worktree.worktrees.reconcile_mapping_ownership"
+        ) as reconcile_mapping,
+    ):
+        with pytest.raises(
+            RuntimeError,
+            match="selected-scope-mapping-epic-mismatch",
+        ):
+            worktree.prepare_worktrees(
+                context=worktree.WorktreePreparationContext(
+                    dry_run=False,
+                    project_data_dir=Path("/project"),
+                    repo_root=Path("/repo"),
+                    beads_root=Path("/beads"),
+                    selected_epic="at-epic",
+                    changeset_id="at-epic.1",
+                    root_branch_value="feat/root",
+                    changeset_parent_branch="feat/root",
+                    allow_parent_branch_override=False,
+                    git_path="git",
+                ),
+                control=_TestControl(logs),
+            )
+
+    preflight.assert_not_called()
+    ownership_lookup.assert_not_called()
+    reconcile_mapping.assert_not_called()
+    assert not logs
