@@ -33,7 +33,7 @@ def test_integrate_changeset_updates_root_with_cas(tmp_path: Path) -> None:
         patch("atelier.integration.exec_util.run_command", side_effect=fake_run),
         patch("atelier.integration.exec_util.try_run_command", side_effect=fake_try_run),
         patch("atelier.integration.git.git_rev_parse", side_effect=fake_rev_parse),
-        patch("atelier.integration.beads.update_changeset_integrated_sha") as update_sha,
+        patch("atelier.integration.worker_store.update_changeset_integrated_sha") as update_sha,
     ):
         result = integration.integrate_changeset(
             changeset_id="epic.1",
@@ -46,7 +46,12 @@ def test_integrate_changeset_updates_root_with_cas(tmp_path: Path) -> None:
 
     assert result.integrated_sha == "newsha"
     assert any("rebase" in cmd for cmd in calls)
-    update_sha.assert_called_once_with("epic.1", "newsha", beads_root=Path("/beads"), cwd=repo_root)
+    update_sha.assert_called_once_with(
+        "epic.1",
+        "newsha",
+        beads_root=Path("/beads"),
+        repo_root=repo_root,
+    )
 
 
 def test_integrate_changeset_raises_on_cas_mismatch(tmp_path: Path) -> None:
@@ -70,7 +75,7 @@ def test_integrate_changeset_raises_on_cas_mismatch(tmp_path: Path) -> None:
         patch("atelier.integration.exec_util.run_command"),
         patch("atelier.integration.exec_util.try_run_command", side_effect=fake_try_run),
         patch("atelier.integration.git.git_rev_parse", side_effect=fake_rev_parse),
-        patch("atelier.integration.beads.update_changeset_integrated_sha") as update_sha,
+        patch("atelier.integration.worker_store.update_changeset_integrated_sha") as update_sha,
     ):
         with pytest.raises(SystemExit):
             integration.integrate_changeset(
