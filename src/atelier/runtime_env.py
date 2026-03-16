@@ -135,14 +135,20 @@ def projected_runtime_contract(*, repo_root: Path | None) -> ProjectedRuntimeCon
             "modules.",
         ),
         inherited_pythonpath_rules=(
-            "Discard inherited PYTHONPATH entries before runtime health checks "
-            "so projected scripts do not mix distributions.",
-            "Preserve or reintroduce only explicit paths required by the "
-            "selected runtime, such as repo_root/src after repo-source "
-            "selection succeeds.",
-            "Do not preserve ambient PYTHONPATH merely because atelier is "
-            "already importable; partial imports without transitive "
-            "dependencies are not healthy.",
+            "Do not trust inherited PYTHONPATH as ambient input. Before "
+            "runtime health checks, clear it or reduce it to import roots "
+            "already proven to belong to the selected runtime.",
+            "When active-interpreter mode is selected, retain inherited "
+            "PYTHONPATH entries only when they are the active interpreter's "
+            "required dependency roots and bootstrap has not yet replaced "
+            "them with equivalent explicit paths.",
+            "When repo-source mode is selected, discard inherited PYTHONPATH "
+            "entries from other distributions and preserve or reintroduce "
+            "only explicit selected-runtime paths, such as repo_root/src "
+            "after repo-source selection succeeds.",
+            "Do not treat ambient PYTHONPATH as healthy merely because "
+            "atelier is importable; transitive dependency health and "
+            "provenance still must be proven.",
         ),
     )
 
@@ -210,9 +216,10 @@ def sanitize_pythonpath_environment(
 ) -> tuple[dict[str, str], tuple[str, ...]]:
     """Return an environment without inherited ``PYTHONPATH`` entries.
 
-    Atelier-managed agent and projected-skill runtimes do not inherit ambient
-    ``PYTHONPATH`` because it can mix a selected interpreter with third-party
-    packages from another distribution tree.
+    Projected bootstrap treats inherited ``PYTHONPATH`` as ambient until it has
+    proven which import roots belong to the selected runtime. Callers should
+    preserve or reintroduce any required selected-runtime roots separately
+    before dropping the remaining inherited entries.
 
     Args:
         base_env: Optional source environment map. When omitted, current process
@@ -247,8 +254,8 @@ def format_ambient_pythonpath_warning(removed_entries: Iterable[str]) -> str | N
     return (
         "Warning: ignored inherited PYTHONPATH entries "
         f"({sample}{suffix}). "
-        "Atelier-managed runtimes rebuild Python imports from the selected "
-        "repo runtime instead of mixing in ambient site-packages."
+        "Atelier-managed runtimes retain only selected-runtime import roots "
+        "instead of mixing in ambient site-packages."
     )
 
 

@@ -37,8 +37,9 @@ def test_projected_runtime_contract_prefers_repo_source_when_repo_root_is_known(
     assert "src/atelier" in contract.repo_root_behavior
     assert any("--repo-dir" in rule for rule in contract.provenance_selection_rules)
     assert any("transitive dependencies" in rule for rule in contract.provenance_selection_rules)
+    assert any("selected runtime" in rule for rule in contract.inherited_pythonpath_rules)
     assert any(
-        "Discard inherited PYTHONPATH" in rule for rule in contract.inherited_pythonpath_rules
+        "repo-source mode is selected" in rule for rule in contract.inherited_pythonpath_rules
     )
 
 
@@ -52,7 +53,11 @@ def test_projected_runtime_contract_makes_repo_root_none_behavior_explicit() -> 
         "remain in active-interpreter mode" in rule for rule in contract.provenance_selection_rules
     )
     assert any(
-        "Do not preserve ambient PYTHONPATH" in rule for rule in contract.inherited_pythonpath_rules
+        "active-interpreter mode is selected" in rule
+        for rule in contract.inherited_pythonpath_rules
+    )
+    assert any(
+        "ambient PYTHONPATH as healthy" in rule for rule in contract.inherited_pythonpath_rules
     )
 
 
@@ -89,7 +94,7 @@ def test_format_ambient_pythonpath_warning_includes_removed_entries() -> None:
     assert warning is not None
     assert "/tmp/one" in warning
     assert "/tmp/two" in warning
-    assert "selected repo runtime" in warning
+    assert "selected-runtime import roots" in warning
 
 
 def test_sanitize_subprocess_environment_empty_mapping_does_not_inherit_ambient(

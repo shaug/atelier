@@ -24,12 +24,17 @@ consumed by `src/atelier/skills/shared/scripts/projected_bootstrap.py`.
 
 ## Inherited `PYTHONPATH` rules
 
-1. Discard inherited `PYTHONPATH` entries before runtime health checks so
-   projected scripts do not mix packages from different distributions.
-1. Preserve or reintroduce only explicit paths required by the selected runtime,
-   such as `repo_root/src` after `repo-source` selection succeeds.
-1. Do not keep ambient `PYTHONPATH` entries just because `atelier` already
-   imports; partial imports without transitive dependencies are not healthy.
+1. Do not trust inherited `PYTHONPATH` as ambient input. Before runtime health
+   checks, clear it or reduce it to import roots already proven to belong to
+   the selected runtime.
+1. In `active-interpreter` mode, inherited `PYTHONPATH` entries may remain only
+   when they are the active interpreter's required dependency roots and
+   bootstrap has not yet replaced them with equivalent explicit paths.
+1. In `repo-source` mode, discard inherited `PYTHONPATH` entries from other
+   distributions and preserve or reintroduce only explicit selected-runtime
+   paths, such as `repo_root/src` after selection succeeds.
+1. Do not treat ambient `PYTHONPATH` as healthy merely because `atelier`
+   imports; transitive dependency health and provenance still must be proven.
 
 ## `repo_root = None`
 
