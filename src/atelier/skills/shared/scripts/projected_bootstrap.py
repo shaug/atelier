@@ -82,6 +82,9 @@ def bootstrap_projected_atelier_script(
 ) -> Path | None:
     """Prepare a projected skill script to import repo ``atelier`` code safely.
 
+    The projected runtime policy for this bootstrap flow is defined by
+    ``atelier.runtime_env.projected_runtime_contract``.
+
     Args:
         script_path: Concrete projected script file path.
         argv: Optional command-line arguments excluding interpreter and script.
@@ -107,16 +110,22 @@ def bootstrap_projected_atelier_script(
     )
 
     from atelier.runtime_env import (
+        ProjectedRuntimeMode,
         ensure_projected_runtime_dependency,
         maybe_reexec_projected_repo_runtime,
+        projected_runtime_contract,
         reset_current_process_pythonpath,
         sanitize_pythonpath_environment,
     )
 
+    contract = projected_runtime_contract(repo_root=repo_root)
     resolved_env, removed_pythonpath = sanitize_pythonpath_environment(base_env=resolved_env)
+    preserve_paths: tuple[str, ...] = ()
+    if contract.preferred_mode is ProjectedRuntimeMode.REPO_SOURCE and repo_root is not None:
+        preserve_paths = (str(repo_root / "src"),)
     reset_current_process_pythonpath(
         removed_pythonpath,
-        preserve_paths=(str(repo_root / "src") if repo_root is not None else "",),
+        preserve_paths=preserve_paths,
     )
 
     if require_runtime_health:
