@@ -26,6 +26,41 @@ def test_sanitize_subprocess_environment_drops_runtime_routing_keys() -> None:
     assert removed == ("ATELIER_PROJECT", "ATELIER_WORKSPACE")
 
 
+def test_projected_runtime_contract_prefers_repo_source_when_repo_root_is_known() -> None:
+    contract = runtime_env.projected_runtime_contract(repo_root=Path("/repo"))
+
+    assert contract.supported_modes == (
+        runtime_env.ProjectedRuntimeMode.REPO_SOURCE,
+        runtime_env.ProjectedRuntimeMode.ACTIVE_INTERPRETER,
+    )
+    assert contract.preferred_mode is runtime_env.ProjectedRuntimeMode.REPO_SOURCE
+    assert "src/atelier" in contract.repo_root_behavior
+    assert any("--repo-dir" in rule for rule in contract.provenance_selection_rules)
+    assert any("transitive dependencies" in rule for rule in contract.provenance_selection_rules)
+    assert any("selected runtime" in rule for rule in contract.inherited_pythonpath_rules)
+    assert any(
+        "repo-source mode is selected" in rule for rule in contract.inherited_pythonpath_rules
+    )
+
+
+def test_projected_runtime_contract_makes_repo_root_none_behavior_explicit() -> None:
+    contract = runtime_env.projected_runtime_contract(repo_root=None)
+
+    assert contract.preferred_mode is runtime_env.ProjectedRuntimeMode.ACTIVE_INTERPRETER
+    assert "repo_root is None" in contract.repo_root_behavior
+    assert "skip repo-runtime re-exec" in contract.repo_root_behavior
+    assert any(
+        "remain in active-interpreter mode" in rule for rule in contract.provenance_selection_rules
+    )
+    assert any(
+        "active-interpreter mode is selected" in rule
+        for rule in contract.inherited_pythonpath_rules
+    )
+    assert any(
+        "ambient PYTHONPATH as healthy" in rule for rule in contract.inherited_pythonpath_rules
+    )
+
+
 def test_format_ambient_env_warning_returns_none_when_no_keys() -> None:
     assert runtime_env.format_ambient_env_warning(()) is None
 
@@ -59,7 +94,7 @@ def test_format_ambient_pythonpath_warning_includes_removed_entries() -> None:
     assert warning is not None
     assert "/tmp/one" in warning
     assert "/tmp/two" in warning
-    assert "selected repo runtime" in warning
+    assert "selected-runtime import roots" in warning
 
 
 def test_sanitize_subprocess_environment_empty_mapping_does_not_inherit_ambient(
@@ -124,6 +159,30 @@ def test_projected_repo_python_command_does_not_treat_base_python_as_repo_venv(
     )
 
     assert command == (str(python_path),)
+
+
+def test_maybe_reexec_projected_repo_runtime_does_not_select_repo_runtime_without_repo_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    def _unexpected_repo_command(**_kwargs: object) -> tuple[str, ...] | None:
+        nonlocal called
+        called = True
+        return ("python3",)
+
+    monkeypatch.setattr(
+        runtime_env,
+        "projected_repo_python_command",
+        _unexpected_repo_command,
+    )
+
+    runtime_env.maybe_reexec_projected_repo_runtime(
+        repo_root=None,
+        script_path=Path("/tmp/projected.py"),
+    )
+
+    assert called is False
 
 
 def test_ensure_projected_runtime_dependency_returns_when_import_succeeds(

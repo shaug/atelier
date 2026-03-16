@@ -9,6 +9,7 @@ import sys
 import sysconfig
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Sequence
 
@@ -48,6 +49,108 @@ class _ProjectedRuntimeProvenanceIssue:
     module_name: str
     module_path: str
     expected_roots: tuple[str, ...]
+
+
+class ProjectedRuntimeMode(str, Enum):
+    """Supported runtime modes for projected skill scripts."""
+
+    REPO_SOURCE = "repo-source"
+    ACTIVE_INTERPRETER = "active-interpreter"
+
+
+@dataclass(frozen=True)
+class ProjectedRuntimeContract:
+    """Declarative runtime policy for projected skill bootstrap flows.
+
+    Projected skill scripts run before Atelier has fully resolved a repo-local
+    runtime. This contract makes the supported modes and safety invariants
+    explicit so bootstrap helpers can share one policy instead of inferring
+    behavior from ambient interpreter state.
+
+    Attributes:
+        supported_modes: Runtime modes a projected script may use.
+        preferred_mode: Mode bootstrap should prefer for the current context.
+        repo_root_behavior: Deterministic behavior when ``repo_root`` is
+            resolved or absent.
+        provenance_selection_rules: Ordered invariants for selecting runtime
+            provenance before importing heavier ``atelier`` modules.
+        inherited_pythonpath_rules: Safety rules for handling inherited
+            ``PYTHONPATH`` entries during projected bootstrap.
+    """
+
+    supported_modes: tuple[ProjectedRuntimeMode, ...]
+    preferred_mode: ProjectedRuntimeMode
+    repo_root_behavior: str
+    provenance_selection_rules: tuple[str, ...]
+    inherited_pythonpath_rules: tuple[str, ...]
+
+
+def projected_runtime_contract(*, repo_root: Path | None) -> ProjectedRuntimeContract:
+    """Return the projected runtime policy for a bootstrap context.
+
+    Args:
+        repo_root: Resolved repo root discovered by projected bootstrap, if any.
+            ``None`` means bootstrap has not proven that repo-source mode is
+            available for the current launch.
+
+    Returns:
+        A contract describing the supported runtime modes, the preferred mode
+        for this context, ordered provenance-selection invariants, and the
+        inherited-``PYTHONPATH`` safety rules that bootstrap must follow.
+    """
+    if repo_root is None:
+        preferred_mode = ProjectedRuntimeMode.ACTIVE_INTERPRETER
+        repo_root_behavior = (
+            "When repo_root is None, projected scripts stay in the active "
+            "interpreter mode, skip repo-runtime re-exec, and must not invent "
+            "repo-local import roots."
+        )
+    else:
+        preferred_mode = ProjectedRuntimeMode.REPO_SOURCE
+        repo_root_behavior = (
+            "When repo_root resolves to a checkout with src/atelier, "
+            "projected scripts prefer repo-source mode and may select a "
+            "deterministic repo interpreter before importing heavier atelier "
+            "modules."
+        )
+
+    return ProjectedRuntimeContract(
+        supported_modes=(
+            ProjectedRuntimeMode.REPO_SOURCE,
+            ProjectedRuntimeMode.ACTIVE_INTERPRETER,
+        ),
+        preferred_mode=preferred_mode,
+        repo_root_behavior=repo_root_behavior,
+        provenance_selection_rules=(
+            "Resolve repo provenance explicitly from --repo-dir, the local "
+            "./worktree link, projected repo env hints, then cwd/script "
+            "ancestry.",
+            "Use repo-source mode only after bootstrap proves a checkout with "
+            "src/atelier is available for the projected script.",
+            "When repo_root is None, remain in active-interpreter mode and "
+            "prove transitive dependency health there instead of guessing a "
+            "repo runtime.",
+            "Runtime health checks must prove transitive dependencies, not "
+            "just partial atelier importability, before importing heavier "
+            "modules.",
+        ),
+        inherited_pythonpath_rules=(
+            "Do not trust inherited PYTHONPATH as ambient input. Before "
+            "runtime health checks, clear it or reduce it to import roots "
+            "already proven to belong to the selected runtime.",
+            "When active-interpreter mode is selected, retain inherited "
+            "PYTHONPATH entries only when they are the active interpreter's "
+            "required dependency roots and bootstrap has not yet replaced "
+            "them with equivalent explicit paths.",
+            "When repo-source mode is selected, discard inherited PYTHONPATH "
+            "entries from other distributions and preserve or reintroduce "
+            "only explicit selected-runtime paths, such as repo_root/src "
+            "after repo-source selection succeeds.",
+            "Do not treat ambient PYTHONPATH as healthy merely because "
+            "atelier is importable; transitive dependency health and "
+            "provenance still must be proven.",
+        ),
+    )
 
 
 def sanitize_subprocess_environment(
@@ -113,9 +216,10 @@ def sanitize_pythonpath_environment(
 ) -> tuple[dict[str, str], tuple[str, ...]]:
     """Return an environment without inherited ``PYTHONPATH`` entries.
 
-    Atelier-managed agent and projected-skill runtimes do not inherit ambient
-    ``PYTHONPATH`` because it can mix a selected interpreter with third-party
-    packages from another distribution tree.
+    Projected bootstrap treats inherited ``PYTHONPATH`` as ambient until it has
+    proven which import roots belong to the selected runtime. Callers should
+    preserve or reintroduce any required selected-runtime roots separately
+    before dropping the remaining inherited entries.
 
     Args:
         base_env: Optional source environment map. When omitted, current process
@@ -150,8 +254,8 @@ def format_ambient_pythonpath_warning(removed_entries: Iterable[str]) -> str | N
     return (
         "Warning: ignored inherited PYTHONPATH entries "
         f"({sample}{suffix}). "
-        "Atelier-managed runtimes rebuild Python imports from the selected "
-        "repo runtime instead of mixing in ambient site-packages."
+        "Atelier-managed runtimes retain only selected-runtime import roots "
+        "instead of mixing in ambient site-packages."
     )
 
 
@@ -219,8 +323,10 @@ def maybe_reexec_projected_repo_runtime(
         base_env: Optional environment map used for the re-exec.
         current_executable: Optional active Python executable path.
     """
-    if repo_root is None:
+    contract = projected_runtime_contract(repo_root=repo_root)
+    if contract.preferred_mode is ProjectedRuntimeMode.ACTIVE_INTERPRETER:
         return
+    assert repo_root is not None
 
     env = dict(os.environ if base_env is None else base_env)
     if env.get(_PROJECTED_RUNTIME_SELECTED_ENV) == "1":
@@ -431,7 +537,8 @@ def _projected_runtime_recovery_guidance(
     runtime_label: str,
     command: tuple[str, ...] | None,
 ) -> str:
-    if repo_root is None:
+    contract = projected_runtime_contract(repo_root=repo_root)
+    if contract.preferred_mode is ProjectedRuntimeMode.ACTIVE_INTERPRETER:
         return (
             "provide --repo-dir <repo-root> or run from an agent home with a "
             "./worktree link so the helper can select the repo runtime."

@@ -7,6 +7,9 @@ when launching planner/worker/editor/shell subprocesses.
 
 - Subprocess launch env is sanitized by
   `src/atelier/runtime_env.py::sanitize_subprocess_environment`.
+- The shared projected-skill runtime contract lives in
+  `src/atelier/runtime_env.py::projected_runtime_contract` and
+  `docs/projected-skill-runtime-contract.md`.
 - Inherited routing keys from ambient parent env are ignored.
 - Internal launch flows no longer use ambient fallback routing via
   `ATELIER_PROJECT`, `ATELIER_WORKSPACE_DIR`, or cross-session
