@@ -312,6 +312,124 @@ def test_worker_startup_and_queue_flows_have_dual_backend_parity(
 
 
 @pytest.mark.parametrize("backend", _BACKENDS)
+def test_worker_inbox_ignores_terminal_changeset_threads_with_dual_backend_parity(
+    monkeypatch: pytest.MonkeyPatch,
+    backend: str,
+) -> None:
+    _client, _store = _bind_worker_backend(
+        monkeypatch,
+        backend=backend,
+        issues=(
+            BUILDER.issue(
+                "at-agent",
+                title=_AGENT_ID,
+                issue_type="agent",
+                labels=("at:agent",),
+                description=f"agent_id: {_AGENT_ID}\nhook_bead: null\n",
+            ),
+            BUILDER.issue(
+                "at-epic",
+                title="Worker migration epic",
+                issue_type="epic",
+                status="open",
+                labels=("at:epic", "atelier"),
+            ),
+            BUILDER.issue(
+                "at-epic.1",
+                title="Open worker changeset",
+                parent="at-epic",
+                status="open",
+                labels=("atelier",),
+                description="pr_state: pushed\n",
+            ),
+            BUILDER.issue(
+                "at-epic.2",
+                title="Terminal worker changeset",
+                parent="at-epic",
+                status="open",
+                labels=("atelier",),
+                description="pr_state: merged\nchangeset.integrated_sha: abc1234\n",
+            ),
+            _worker_message(
+                "msg-actionable",
+                title="Action required on open work",
+                body="This unread message should still block startup.",
+                thread_id="at-epic.1",
+                kind="needs-decision",
+                blocking=True,
+            ),
+            _worker_message(
+                "msg-terminal",
+                title="Ignore merged-thread message",
+                body="This unread message should not block startup anymore.",
+                thread_id="at-epic.2",
+            ),
+        ),
+    )
+
+    inbox = worker_store.list_inbox_messages(
+        _AGENT_ID,
+        beads_root=_BEADS_ROOT,
+        repo_root=_REPO_ROOT,
+    )
+
+    assert tuple(item["id"] for item in inbox) == ("msg-actionable",)
+    worker_store.clear_bundle_cache()
+
+
+@pytest.mark.parametrize("backend", _BACKENDS)
+def test_worker_inbox_keeps_open_changesets_with_stale_closed_pr_state_visible(
+    monkeypatch: pytest.MonkeyPatch,
+    backend: str,
+) -> None:
+    _client, _store = _bind_worker_backend(
+        monkeypatch,
+        backend=backend,
+        issues=(
+            BUILDER.issue(
+                "at-agent",
+                title=_AGENT_ID,
+                issue_type="agent",
+                labels=("at:agent",),
+                description=f"agent_id: {_AGENT_ID}\nhook_bead: null\n",
+            ),
+            BUILDER.issue(
+                "at-epic",
+                title="Worker migration epic",
+                issue_type="epic",
+                status="open",
+                labels=("at:epic", "atelier"),
+            ),
+            BUILDER.issue(
+                "at-epic.1",
+                title="Open worker changeset with stale closed PR state",
+                parent="at-epic",
+                status="open",
+                labels=("atelier",),
+                description="pr_state: closed\n",
+            ),
+            _worker_message(
+                "msg-actionable",
+                title="Still block startup on open work",
+                body="A stale closed PR marker should not hide this message.",
+                thread_id="at-epic.1",
+                kind="needs-decision",
+                blocking=True,
+            ),
+        ),
+    )
+
+    inbox = worker_store.list_inbox_messages(
+        _AGENT_ID,
+        beads_root=_BEADS_ROOT,
+        repo_root=_REPO_ROOT,
+    )
+
+    assert tuple(item["id"] for item in inbox) == ("msg-actionable",)
+    worker_store.clear_bundle_cache()
+
+
+@pytest.mark.parametrize("backend", _BACKENDS)
 def test_worker_lifecycle_and_finalize_flows_have_dual_backend_parity(
     monkeypatch: pytest.MonkeyPatch,
     backend: str,
