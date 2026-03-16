@@ -1084,6 +1084,182 @@ def test_projected_refresh_overview_fails_closed_when_repo_runtime_is_dependency
     assert "repair the selected repo runtime or rerun explicitly via" in completed.stderr
 
 
+def test_projected_close_epic_reorders_repo_src_ahead_of_installed_package(
+    tmp_path: Path,
+) -> None:
+    agent_home, projected_script = _install_projected_script(
+        tmp_path,
+        skill_name="work-done",
+        script_name="close_epic.py",
+    )
+    repo_root = _fake_repo(
+        tmp_path,
+        sentinel_import="bootstrap_marker",
+        extra_modules={
+            "beads.py": (
+                "from pathlib import Path\n"
+                "import os\n"
+                "\n"
+                "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text(__file__, encoding='utf-8')\n"
+            ),
+        },
+    )
+    installed_root = _fake_installed_package(
+        tmp_path,
+        modules={
+            "beads.py": (
+                "from pathlib import Path\n"
+                "import os\n"
+                "\n"
+                "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text('installed', encoding='utf-8')\n"
+            ),
+        },
+    )
+    sentinel_path = tmp_path / "close-epic-reorder-sentinel.txt"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(projected_script),
+            "--repo-dir",
+            str(repo_root),
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=agent_home,
+        env={
+            "BOOTSTRAP_SENTINEL": str(sentinel_path),
+            "PYTHONPATH": os.pathsep.join([str(installed_root), str(repo_root / "src")]),
+        },
+    )
+
+    assert completed.returncode == 0
+    assert sentinel_path.read_text(encoding="utf-8") == str(
+        repo_root / "src" / "atelier" / "beads.py"
+    )
+
+
+def test_projected_close_epic_preserves_tool_runtime_when_repo_root_is_unresolved(
+    tmp_path: Path,
+) -> None:
+    agent_home, projected_script = _install_projected_script(
+        tmp_path,
+        skill_name="work-done",
+        script_name="close_epic.py",
+    )
+    source_root = _project_repo_root() / "src" / "atelier"
+    installed_root = _fake_mixed_runtime_site_packages(
+        tmp_path,
+        atelier_modules={
+            "runtime_env.py": (source_root / "runtime_env.py").read_text(encoding="utf-8"),
+            "beads.py": (
+                "from pathlib import Path\n"
+                "import os\n"
+                "import rich\n"
+                "\n"
+                "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text(\n"
+                "    rich.__file__ or '',\n"
+                "    encoding='utf-8',\n"
+                ")\n"
+            ),
+        },
+    )
+    isolated_python = tmp_path / "bin" / "python3"
+    _write_python_without_site_packages(isolated_python)
+    sentinel_path = tmp_path / "close-epic-installed-runtime-sentinel.txt"
+
+    completed = subprocess.run(
+        [
+            str(isolated_python),
+            str(projected_script),
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=agent_home,
+        env={
+            "BOOTSTRAP_SENTINEL": str(sentinel_path),
+            "PYTHONPATH": str(installed_root),
+        },
+    )
+
+    assert completed.returncode == 0
+    assert sentinel_path.read_text(encoding="utf-8") == str(installed_root / "rich" / "__init__.py")
+
+
+def test_projected_close_epic_preserves_split_tool_runtime_roots_when_repo_root_is_unresolved(
+    tmp_path: Path,
+) -> None:
+    agent_home, projected_script = _install_projected_script(
+        tmp_path,
+        skill_name="work-done",
+        script_name="close_epic.py",
+    )
+    source_root = _project_repo_root() / "src" / "atelier"
+    core_runtime_root = _fake_installed_package(
+        tmp_path / "core-runtime",
+        modules={
+            "runtime_env.py": (source_root / "runtime_env.py").read_text(encoding="utf-8"),
+            "beads.py": (
+                "from pathlib import Path\n"
+                "import os\n"
+                "import rich\n"
+                "\n"
+                "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text(\n"
+                "    rich.__file__ or '',\n"
+                "    encoding='utf-8',\n"
+                ")\n"
+            ),
+        },
+    )
+    _write_fake_module(
+        core_runtime_root / "pydantic" / "__init__.py",
+        "__version__ = 'installed'\n",
+    )
+    _write_fake_module(
+        core_runtime_root / "pydantic_core" / "__init__.py",
+        "from . import _pydantic_core\n",
+    )
+    _write_fake_module(core_runtime_root / "pydantic_core" / "_pydantic_core.py", "")
+    _write_fake_module(core_runtime_root / "platformdirs" / "__init__.py", "")
+    _write_fake_module(core_runtime_root / "questionary" / "__init__.py", "")
+    _write_fake_module(core_runtime_root / "typer" / "__init__.py", "")
+
+    rich_runtime_root = tmp_path / "rich-runtime"
+    _write_fake_module(
+        rich_runtime_root / "rich" / "__init__.py",
+        "__version__ = 'installed'\n",
+    )
+
+    isolated_python = tmp_path / "bin" / "python3"
+    _write_python_without_site_packages(isolated_python)
+    sentinel_path = tmp_path / "close-epic-split-tool-runtime-sentinel.txt"
+
+    completed = subprocess.run(
+        [
+            str(isolated_python),
+            str(projected_script),
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=agent_home,
+        env={
+            "BOOTSTRAP_SENTINEL": str(sentinel_path),
+            "PYTHONPATH": os.pathsep.join([str(core_runtime_root), str(rich_runtime_root)]),
+        },
+    )
+
+    assert completed.returncode == 0
+    assert sentinel_path.read_text(encoding="utf-8") == str(
+        rich_runtime_root / "rich" / "__init__.py"
+    )
+
+
 def test_projected_check_issue_ownership_fails_closed_when_repo_runtime_is_dependency_unhealthy(
     tmp_path: Path,
 ) -> None:
