@@ -73,6 +73,9 @@ def test_normalize_review_state_handles_invalid_values() -> None:
     assert lifecycle.normalize_review_state(None) is None
     assert lifecycle.normalize_review_state(" null ") is None
     assert lifecycle.normalize_review_state(" In-Review ") == "in-review"
+    assert lifecycle.normalize_review_state(" review ") == "in-review"
+    assert lifecycle.normalize_review_state("open") == "pr-open"
+    assert lifecycle.normalize_review_state("draft") == "draft-pr"
 
 
 def test_review_state_helpers_distinguish_integrated_from_closed() -> None:

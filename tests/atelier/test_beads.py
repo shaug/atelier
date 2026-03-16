@@ -5928,6 +5928,28 @@ def test_update_changeset_review_updates_description() -> None:
     assert updated == refreshed[0]
 
 
+def test_update_changeset_review_normalizes_legacy_review_state_aliases() -> None:
+    store = Mock()
+    store.update_review = AsyncMock()
+    refreshed = [{"id": "atelier-99", "description": "scope: demo\npr_state: in-review\n"}]
+
+    with (
+        patch("atelier.lib.beads.SubprocessBeadsClient", return_value=object()),
+        patch("atelier.store.build_atelier_store", return_value=store),
+        patch("atelier.beads.run_bd_json", return_value=refreshed),
+    ):
+        beads.update_changeset_review(
+            "atelier-99",
+            beads.changesets.ReviewMetadata(pr_state="review"),
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    request = store.update_review.await_args.args[0]
+    assert request.review.pr_state is not None
+    assert request.review.pr_state.value == "in-review"
+
+
 def test_update_changeset_review_feedback_cursor_updates_description() -> None:
     state = {"description": "scope: demo\n"}
     captured: dict[str, str] = {}
