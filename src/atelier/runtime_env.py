@@ -33,6 +33,8 @@ _INSTALLED_TOOL_RUNTIME_MARKERS: tuple[str, ...] = (
     "/site-packages/atelier/",
 )
 _PYTHONPATH_ENV = "PYTHONPATH"
+_PROJECTED_REMOVED_PYTHONPATH_ENV = "ATELIER_PROJECTED_REMOVED_PYTHONPATH"
+_PROJECTED_PRESERVED_PYTHONPATH_ENV = "ATELIER_PROJECTED_PRESERVED_PYTHONPATH"
 
 USER_DEFAULT_ENV_KEYS: frozenset[str] = frozenset(
     {
@@ -55,6 +57,13 @@ class _ProjectedRuntimeProvenanceIssue:
     module_name: str
     module_path: str
     expected_roots: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _ProjectedRepoRuntimeResolution:
+    status: str
+    detail: str
+    command: tuple[str, ...] | None
 
 
 class ProjectedRuntimeMode(str, Enum):
@@ -89,6 +98,37 @@ class ProjectedRuntimeContract:
     repo_root_behavior: str
     provenance_selection_rules: tuple[str, ...]
     inherited_pythonpath_rules: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ProjectedBootstrapDiagnostics:
+    """Snapshot of projected bootstrap state for failure-path reporting.
+
+    Attributes:
+        selected_mode: Runtime mode selected by the projected runtime contract.
+        selected_interpreter: Interpreter chosen for the current process.
+        runtime_provenance: Human-readable label for the selected interpreter's
+            provenance.
+        repo_runtime_status: Availability state for a deterministic repo
+            runtime.
+        repo_runtime_detail: Explanation of how repo runtime availability was
+            determined.
+        repo_runtime_command: Explicit repo-runtime command when one can be
+            recommended in diagnostics.
+        removed_pythonpath_entries: Inherited ``PYTHONPATH`` entries removed
+            before runtime health checks.
+        preserved_pythonpath_entries: Import roots intentionally preserved in
+            the active process after sanitization.
+    """
+
+    selected_mode: ProjectedRuntimeMode
+    selected_interpreter: str
+    runtime_provenance: str
+    repo_runtime_status: str
+    repo_runtime_detail: str
+    repo_runtime_command: tuple[str, ...] | None
+    removed_pythonpath_entries: tuple[str, ...]
+    preserved_pythonpath_entries: tuple[str, ...]
 
 
 def projected_runtime_contract(*, repo_root: Path | None) -> ProjectedRuntimeContract:
@@ -289,21 +329,79 @@ def projected_repo_python_command(
         or when no deterministic repo runtime is available; otherwise a command
         prefix suitable for ``os.execvpe``.
     """
-    repo_python = _repo_python_candidate(repo_root)
-    current = str(current_executable or sys.executable or "").strip()
-    if repo_python is not None:
-        if _same_executable_path(current, repo_python):
-            return None
-        return (str(repo_python),)
+    resolution = _resolve_projected_repo_runtime(
+        repo_root=repo_root,
+        base_env=base_env,
+        current_executable=current_executable,
+    )
+    return resolution.command
 
-    if not (repo_root / "pyproject.toml").is_file():
-        return None
 
+def collect_projected_bootstrap_diagnostics(
+    *,
+    repo_root: Path | None,
+    script_path: Path,
+    base_env: Mapping[str, str] | None = None,
+    current_executable: str | None = None,
+    removed_pythonpath_entries: Iterable[str] = (),
+    preserved_pythonpath_entries: Iterable[str] = (),
+) -> ProjectedBootstrapDiagnostics:
+    """Capture projected bootstrap state for failure diagnostics.
+
+    Args:
+        repo_root: Resolved repository root, if bootstrap discovered one.
+        script_path: Concrete helper script path for provenance labeling.
+        base_env: Optional environment mapping used for repo-runtime lookup.
+        current_executable: Optional interpreter path override for testing.
+        removed_pythonpath_entries: ``PYTHONPATH`` entries removed during
+            bootstrap sanitization.
+        preserved_pythonpath_entries: Explicit import roots preserved after
+            sanitization.
+
+    Returns:
+        Immutable bootstrap diagnostics suitable for failure-path reporting.
+    """
     env = dict(os.environ if base_env is None else base_env)
-    uv_path = shutil.which("uv", path=env.get("PATH"))
-    if not uv_path:
-        return None
-    return (uv_path, "run", "--project", str(repo_root), "python")
+    current = str(current_executable or sys.executable or "").strip()
+    if repo_root is None:
+        resolution = _ProjectedRepoRuntimeResolution(
+            status="not-applicable",
+            detail=(
+                "repo_root is unresolved, so projected bootstrap stayed in "
+                "active-interpreter mode and skipped repo-runtime selection."
+            ),
+            command=None,
+        )
+    else:
+        resolution = _resolve_projected_repo_runtime(
+            repo_root=repo_root,
+            base_env=env,
+            current_executable=current,
+        )
+    contract = projected_runtime_contract(repo_root=repo_root)
+    removed_entries = _projected_bootstrap_path_entries(
+        explicit_entries=removed_pythonpath_entries,
+        env=env,
+        env_key=_PROJECTED_REMOVED_PYTHONPATH_ENV,
+    )
+    preserved_entries = _projected_bootstrap_path_entries(
+        explicit_entries=preserved_pythonpath_entries,
+        env=env,
+        env_key=_PROJECTED_PRESERVED_PYTHONPATH_ENV,
+    )
+    return ProjectedBootstrapDiagnostics(
+        selected_mode=contract.preferred_mode,
+        selected_interpreter=current,
+        runtime_provenance=_projected_runtime_label(
+            current_executable=current,
+            script_path=script_path,
+        ),
+        repo_runtime_status=resolution.status,
+        repo_runtime_detail=resolution.detail,
+        repo_runtime_command=resolution.command,
+        removed_pythonpath_entries=removed_entries,
+        preserved_pythonpath_entries=preserved_entries,
+    )
 
 
 def maybe_reexec_projected_repo_runtime(
@@ -313,6 +411,7 @@ def maybe_reexec_projected_repo_runtime(
     argv: Sequence[str] | None = None,
     base_env: Mapping[str, str] | None = None,
     current_executable: str | None = None,
+    bootstrap_diagnostics: ProjectedBootstrapDiagnostics | None = None,
 ) -> None:
     """Re-exec a projected script into the repo runtime when required.
 
@@ -328,6 +427,8 @@ def maybe_reexec_projected_repo_runtime(
             path. Defaults to ``sys.argv[1:]``.
         base_env: Optional environment map used for the re-exec.
         current_executable: Optional active Python executable path.
+        bootstrap_diagnostics: Optional bootstrap snapshot whose sanitized
+            ``PYTHONPATH`` decisions should survive a repo-runtime re-exec.
     """
     contract = projected_runtime_contract(repo_root=repo_root)
     if contract.preferred_mode is ProjectedRuntimeMode.ACTIVE_INTERPRETER:
@@ -348,6 +449,17 @@ def maybe_reexec_projected_repo_runtime(
 
     exec_env = dict(env)
     exec_env[_PROJECTED_RUNTIME_SELECTED_ENV] = "1"
+    if bootstrap_diagnostics is not None:
+        _set_projected_bootstrap_path_entries(
+            env=exec_env,
+            env_key=_PROJECTED_REMOVED_PYTHONPATH_ENV,
+            entries=bootstrap_diagnostics.removed_pythonpath_entries,
+        )
+        _set_projected_bootstrap_path_entries(
+            env=exec_env,
+            env_key=_PROJECTED_PRESERVED_PYTHONPATH_ENV,
+            entries=bootstrap_diagnostics.preserved_pythonpath_entries,
+        )
     script_args = list(sys.argv[1:] if argv is None else argv)
     os.execvpe(
         command[0],
@@ -363,6 +475,7 @@ def ensure_projected_runtime_dependency(
     dependency: str = _PROJECTED_RUNTIME_DEPENDENCY,
     base_env: Mapping[str, str] | None = None,
     current_executable: str | None = None,
+    bootstrap_diagnostics: ProjectedBootstrapDiagnostics | None = None,
 ) -> tuple[str, ...]:
     """Fail closed when a projected helper runtime lacks compiled dependencies.
 
@@ -378,6 +491,8 @@ def ensure_projected_runtime_dependency(
         dependency: Import path used as the runtime-health probe.
         base_env: Optional environment mapping used for runtime resolution.
         current_executable: Optional interpreter path override for testing.
+        bootstrap_diagnostics: Optional bootstrap snapshot captured before the
+            active process state was sanitized.
 
     Returns:
         Ordered ``PYTHONPATH`` roots that were proven to belong to the selected
@@ -414,18 +529,11 @@ def ensure_projected_runtime_dependency(
         if not provenance_issues:
             return selected_pythonpath_entries
         provenance_issue = provenance_issues[0]
-        command = (
-            projected_repo_python_command(
-                repo_root=repo_root,
-                base_env=base_env,
-                current_executable=current_executable or sys.executable,
-            )
-            if repo_root is not None
-            else None
-        )
-        runtime_label = _projected_runtime_label(
-            current_executable=str(current_executable or sys.executable or "").strip(),
+        diagnostics = bootstrap_diagnostics or collect_projected_bootstrap_diagnostics(
+            repo_root=repo_root,
             script_path=script_path,
+            base_env=base_env,
+            current_executable=current_executable,
         )
         repo_display = str(repo_root) if repo_root is not None else "(unresolved)"
         print(
@@ -439,11 +547,29 @@ def ensure_projected_runtime_dependency(
         )
         print(f"script: {script_path}", file=sys.stderr)
         print(
-            f"interpreter: {str(current_executable or sys.executable or '').strip() or '(unknown)'}",
+            f"selected_interpreter: {diagnostics.selected_interpreter or '(unknown)'}",
             file=sys.stderr,
         )
-        print(f"runtime: {runtime_label}", file=sys.stderr)
+        print(f"selected_mode: {diagnostics.selected_mode.value}", file=sys.stderr)
+        print(f"runtime_provenance: {diagnostics.runtime_provenance}", file=sys.stderr)
         print(f"repo_root: {repo_display}", file=sys.stderr)
+        print(f"repo_runtime_status: {diagnostics.repo_runtime_status}", file=sys.stderr)
+        print(f"repo_runtime_detail: {diagnostics.repo_runtime_detail}", file=sys.stderr)
+        if diagnostics.repo_runtime_command is not None:
+            print(
+                "repo_runtime_command: " + " ".join(diagnostics.repo_runtime_command),
+                file=sys.stderr,
+            )
+        print(
+            "pythonpath_removed: "
+            + _format_runtime_path_entries(diagnostics.removed_pythonpath_entries),
+            file=sys.stderr,
+        )
+        print(
+            "pythonpath_preserved: "
+            + _format_runtime_path_entries(diagnostics.preserved_pythonpath_entries),
+            file=sys.stderr,
+        )
         print(f"module: {provenance_issue.module_name}", file=sys.stderr)
         print(f"module_path: {provenance_issue.module_path}", file=sys.stderr)
         print(
@@ -458,26 +584,17 @@ def ensure_projected_runtime_dependency(
             + _projected_runtime_recovery_guidance(
                 repo_root=repo_root,
                 script_path=script_path,
-                runtime_label=runtime_label,
-                command=command,
+                diagnostics=diagnostics,
             ),
             file=sys.stderr,
         )
         raise SystemExit(1)
 
-    current = str(current_executable or sys.executable or "").strip()
-    command = (
-        projected_repo_python_command(
-            repo_root=repo_root,
-            base_env=env,
-            current_executable=current,
-        )
-        if repo_root is not None
-        else None
-    )
-    runtime_label = _projected_runtime_label(
-        current_executable=current,
+    diagnostics = bootstrap_diagnostics or collect_projected_bootstrap_diagnostics(
+        repo_root=repo_root,
         script_path=script_path,
+        base_env=base_env,
+        current_executable=current_executable,
     )
     repo_display = str(repo_root) if repo_root is not None else "(unresolved)"
     print(
@@ -490,9 +607,30 @@ def ensure_projected_runtime_dependency(
         file=sys.stderr,
     )
     print(f"script: {script_path}", file=sys.stderr)
-    print(f"interpreter: {current or '(unknown)'}", file=sys.stderr)
-    print(f"runtime: {runtime_label}", file=sys.stderr)
+    print(
+        f"selected_interpreter: {diagnostics.selected_interpreter or '(unknown)'}",
+        file=sys.stderr,
+    )
+    print(f"selected_mode: {diagnostics.selected_mode.value}", file=sys.stderr)
+    print(f"runtime_provenance: {diagnostics.runtime_provenance}", file=sys.stderr)
     print(f"repo_root: {repo_display}", file=sys.stderr)
+    print(f"repo_runtime_status: {diagnostics.repo_runtime_status}", file=sys.stderr)
+    print(f"repo_runtime_detail: {diagnostics.repo_runtime_detail}", file=sys.stderr)
+    if diagnostics.repo_runtime_command is not None:
+        print(
+            "repo_runtime_command: " + " ".join(diagnostics.repo_runtime_command),
+            file=sys.stderr,
+        )
+    print(
+        "pythonpath_removed: "
+        + _format_runtime_path_entries(diagnostics.removed_pythonpath_entries),
+        file=sys.stderr,
+    )
+    print(
+        "pythonpath_preserved: "
+        + _format_runtime_path_entries(diagnostics.preserved_pythonpath_entries),
+        file=sys.stderr,
+    )
     print(f"dependency: {dependency}", file=sys.stderr)
     print(
         f"detail: {type(dependency_error).__name__}: {dependency_error}",
@@ -503,8 +641,7 @@ def ensure_projected_runtime_dependency(
         + _projected_runtime_recovery_guidance(
             repo_root=repo_root,
             script_path=script_path,
-            runtime_label=runtime_label,
-            command=command,
+            diagnostics=diagnostics,
         ),
         file=sys.stderr,
     )
@@ -558,21 +695,21 @@ def _projected_runtime_recovery_guidance(
     *,
     repo_root: Path | None,
     script_path: Path,
-    runtime_label: str,
-    command: tuple[str, ...] | None,
+    diagnostics: ProjectedBootstrapDiagnostics,
 ) -> str:
     contract = projected_runtime_contract(repo_root=repo_root)
     if contract.preferred_mode is ProjectedRuntimeMode.ACTIVE_INTERPRETER:
         return (
-            "provide --repo-dir <repo-root> or run from an agent home with a "
-            "./worktree link so the helper can select the repo runtime."
+            "tool-installed mode stayed active because repo_root could not be "
+            "proven. Re-run with --repo-dir <repo-root> or from an agent home "
+            "with a ./worktree link so the helper can select the repo runtime."
         )
-    if command is not None:
+    if diagnostics.repo_runtime_command is not None:
         return (
             "repair the selected repo runtime or rerun explicitly via "
-            f"`{' '.join((*command, str(script_path)))}'."
+            f"`{' '.join((*diagnostics.repo_runtime_command, str(script_path)))}'."
         )
-    if runtime_label == "installed-tool":
+    if diagnostics.runtime_provenance == "installed-tool":
         return (
             "repair or reinstall the uv tool environment, or rerun the helper "
             f"from the repo runtime (for example `uv run --project {repo_root} "
@@ -609,6 +746,92 @@ def reset_current_process_pythonpath(
         return
     preserved = set(preserved_ordered)
     sys.path[:] = [entry for entry in sys.path if entry not in removed or entry in preserved]
+
+
+def _format_runtime_path_entries(entries: Iterable[str]) -> str:
+    values = tuple(entry for entry in entries if str(entry).strip())
+    if not values:
+        return "(none)"
+    return ", ".join(values)
+
+
+def _projected_bootstrap_path_entries(
+    *,
+    explicit_entries: Iterable[str],
+    env: Mapping[str, str],
+    env_key: str,
+) -> tuple[str, ...]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for entry in (
+        *_pythonpath_entries(env.get(env_key)),
+        *(entry for entry in explicit_entries if str(entry).strip()),
+    ):
+        normalized = str(entry).strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        merged.append(normalized)
+    return tuple(merged)
+
+
+def _set_projected_bootstrap_path_entries(
+    *,
+    env: dict[str, str],
+    env_key: str,
+    entries: Iterable[str],
+) -> None:
+    values = tuple(entry for entry in entries if str(entry).strip())
+    if values:
+        env[env_key] = os.pathsep.join(values)
+        return
+    env.pop(env_key, None)
+
+
+def _resolve_projected_repo_runtime(
+    *,
+    repo_root: Path,
+    base_env: Mapping[str, str] | None = None,
+    current_executable: str | None = None,
+) -> _ProjectedRepoRuntimeResolution:
+    current = str(current_executable or sys.executable or "").strip()
+    repo_python = _repo_python_candidate(repo_root)
+    if repo_python is not None:
+        if _same_executable_path(current, repo_python):
+            return _ProjectedRepoRuntimeResolution(
+                status="active",
+                detail=f"repo venv interpreter already selected: {repo_python}",
+                command=None,
+            )
+        return _ProjectedRepoRuntimeResolution(
+            status="available",
+            detail=f"repo venv interpreter available: {repo_python}",
+            command=(str(repo_python),),
+        )
+
+    if not (repo_root / "pyproject.toml").is_file():
+        return _ProjectedRepoRuntimeResolution(
+            status="unavailable",
+            detail=(
+                "repo_root resolved, but no repo .venv python or pyproject-backed uv fallback "
+                "is available."
+            ),
+            command=None,
+        )
+
+    env = dict(os.environ if base_env is None else base_env)
+    uv_path = shutil.which("uv", path=env.get("PATH"))
+    if not uv_path:
+        return _ProjectedRepoRuntimeResolution(
+            status="unavailable",
+            detail="repo_root resolved, but uv is not available for repo-runtime fallback.",
+            command=None,
+        )
+    return _ProjectedRepoRuntimeResolution(
+        status="available",
+        detail=f"repo runtime can be selected via uv project command: {repo_root}",
+        command=(uv_path, "run", "--project", str(repo_root), "python"),
+    )
 
 
 def selected_runtime_pythonpath_entries(

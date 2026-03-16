@@ -198,6 +198,21 @@ def test_projected_repo_python_command_does_not_treat_base_python_as_repo_venv(
     assert command == (str(python_path),)
 
 
+def test_collect_projected_bootstrap_diagnostics_reports_repo_root_none_state() -> None:
+    diagnostics = runtime_env.collect_projected_bootstrap_diagnostics(
+        repo_root=None,
+        script_path=Path("/tmp/projected.py"),
+        current_executable="/usr/bin/python3",
+        removed_pythonpath_entries=("/tmp/foreign/site-packages",),
+    )
+
+    assert diagnostics.selected_mode is runtime_env.ProjectedRuntimeMode.ACTIVE_INTERPRETER
+    assert diagnostics.repo_runtime_status == "not-applicable"
+    assert "repo_root is unresolved" in diagnostics.repo_runtime_detail
+    assert diagnostics.removed_pythonpath_entries == ("/tmp/foreign/site-packages",)
+    assert diagnostics.preserved_pythonpath_entries == ()
+
+
 def test_maybe_reexec_projected_repo_runtime_does_not_select_repo_runtime_without_repo_root(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -316,7 +331,11 @@ def test_ensure_projected_runtime_dependency_fails_closed_for_provenance_mismatc
             "platlib": "/repo/.venv/lib/python3.11/site-packages",
         }[key],
     )
-    monkeypatch.setattr(runtime_env, "projected_repo_python_command", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        runtime_env,
+        "_repo_python_candidate",
+        lambda _repo_root: Path("/repo/.venv/bin/python3"),
+    )
 
     with pytest.raises(SystemExit) as exc_info:
         runtime_env.ensure_projected_runtime_dependency(
@@ -331,7 +350,11 @@ def test_ensure_projected_runtime_dependency_fails_closed_for_provenance_mismatc
     assert "module: pydantic" in captured.err
     assert "module_path:" in captured.err
     assert "foreign/pydantic/__init__.py" in captured.err
+    assert "selected_mode: repo-source" in captured.err
+    assert "repo_runtime_status: active" in captured.err
     assert "expected_roots: /repo/.venv/lib/python3.11/site-packages" in captured.err
+    assert "pythonpath_removed: (none)" in captured.err
+    assert "pythonpath_preserved: (none)" in captured.err
     assert "dependency provenance contradiction" in captured.err
 
 
@@ -359,7 +382,43 @@ def test_ensure_projected_runtime_dependency_fails_closed_for_installed_tool_run
     assert exc_info.value.code == 1
     captured = capsys.readouterr()
     assert "planner helper runtime is unhealthy" in captured.err
-    assert "runtime: installed-tool" in captured.err
+    assert "runtime_provenance: installed-tool" in captured.err
+    assert "selected_mode: repo-source" in captured.err
+    assert "repo_runtime_status: unavailable" in captured.err
     assert "dependency: pydantic_core._pydantic_core" in captured.err
+    assert "pythonpath_removed: (none)" in captured.err
     assert "not another src-path-ordering regression" in captured.err
     assert "repair or reinstall the uv tool environment" in captured.err
+
+
+def test_ensure_projected_runtime_dependency_guides_repo_hint_when_repo_root_is_unresolved(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def _fake_import_module(_name: str):
+        raise ModuleNotFoundError("No module named 'pydantic_core._pydantic_core'")
+
+    monkeypatch.setattr(runtime_env.importlib, "import_module", _fake_import_module)
+    diagnostics = runtime_env.collect_projected_bootstrap_diagnostics(
+        repo_root=None,
+        script_path=Path("/tmp/projected.py"),
+        current_executable="/Users/scott/.local/share/uv/tools/atelier/bin/python",
+        removed_pythonpath_entries=("/tmp/foreign/site-packages",),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        runtime_env.ensure_projected_runtime_dependency(
+            repo_root=None,
+            script_path=Path("/tmp/projected.py"),
+            current_executable="/Users/scott/.local/share/uv/tools/atelier/bin/python",
+            bootstrap_diagnostics=diagnostics,
+        )
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "selected_mode: active-interpreter" in captured.err
+    assert "runtime_provenance: installed-tool" in captured.err
+    assert "repo_runtime_status: not-applicable" in captured.err
+    assert "pythonpath_removed: /tmp/foreign/site-packages" in captured.err
+    assert "pythonpath_preserved: (none)" in captured.err
+    assert "tool-installed mode stayed active because repo_root could not be proven" in captured.err

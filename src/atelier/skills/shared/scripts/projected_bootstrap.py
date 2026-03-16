@@ -111,6 +111,7 @@ def bootstrap_projected_atelier_script(
 
     from atelier.runtime_env import (
         ProjectedRuntimeMode,
+        collect_projected_bootstrap_diagnostics,
         ensure_projected_runtime_dependency,
         maybe_reexec_projected_repo_runtime,
         projected_runtime_contract,
@@ -134,6 +135,14 @@ def bootstrap_projected_atelier_script(
             )
             preserve_paths = (str(repo_root / "src"),)
             resolved_env["PYTHONPATH"] = os.pathsep.join(preserve_paths)
+            bootstrap_diagnostics = collect_projected_bootstrap_diagnostics(
+                repo_root=repo_root,
+                script_path=script_path,
+                base_env=resolved_env,
+                current_executable=sys.executable,
+                removed_pythonpath_entries=removed_pythonpath,
+                preserved_pythonpath_entries=preserve_paths,
+            )
             reset_current_process_pythonpath(
                 removed_pythonpath,
                 preserve_paths=preserve_paths,
@@ -144,23 +153,36 @@ def bootstrap_projected_atelier_script(
                 script_path=script_path,
                 argv=resolved_argv,
                 base_env=resolved_env,
+                bootstrap_diagnostics=bootstrap_diagnostics,
             )
             ensure_projected_runtime_dependency(
                 repo_root=repo_root,
                 script_path=script_path,
                 base_env=resolved_env,
+                bootstrap_diagnostics=bootstrap_diagnostics,
             )
         else:
+            bootstrap_diagnostics = collect_projected_bootstrap_diagnostics(
+                repo_root=repo_root,
+                script_path=script_path,
+                base_env=resolved_env,
+                current_executable=sys.executable,
+                removed_pythonpath_entries=tuple(
+                    entry for entry in resolved_env.get("PYTHONPATH", "").split(os.pathsep) if entry
+                ),
+            )
             maybe_reexec_projected_repo_runtime(
                 repo_root=repo_root,
                 script_path=script_path,
                 argv=resolved_argv,
                 base_env=resolved_env,
+                bootstrap_diagnostics=bootstrap_diagnostics,
             )
             preserve_paths = ensure_projected_runtime_dependency(
                 repo_root=repo_root,
                 script_path=script_path,
                 base_env=resolved_env,
+                bootstrap_diagnostics=bootstrap_diagnostics,
             )
             resolved_env, removed_pythonpath = sanitize_pythonpath_environment(
                 base_env=resolved_env
