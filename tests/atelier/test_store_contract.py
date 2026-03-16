@@ -36,6 +36,7 @@ from atelier.store import (
     DependencyRecord,
     EpicQuery,
     EpicRecord,
+    ExternalTicketLink,
     HookRecord,
     LifecycleStatus,
     LifecycleTransitionRequest,
@@ -49,6 +50,7 @@ from atelier.store import (
     SetAgentBeadHookRequest,
     SetHookRequest,
     StartupMessageRecord,
+    UpdateExternalTicketsRequest,
     UpdateReviewRequest,
     WorkItemKind,
     WorkRef,
@@ -93,6 +95,8 @@ _STORE_METHOD_NAMES = (
     "set_agent_hook",
     "clear_agent_bead_hook",
     "clear_agent_hook",
+    "get_external_tickets",
+    "update_external_tickets",
     "update_review",
     "transition_lifecycle",
 )
@@ -140,6 +144,30 @@ def test_changeset_record_captures_store_owned_metadata() -> None:
     assert record.review.pr_number == 17
     assert record.review.pr_state is ReviewState.IN_REVIEW
     assert record.branches and record.branches.work_branch == "root/store-at-123"
+
+
+def test_external_ticket_link_normalizes_drift_metadata() -> None:
+    ticket = ExternalTicketLink(
+        provider=" GitHub ",
+        ticket_id=" 123 ",
+        relation="Primary",
+        direction="export",
+        sync_mode="two_way",
+        state="In Progress",
+        on_close="Close",
+        state_updated_at="2026-02-08T10:00:00Z",
+        content_updated_at="2026-02-08T10:05:00Z",
+        notes_updated_at="2026-02-08T10:06:00Z",
+        last_synced_at="2026-02-08T10:07:00Z",
+    )
+
+    assert ticket.provider == "github"
+    assert ticket.ticket_id == "123"
+    assert ticket.relation == "primary"
+    assert ticket.direction == "exported"
+    assert ticket.sync_mode == "sync"
+    assert ticket.state == "in_progress"
+    assert ticket.on_close == "close"
 
 
 def test_work_threaded_messages_require_thread_identity() -> None:
@@ -283,6 +311,8 @@ def test_store_contract_docs_record_invariants_and_deferred_work() -> None:
     assert "compatibility projections" in store_doc
     assert "implement `AtelierStore` itself" in store_doc
     assert "`atelier.lib.beads.Beads` remains the swappable boundary" in store_doc
+    assert "External ticket metadata is a store-owned persistence concern" in store_doc
+    assert "remote import/export/sync behavior" in store_doc
     assert "Dual-Backend Proof" in store_doc
     assert "Downstream Migration Contract" in store_doc
     assert "Known Contract Gaps" in store_doc
@@ -552,6 +582,26 @@ def _mutation_snapshot(backend: str) -> dict[str, object]:
             )
         )
     )
+    external_tickets = _RUN(
+        store.update_external_tickets(
+            UpdateExternalTicketsRequest(
+                issue_id="at-change",
+                tickets=(
+                    ExternalTicketLink(
+                        provider="github",
+                        ticket_id="77",
+                        relation="derived",
+                        direction="exported",
+                        sync_mode="export",
+                        state="open",
+                        state_updated_at="2026-03-15T23:02:27Z",
+                        content_updated_at="2026-03-15T23:02:27Z",
+                        last_synced_at="2026-03-15T23:02:27Z",
+                    ),
+                ),
+            )
+        )
+    )
     appended = _RUN(
         store.append_notes(
             AppendNotesRequest(
@@ -631,6 +681,7 @@ def _mutation_snapshot(backend: str) -> dict[str, object]:
             "raw_acceptance": created_changeset_issue.acceptance_criteria,
         },
         "review": review.review.model_dump(mode="json"),
+        "external_tickets": tuple(ticket.model_dump(mode="json") for ticket in external_tickets),
         "transition": transition.model_dump(mode="json"),
         "created_message": {
             "thread_id": created_message.thread_id,
@@ -844,6 +895,28 @@ def test_store_dual_backend_mutation_snapshot_matches_expected_contract(backend:
             "review_owner": "reviewer-b",
             "integrated_sha": "abc1234",
         },
+        "external_tickets": (
+            {
+                "provider": "github",
+                "ticket_id": "77",
+                "url": None,
+                "title": None,
+                "summary": None,
+                "body": None,
+                "notes": None,
+                "relation": "derived",
+                "direction": "exported",
+                "sync_mode": "export",
+                "state": "open",
+                "raw_state": None,
+                "state_updated_at": "2026-03-15T23:02:27Z",
+                "parent_id": None,
+                "on_close": None,
+                "content_updated_at": "2026-03-15T23:02:27Z",
+                "notes_updated_at": None,
+                "last_synced_at": "2026-03-15T23:02:27Z",
+            },
+        ),
         "transition": {
             "issue_id": "at-change",
             "issue_kind": "changeset",
@@ -1042,6 +1115,45 @@ def test_beads_store_mutation_paths(operation: str) -> None:
             ClearHookRequest(agent_id="atelier/worker/agent", expected_epic_id="at-epic")
         )
     ) == HookRecord(agent_id="atelier/worker/agent", epic_id="at-epic")
+
+    external_tickets = _RUN(
+        store.update_external_tickets(
+            UpdateExternalTicketsRequest(
+                issue_id="at-change",
+                tickets=(
+                    ExternalTicketLink(
+                        provider="github",
+                        ticket_id="77",
+                        relation="derived",
+                        direction="exported",
+                        sync_mode="export",
+                        state="open",
+                        state_updated_at="2026-03-15T23:02:27Z",
+                        content_updated_at="2026-03-15T23:02:27Z",
+                        last_synced_at="2026-03-15T23:02:27Z",
+                    ),
+                ),
+            )
+        )
+    )
+    assert external_tickets == (
+        ExternalTicketLink(
+            provider="github",
+            ticket_id="77",
+            relation="derived",
+            direction="exported",
+            sync_mode="export",
+            state="open",
+            state_updated_at="2026-03-15T23:02:27Z",
+            content_updated_at="2026-03-15T23:02:27Z",
+            last_synced_at="2026-03-15T23:02:27Z",
+        ),
+    )
+    assert _RUN(store.get_external_tickets("at-change")) == external_tickets
+    external_issue = _RUN(store._show_issue("at-change"))
+    assert "ext:github" in external_issue.labels
+    assert external_issue.description is not None
+    assert '"direction":"exported"' in external_issue.description
 
     probe = {
         ("bd", "--version"): _ok("bd", "--version", stdout="bd version 0.56.1 (dev)"),

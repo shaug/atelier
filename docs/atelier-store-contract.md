@@ -15,6 +15,7 @@ Typed models:
 - `EpicIdentityViolation`
 - `ChangesetRecord`
 - `DependencyRecord`
+- `ExternalTicketLink`
 - `MessageRecord`
 - `HookRecord`
 - `ReviewMetadata`
@@ -35,6 +36,7 @@ Typed request/query models:
 - `MarkMessageReadRequest`
 - `SetHookRequest`
 - `ClearHookRequest`
+- `UpdateExternalTicketsRequest`
 - `UpdateReviewRequest`
 - `LifecycleTransitionRequest`
 
@@ -76,6 +78,11 @@ implementation is backed by Beads:
   lifecycle values `pushed|draft-pr|pr-open|in-review|approved|merged|closed`.
 - Changesets may carry branch metadata plus review and integration metadata
   without exposing how the backend persists those fields.
+- External ticket metadata is a store-owned persistence concern. Provider
+  adapters own remote import/export/sync behavior, while `AtelierStore` owns the
+  normalized persisted link shape, provider labels, and drift timestamps
+  (`state_updated_at`, `content_updated_at`, `notes_updated_at`,
+  `last_synced_at`).
 - Dependency satisfaction is an Atelier decision. Adapters may persist raw
   dependency edges, but whether a dependency counts as satisfied is owned by
   Atelier lifecycle policy.
@@ -115,10 +122,11 @@ The store contract is now proven against both supported `Beads` backends:
 
 The shared proof runs the same `AtelierStore` read and mutation flows over both
 backends. Representative read coverage includes epic discovery, changeset
-listing and ready discovery, message listing, hook lookup, branch metadata, and
-review/dependency state decoding. Representative mutation coverage includes epic
-and changeset authoring, review updates, note appends, lifecycle transitions,
-message create/claim/read, and agent hook set/clear.
+listing and ready discovery, message listing, hook lookup, branch metadata,
+review/dependency state decoding, and external ticket metadata reads.
+Representative mutation coverage includes epic and changeset authoring, review
+updates, external ticket metadata replacement, note appends, lifecycle
+transitions, message create/claim/read, and agent hook set/clear.
 
 This proof freezes one architecture shape: a single Atelier-owned store boundary
 implemented on top of multiple `Beads` backends. Future backend additions must
@@ -134,14 +142,15 @@ Downstream epics can rely on the following store surface today:
 
 - `AtelierStore`
 - `EpicRecord`, `ChangesetRecord`, `MessageRecord`, `HookRecord`
-- `ReviewMetadata`, `DependencyRecord`, `LifecycleTransition`
+- `ReviewMetadata`, `ExternalTicketLink`, `DependencyRecord`,
+  `LifecycleTransition`
 - the request/query models in `atelier.store.contract`, including
   `CreateEpicRequest`, `CreateChangesetRequest`, `AppendNotesRequest`,
-  `UpdateReviewRequest`, `LifecycleTransitionRequest`, `CreateMessageRequest`,
-  `ClaimMessageRequest`, `MarkMessageReadRequest`, `SetHookRequest`, and
-  `ClearHookRequest`
+  `UpdateReviewRequest`, `UpdateExternalTicketsRequest`,
+  `LifecycleTransitionRequest`, `CreateMessageRequest`, `ClaimMessageRequest`,
+  `MarkMessageReadRequest`, `SetHookRequest`, and `ClearHookRequest`
 - shared dual-backend parity for discovery/read flows plus notes, review,
-  lifecycle, authoring, message, and hook mutations
+  external-ticket metadata, lifecycle, authoring, message, and hook mutations
 
 Downstream code should not:
 
@@ -152,8 +161,8 @@ Downstream code should not:
   capability probing from planner/worker/publish policy modules
 
 Direct `atelier.lib.beads` usage remains appropriate only in boundary adapters
-that own transport, startup diagnostics, or other Beads-client-specific
-concerns.
+that own transport, startup diagnostics, provider API calls, or other
+Beads-client-specific concerns.
 
 Downstream migrations should treat the following as still deferred:
 
