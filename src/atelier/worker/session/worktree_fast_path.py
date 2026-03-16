@@ -58,12 +58,6 @@ class SelectedScopeValidation:
         return self.outcome is SelectedScopeValidationOutcome.SAFE_REUSE
 
 
-@dataclass(frozen=True)
-class _MappingCandidateScan:
-    candidates: tuple[worktrees.WorktreeMapping, ...]
-    selected_mapping_invalid: bool
-
-
 def _normalize_text(value: object) -> str | None:
     if not isinstance(value, str):
         return None
@@ -91,39 +85,6 @@ def _default_selected_worktree_path(
     if changeset_id == epic_id:
         return worktrees.worktree_dir(project_data_dir, epic_id)
     return project_data_dir / worktrees.changeset_worktree_relpath(changeset_id)
-
-
-def _scan_mapping_candidates(
-    project_data_dir: Path,
-    *,
-    epic_id: str,
-    changeset_id: str,
-) -> _MappingCandidateScan:
-    meta_dir = worktrees.worktrees_root(project_data_dir) / worktrees.METADATA_DIRNAME
-    selected_mapping_path = worktrees.mapping_path(project_data_dir, epic_id)
-    selected_mapping_invalid = selected_mapping_path.exists() and (
-        worktrees.load_mapping(selected_mapping_path) is None
-    )
-    if not meta_dir.exists():
-        return _MappingCandidateScan(
-            candidates=(), selected_mapping_invalid=selected_mapping_invalid
-        )
-
-    candidates: list[worktrees.WorktreeMapping] = []
-    for candidate_path in sorted(meta_dir.glob("*.json")):
-        mapping = worktrees.load_mapping(candidate_path)
-        if mapping is None:
-            continue
-        if mapping.epic_id == epic_id:
-            candidates.append(mapping)
-            continue
-        if changeset_id in mapping.changesets or changeset_id in mapping.changeset_worktrees:
-            candidates.append(mapping)
-
-    return _MappingCandidateScan(
-        candidates=tuple(candidates),
-        selected_mapping_invalid=selected_mapping_invalid,
-    )
 
 
 def _validate_selected_issue(
@@ -162,10 +123,10 @@ def validate_selected_scope(*, context: SelectedScopeValidationContext) -> Selec
     """Classify selected-scope local state for fast-path worktree preparation.
 
     The validator is intentionally read-only. It inspects the selected
-    changeset's bead metadata, mapping ownership, mapped worktree path, and the
-    currently checked out branch to decide whether the worker can reuse the
-    selected scope directly, should create missing local state, needs fallback
-    repair, or must fail closed due to ambiguity.
+    changeset's bead metadata, the selected epic mapping, the mapped worktree
+    path, and the currently checked out branch to decide whether the worker can
+    reuse the selected scope directly, should create missing local state, needs
+    fallback repair, or must fail closed due to ambiguity.
 
     Args:
         context: Selected-scope inputs for the validation check.
@@ -229,12 +190,9 @@ def validate_selected_scope(*, context: SelectedScopeValidationContext) -> Selec
 
     metadata_root = _normalize_text(changeset_fields.root_branch(issue or {}))
     metadata_work = _normalize_text(changeset_fields.work_branch(issue or {}))
-    scan = _scan_mapping_candidates(
-        context.project_data_dir,
-        epic_id=selected_epic,
-        changeset_id=changeset_id,
-    )
-    if scan.selected_mapping_invalid:
+    selected_mapping_path = worktrees.mapping_path(context.project_data_dir, selected_epic)
+    mapping = worktrees.load_mapping(selected_mapping_path)
+    if selected_mapping_path.exists() and mapping is None:
         return SelectedScopeValidation(
             outcome=SelectedScopeValidationOutcome.AMBIGUOUS,
             mapping_epic_id=None,
@@ -250,26 +208,23 @@ def validate_selected_scope(*, context: SelectedScopeValidationContext) -> Selec
             ),
         )
 
-    if len(scan.candidates) > 1:
-        candidate_epics = ",".join(mapping.epic_id for mapping in scan.candidates)
+    if mapping is not None and mapping.epic_id != selected_epic:
         return SelectedScopeValidation(
             outcome=SelectedScopeValidationOutcome.AMBIGUOUS,
-            mapping_epic_id=None,
+            mapping_epic_id=mapping.epic_id,
             worktree_path=default_worktree_path,
             expected_work_branch=expected_work_branch,
             checked_out_branch=None,
             signals=(
                 _signal(
-                    "selected-scope-mapping-ambiguous",
-                    "multiple mappings claim the selected scope",
+                    "selected-scope-mapping-epic-mismatch",
+                    "selected epic mapping file points at a different epic",
                     selected_epic=selected_epic,
-                    changeset_id=changeset_id,
-                    candidate_epics=candidate_epics,
+                    mapping_epic_id=mapping.epic_id,
                 ),
             ),
         )
 
-    mapping = scan.candidates[0] if scan.candidates else None
     if mapping is None:
         if metadata_root is not None or metadata_work is not None:
             return SelectedScopeValidation(
@@ -331,24 +286,6 @@ def validate_selected_scope(*, context: SelectedScopeValidationContext) -> Selec
                     "no selected-scope mapping or worktree exists yet",
                     selected_epic=selected_epic,
                     changeset_id=changeset_id,
-                ),
-            ),
-        )
-
-    if mapping.epic_id != selected_epic:
-        return SelectedScopeValidation(
-            outcome=SelectedScopeValidationOutcome.REQUIRES_FALLBACK_REPAIR,
-            mapping_epic_id=mapping.epic_id,
-            worktree_path=default_worktree_path,
-            expected_work_branch=expected_work_branch,
-            checked_out_branch=None,
-            signals=(
-                _signal(
-                    "selected-scope-mapping-owned-by-other-epic",
-                    "selected changeset is still owned by a legacy mapping",
-                    selected_epic=selected_epic,
-                    changeset_id=changeset_id,
-                    mapping_epic_id=mapping.epic_id,
                 ),
             ),
         )

@@ -138,20 +138,19 @@ def test_validate_selected_scope_requires_fallback_when_mapped_worktree_is_missi
     assert result.signals[0].code == "selected-scope-mapped-worktree-missing"
 
 
-def test_validate_selected_scope_reports_ambiguous_when_multiple_mappings_claim_changeset(
+def test_validate_selected_scope_reports_ambiguous_when_selected_mapping_points_at_other_epic(
     tmp_path: Path,
 ) -> None:
-    for epic_id in ("at-epic", "at-shadow"):
-        worktrees.write_mapping(
-            worktrees.mapping_path(tmp_path, epic_id),
-            worktrees.WorktreeMapping(
-                epic_id=epic_id,
-                worktree_path=f"worktrees/{epic_id}",
-                root_branch="feat/root",
-                changesets={"at-epic.1": f"feat/root-{epic_id}"},
-                changeset_worktrees={"at-epic.1": f"worktrees/{epic_id}.1"},
-            ),
-        )
+    worktrees.write_mapping(
+        worktrees.mapping_path(tmp_path, "at-epic"),
+        worktrees.WorktreeMapping(
+            epic_id="at-shadow",
+            worktree_path="worktrees/at-shadow",
+            root_branch="feat/root",
+            changesets={"at-epic.1": "feat/root-at-shadow"},
+            changeset_worktrees={"at-epic.1": "worktrees/at-shadow.1"},
+        ),
+    )
 
     with patch(
         "atelier.worker.session.worktree_fast_path.beads.run_bd_json",
@@ -160,5 +159,5 @@ def test_validate_selected_scope_reports_ambiguous_when_multiple_mappings_claim_
         result = worktree_fast_path.validate_selected_scope(context=_context(tmp_path))
 
     assert result.outcome is worktree_fast_path.SelectedScopeValidationOutcome.AMBIGUOUS
-    assert result.mapping_epic_id is None
-    assert result.signals[0].code == "selected-scope-mapping-ambiguous"
+    assert result.mapping_epic_id == "at-shadow"
+    assert result.signals[0].code == "selected-scope-mapping-epic-mismatch"
