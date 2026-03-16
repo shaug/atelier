@@ -21,11 +21,16 @@ description: >-
 
 1. Show the bead:
    - `bd show <issue_id>`
-1. Add/merge the ticket ref into `external_tickets` in the description, with
-   `direction=imported` by default.
+1. Read [Publish Store Migration Contract] before mutating ticket metadata.
+1. Add or merge the ticket ref through the store-backed external ticket update
+   path, with `direction=imported` by default.
 1. Add the `ext:<provider>` label to the bead.
 1. Do not fetch remote metadata unless the user explicitly requests it.
 
 ## Verification
 
 - The bead includes the new `external_tickets` entry and provider label.
+
+<!-- inline reference link definitions. please keep alphabetized -->
+
+[publish store migration contract]: ../../../docs/publish-store-migration-contract.md

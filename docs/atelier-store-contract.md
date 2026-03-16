@@ -190,12 +190,15 @@ This proof slice leaves only the following work deferred:
 - planner migrations onto `atelier.store`; that remains deferred to
   [GitHub issue #582]
 - publish/orchestration migrations onto `atelier.store` beyond the store-backed
-  integration-proof persistence seam; that remains deferred to
+  review, integration-proof, and external-ticket persistence seams; that
+  remains deferred to
   [GitHub issue #584]
 - dependency add/remove parity in the in-memory backend so those mutations can
   graduate from process-backed-only coverage into the shared proof suite
 
 Worker lifecycle migrations now follow the [Worker Store Migration Contract].
+Publish persistence migrations now follow the
+[Publish Store Migration Contract].
 Remaining worker-side deferred work stays on publish/orchestration work above
 the integration-proof persistence seam plus richer worktree and epic-close store
 semantics.
@@ -208,4 +211,5 @@ surface instead of re-deriving store semantics from Beads issue payloads.
 
 [github issue #582]: https://github.com/shaug/atelier/issues/582
 [github issue #584]: https://github.com/shaug/atelier/issues/584
+[publish store migration contract]: ./publish-store-migration-contract.md
 [worker store migration contract]: ./worker-store-migration-contract.md
