@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from subprocess import CompletedProcess
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -5899,20 +5899,44 @@ def test_mark_issue_in_progress_runs_update_and_reconciles_reopen() -> None:
 
 
 def test_update_changeset_review_updates_description() -> None:
-    state = {"description": "scope: demo\n"}
-    captured: dict[str, str] = {}
-
-    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
-        return [{"id": "atelier-99", "description": state["description"]}]
-
-    def fake_update(issue_id: str, description: str, *, beads_root: Path, cwd: Path) -> None:
-        captured["id"] = issue_id
-        captured["description"] = description
-        state["description"] = description
+    store = Mock()
+    store.update_review = AsyncMock()
+    refreshed = [{"id": "atelier-99", "description": "scope: demo\npr_state: in-review\n"}]
 
     with (
-        patch("atelier.beads.run_bd_json", side_effect=fake_json),
-        patch("atelier.beads._update_issue_description", side_effect=fake_update),
+        patch("atelier.lib.beads.SubprocessBeadsClient", return_value=object()),
+        patch("atelier.store.build_atelier_store", return_value=store),
+        patch("atelier.beads.run_bd_json", return_value=refreshed) as run_json,
+    ):
+        updated = beads.update_changeset_review(
+            "atelier-99",
+            beads.changesets.ReviewMetadata(pr_state="in-review"),
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    request = store.update_review.await_args.args[0]
+    assert request.changeset_id == "atelier-99"
+    assert request.review.pr_state is not None
+    assert request.review.pr_state.value == "in-review"
+    assert request.preserve_existing is False
+    run_json.assert_called_once_with(
+        ["show", "atelier-99"],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+    assert updated == refreshed[0]
+
+
+def test_update_changeset_review_normalizes_legacy_review_state_aliases() -> None:
+    store = Mock()
+    store.update_review = AsyncMock()
+    refreshed = [{"id": "atelier-99", "description": "scope: demo\npr_state: in-review\n"}]
+
+    with (
+        patch("atelier.lib.beads.SubprocessBeadsClient", return_value=object()),
+        patch("atelier.store.build_atelier_store", return_value=store),
+        patch("atelier.beads.run_bd_json", return_value=refreshed),
     ):
         beads.update_changeset_review(
             "atelier-99",
@@ -5921,8 +5945,9 @@ def test_update_changeset_review_updates_description() -> None:
             cwd=Path("/repo"),
         )
 
-    assert captured["id"] == "atelier-99"
-    assert "pr_state: review" in captured["description"]
+    request = store.update_review.await_args.args[0]
+    assert request.review.pr_state is not None
+    assert request.review.pr_state.value == "in-review"
 
 
 def test_update_changeset_review_feedback_cursor_updates_description() -> None:
@@ -5953,25 +5978,24 @@ def test_update_changeset_review_feedback_cursor_updates_description() -> None:
 
 
 def test_update_changeset_review_preserves_missing_fields_when_requested() -> None:
-    state = {
-        "description": (
-            "pr_url: https://example.test/pr/42\n"
-            "pr_number: 42\n"
-            "pr_state: draft-pr\n"
-            "review_owner: reviewer-a\n"
-        )
-    }
-
-    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
-        return [{"id": "atelier-99", "description": state["description"]}]
-
-    def fake_update(issue_id: str, description: str, *, beads_root: Path, cwd: Path) -> None:
-        del issue_id, beads_root, cwd
-        state["description"] = description
+    store = Mock()
+    store.update_review = AsyncMock()
+    refreshed = [
+        {
+            "id": "atelier-99",
+            "description": (
+                "pr_url: https://example.test/pr/42\n"
+                "pr_number: 42\n"
+                "pr_state: in-review\n"
+                "review_owner: reviewer-a\n"
+            ),
+        }
+    ]
 
     with (
-        patch("atelier.beads.run_bd_json", side_effect=fake_json),
-        patch("atelier.beads._update_issue_description", side_effect=fake_update),
+        patch("atelier.lib.beads.SubprocessBeadsClient", return_value=object()),
+        patch("atelier.store.build_atelier_store", return_value=store),
+        patch("atelier.beads.run_bd_json", return_value=refreshed),
     ):
         beads.update_changeset_review(
             "atelier-99",
@@ -5981,10 +6005,14 @@ def test_update_changeset_review_preserves_missing_fields_when_requested() -> No
             preserve_missing=True,
         )
 
-    assert "pr_url: https://example.test/pr/42" in state["description"]
-    assert "pr_number: 42" in state["description"]
-    assert "pr_state: in-review" in state["description"]
-    assert "review_owner: reviewer-a" in state["description"]
+    request = store.update_review.await_args.args[0]
+    assert request.changeset_id == "atelier-99"
+    assert request.review.pr_url is None
+    assert request.review.pr_number is None
+    assert request.review.pr_state is not None
+    assert request.review.pr_state.value == "in-review"
+    assert request.review.review_owner is None
+    assert request.preserve_existing is True
 
 
 def test_update_issue_description_fields_retries_after_interleaved_overwrite() -> None:

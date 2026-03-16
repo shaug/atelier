@@ -19,6 +19,11 @@ ACTIVE_REVIEW_STATES = {"draft-pr", "pr-open", "in-review", "approved"}
 ACTIVE_PR_LIFECYCLE_STATES = {"pushed", *ACTIVE_REVIEW_STATES}
 INTEGRATED_REVIEW_STATES = {"merged"}
 TERMINAL_UNINTEGRATED_REVIEW_STATES = {"closed"}
+_LEGACY_REVIEW_STATE_ALIASES = {
+    "draft": "draft-pr",
+    "open": "pr-open",
+    "review": "in-review",
+}
 
 CANONICAL_LIFECYCLE_STATUSES = {
     "deferred",
@@ -99,7 +104,7 @@ def normalize_review_state(value: object) -> str | None:
     lowered = normalized.lower()
     if lowered == "null":
         return None
-    return lowered
+    return _LEGACY_REVIEW_STATE_ALIASES.get(lowered, lowered)
 
 
 def is_active_pr_lifecycle_state(review_state: object) -> bool:
