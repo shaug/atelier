@@ -98,6 +98,22 @@ def _note_lines(description: str | None) -> tuple[str, ...]:
     return tuple(lines)
 
 
+def _issue_notes_text(issue: object) -> str | None:
+    notes = getattr(issue, "notes", None)
+    if isinstance(notes, str):
+        return _clean_text(notes)
+    if isinstance(notes, (list, tuple)):
+        cleaned_lines = tuple(
+            cleaned for item in notes if (cleaned := _clean_text(item)) is not None
+        )
+        if cleaned_lines:
+            return "\n".join(cleaned_lines)
+    legacy_notes = _note_lines(_issue_text(issue, "description"))
+    if legacy_notes:
+        return "\n".join(legacy_notes)
+    return None
+
+
 def _related_context(issue: object) -> tuple[str, ...]:
     fields = beads_metadata.parse_description_fields(_issue_text(issue, "description") or "")
     related = list(_split_field_values(fields.get("related_context")))
@@ -116,7 +132,7 @@ def _missing_detail_sections(issue: object) -> tuple[str, ...]:
     missing: list[str] = []
     if _issue_text(issue, "description") is None:
         missing.append("description")
-    if not _note_lines(_issue_text(issue, "description")):
+    if _issue_notes_text(issue) is None:
         missing.append("notes")
     if _issue_text(issue, "acceptance_criteria") is None:
         missing.append("acceptance criteria")
@@ -150,7 +166,7 @@ def _dependency_ids(issue: object) -> tuple[str, ...]:
 def _render_issue_preview(*, header: str, issue: object) -> str:
     dependencies = _dependency_ids(issue)
     related_context = _related_context(issue)
-    notes = _note_lines(_issue_text(issue, "description"))
+    notes = _issue_notes_text(issue)
     missing = _missing_detail_sections(issue)
     lines = [
         header,
@@ -159,7 +175,7 @@ def _render_issue_preview(*, header: str, issue: object) -> str:
         "Description:",
         _issue_text(issue, "description") or "(missing)",
         "Notes:",
-        "\n".join(notes) if notes else "(missing)",
+        notes or "(missing)",
         "Acceptance Criteria:",
         _issue_text(issue, "acceptance_criteria") or "(missing)",
         "Dependencies:",
