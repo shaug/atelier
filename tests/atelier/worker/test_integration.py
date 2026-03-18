@@ -1316,8 +1316,8 @@ def test_cleanup_paths_serialize_worker_and_gc_actions() -> None:
             return True, None
 
         with (
-            patch("atelier.beads.list_epics", return_value=[epic_issue]),
-            patch("atelier.beads.list_descendant_changesets", return_value=[]),
+            patch("atelier.gc.worktrees.beads.list_epics", return_value=[epic_issue]),
+            patch("atelier.gc.worktrees.beads.list_descendant_changesets", return_value=[]),
             patch("atelier.gc.worktrees.try_show_issue", return_value=epic_issue),
             patch("atelier.git.git_default_branch", return_value="main"),
             patch(

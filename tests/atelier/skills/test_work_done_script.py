@@ -32,18 +32,22 @@ def test_close_epic_uses_readiness_path(monkeypatch) -> None:
         agent_bead_id: str,
         *,
         beads_root: Path,
-        cwd: Path,
+        repo_root: Path,
     ) -> bool:
         captured["epic_id"] = epic_id
         captured["agent_bead_id"] = agent_bead_id
         captured["beads_root"] = beads_root
-        captured["cwd"] = cwd
+        captured["repo_root"] = repo_root
         return True
 
-    monkeypatch.setattr(module.beads, "close_epic_if_complete", fake_close_epic_if_complete)
     monkeypatch.setattr(
-        module.beads,
-        "close_issue",
+        module.epic_close_compat,
+        "close_epic_if_complete",
+        fake_close_epic_if_complete,
+    )
+    monkeypatch.setattr(
+        module.epic_close_compat,
+        "direct_close_epic",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unexpected direct close")),
     )
 
@@ -60,7 +64,7 @@ def test_close_epic_uses_readiness_path(monkeypatch) -> None:
         "epic_id": "at-epic",
         "agent_bead_id": "at-agent",
         "beads_root": Path("/beads"),
-        "cwd": Path("/repo"),
+        "repo_root": Path("/repo"),
     }
 
 
@@ -68,33 +72,21 @@ def test_close_epic_direct_close_reconciles_and_clears_hook(monkeypatch) -> None
     module = _load_script_module()
     events: list[tuple[str, str]] = []
 
-    def fake_close_issue(
+    def fake_direct_close_epic(
         issue_id: str,
-        *,
-        beads_root: Path,
-        cwd: Path,
-    ) -> object:
-        events.append(("close", issue_id))
-        assert beads_root == Path("/beads")
-        assert cwd == Path("/repo")
-        return object()
-
-    def fake_clear_agent_hook(
         agent_bead_id: str,
         *,
         beads_root: Path,
-        cwd: Path,
-        expected_hook: str | None = None,
+        repo_root: Path,
     ) -> None:
+        events.append(("close", issue_id))
         events.append(("clear_hook", agent_bead_id))
         assert beads_root == Path("/beads")
-        assert cwd == Path("/repo")
-        assert expected_hook == "at-epic"
+        assert repo_root == Path("/repo")
 
-    monkeypatch.setattr(module.beads, "close_issue", fake_close_issue)
-    monkeypatch.setattr(module.beads, "clear_agent_hook", fake_clear_agent_hook)
+    monkeypatch.setattr(module.epic_close_compat, "direct_close_epic", fake_direct_close_epic)
     monkeypatch.setattr(
-        module.beads,
+        module.epic_close_compat,
         "close_epic_if_complete",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("unexpected readiness close")

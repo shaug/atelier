@@ -22,10 +22,10 @@ _BOOTSTRAP_REPO_ROOT = bootstrap_projected_atelier_script(
     require_runtime_health=__name__ == "__main__",
 )
 
-from atelier import beads  # noqa: E402
+from atelier import external_ticket_repair  # noqa: E402
 
 
-def _render_result(result: beads.ExternalTicketMetadataRepairResult) -> str:
+def _render_result(result: external_ticket_repair.ExternalTicketMetadataRepairResult) -> str:
     providers = ",".join(result.providers) if result.providers else "unknown"
     if result.repaired:
         return (
@@ -68,9 +68,9 @@ def main() -> None:
             if os.environ.get("BEADS_DIR")
             else Path.cwd() / ".beads"
         )
-    results = beads.repair_external_ticket_metadata_from_history(
+    results = external_ticket_repair.repair_external_ticket_metadata_from_history(
         beads_root=beads_root,
-        cwd=Path.cwd(),
+        repo_root=Path.cwd(),
         issue_ids=[issue_id for issue_id in args.issue_id if issue_id.strip()] or None,
         apply=bool(args.apply),
     )
