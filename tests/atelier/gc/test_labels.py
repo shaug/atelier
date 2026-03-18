@@ -37,8 +37,8 @@ def test_gc_normalize_changeset_labels_updates_legacy_status() -> None:
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     with (
-        patch("atelier.beads.list_all_changesets", side_effect=fake_list_all_changesets),
-        patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command),
+        patch("atelier.gc.labels.beads.list_all_changesets", side_effect=fake_list_all_changesets),
+        patch("atelier.gc.labels.beads.run_bd_command", side_effect=fake_run_bd_command),
     ):
         actions = gc_labels.collect_normalize_changeset_labels(
             beads_root=Path("/beads"),
@@ -61,7 +61,7 @@ def test_gc_normalize_changeset_labels_ignores_label_only_payloads() -> None:
     def fake_list_all_changesets(*, beads_root: Path, cwd: Path, include_closed: bool) -> list:
         return issues
 
-    with patch("atelier.beads.list_all_changesets", side_effect=fake_list_all_changesets):
+    with patch("atelier.gc.labels.beads.list_all_changesets", side_effect=fake_list_all_changesets):
         actions = gc_labels.collect_normalize_changeset_labels(
             beads_root=Path("/beads"),
             repo_root=Path("/repo"),
@@ -78,7 +78,7 @@ def test_gc_normalize_changeset_labels_orders_actions_deterministically() -> Non
     def fake_list_all_changesets(*, beads_root: Path, cwd: Path, include_closed: bool) -> list:
         return issues
 
-    with patch("atelier.beads.list_all_changesets", side_effect=fake_list_all_changesets):
+    with patch("atelier.gc.labels.beads.list_all_changesets", side_effect=fake_list_all_changesets):
         actions = gc_labels.collect_normalize_changeset_labels(
             beads_root=Path("/beads"),
             repo_root=Path("/repo"),
@@ -114,8 +114,8 @@ def test_gc_normalize_epic_labels_updates_legacy_status() -> None:
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     with (
-        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
-        patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command),
+        patch("atelier.gc.labels.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.gc.labels.beads.run_bd_command", side_effect=fake_run_bd_command),
     ):
         actions = gc_labels.collect_normalize_epic_labels(
             beads_root=Path("/beads"),
@@ -147,8 +147,8 @@ def test_gc_remove_deprecated_label_removes_at_changeset() -> None:
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     with (
-        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
-        patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command),
+        patch("atelier.gc.labels.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.gc.labels.beads.run_bd_command", side_effect=fake_run_bd_command),
     ):
         actions = gc_labels.collect_remove_deprecated_label(
             label="at:changeset",
@@ -176,7 +176,7 @@ def test_gc_remove_deprecated_label_orders_actions_deterministically() -> None:
             return issues
         return []
 
-    with patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json):
+    with patch("atelier.gc.labels.beads.run_bd_json", side_effect=fake_run_bd_json):
         actions = gc_labels.collect_remove_deprecated_label(
             label="at:changeset",
             detail="changeset role inferred from graph",
@@ -209,9 +209,9 @@ def test_gc_remove_deprecated_label_removes_cs_labels() -> None:
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
         with (
-            patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
+            patch("atelier.gc.labels.beads.run_bd_json", side_effect=fake_run_bd_json),
             patch(
-                "atelier.beads.run_bd_command",
+                "atelier.gc.labels.beads.run_bd_command",
                 side_effect=fake_run_bd_command,
             ),
         ):
@@ -242,7 +242,7 @@ def test_gc_report_epic_identity_guardrails_returns_report_only_actions() -> Non
         missing_from_index=("at-indexed",),
     )
 
-    with patch("atelier.beads.epic_discovery_parity_report", return_value=report):
+    with patch("atelier.gc.labels.beads.epic_discovery_parity_report", return_value=report):
         actions = gc_labels.collect_report_epic_identity_guardrails(
             beads_root=Path("/beads"),
             repo_root=Path("/repo"),
@@ -268,7 +268,7 @@ def test_gc_report_epic_identity_guardrails_noop_when_in_parity() -> None:
         missing_from_index=(),
     )
 
-    with patch("atelier.beads.epic_discovery_parity_report", return_value=report):
+    with patch("atelier.gc.labels.beads.epic_discovery_parity_report", return_value=report):
         actions = gc_labels.collect_report_epic_identity_guardrails(
             beads_root=Path("/beads"),
             repo_root=Path("/repo"),

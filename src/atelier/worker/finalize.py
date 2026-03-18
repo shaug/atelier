@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .. import beads, git
+from . import epic_close_compat
 from . import store_adapter as worker_store
 from .models import FinalizeResult
 
@@ -114,8 +115,11 @@ def finalize_epic_if_complete(
             )
             return FinalizeResult(continue_running=False, reason="epic_blocked_finalization")
 
-    closed = beads.close_epic_if_complete(
-        epic_id, agent_bead_id, beads_root=beads_root, cwd=repo_root
+    closed = epic_close_compat.close_epic_if_complete(
+        epic_id,
+        agent_bead_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
     )
     if closed:
         if log:

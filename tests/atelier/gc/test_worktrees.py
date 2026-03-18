@@ -52,14 +52,14 @@ def test_collect_resolved_epic_artifacts_prunes_worktrees_and_branches() -> None
         commands: list[list[str]] = []
 
         with (
-            patch("atelier.beads.list_epics", return_value=[epic_issue]),
-            patch("atelier.beads.list_descendant_changesets", return_value=[]),
+            patch("atelier.gc.worktrees.beads.list_epics", return_value=[epic_issue]),
+            patch("atelier.gc.worktrees.beads.list_descendant_changesets", return_value=[]),
             patch(
                 "atelier.gc.worktrees.try_show_issue",
                 return_value=IssueRecord.model_validate(epic_issue),
             ),
             patch(
-                "atelier.beads.epic_changeset_summary",
+                "atelier.gc.worktrees.beads.epic_changeset_summary",
                 side_effect=AssertionError("summary should not gate closed epic cleanup"),
             ),
             patch("atelier.git.git_default_branch", return_value="main"),
@@ -135,14 +135,14 @@ def test_collect_resolved_epic_artifacts_skips_when_not_integrated() -> None:
         }
 
         with (
-            patch("atelier.beads.list_epics", return_value=[epic_issue]),
-            patch("atelier.beads.list_descendant_changesets", return_value=[]),
+            patch("atelier.gc.worktrees.beads.list_epics", return_value=[epic_issue]),
+            patch("atelier.gc.worktrees.beads.list_descendant_changesets", return_value=[]),
             patch(
                 "atelier.gc.worktrees.try_show_issue",
                 return_value=IssueRecord.model_validate(epic_issue),
             ),
             patch(
-                "atelier.beads.epic_changeset_summary",
+                "atelier.gc.worktrees.beads.epic_changeset_summary",
                 side_effect=AssertionError("summary should not gate closed epic cleanup"),
             ),
             patch("atelier.git.git_default_branch", return_value="main"),
@@ -208,8 +208,8 @@ def test_collect_resolved_epic_artifacts_allows_explicit_abandoned_cleanup() -> 
         }
 
         with (
-            patch("atelier.beads.list_epics", return_value=[epic_issue]),
-            patch("atelier.beads.list_descendant_changesets", return_value=[]),
+            patch("atelier.gc.worktrees.beads.list_epics", return_value=[epic_issue]),
+            patch("atelier.gc.worktrees.beads.list_descendant_changesets", return_value=[]),
             patch(
                 "atelier.gc.worktrees.try_show_issue",
                 return_value=IssueRecord.model_validate(epic_issue),
@@ -281,8 +281,8 @@ def test_collect_resolved_epic_artifacts_reports_drift_for_closed_merged_state()
         }
 
         with (
-            patch("atelier.beads.list_epics", return_value=[epic_issue]),
-            patch("atelier.beads.list_descendant_changesets", return_value=[]),
+            patch("atelier.gc.worktrees.beads.list_epics", return_value=[epic_issue]),
+            patch("atelier.gc.worktrees.beads.list_descendant_changesets", return_value=[]),
             patch(
                 "atelier.gc.worktrees.try_show_issue",
                 return_value=IssueRecord.model_validate(epic_issue),
@@ -360,8 +360,8 @@ def test_collect_resolved_epic_artifacts_continues_when_mapping_epic_missing() -
         }
 
         with (
-            patch("atelier.beads.list_epics", return_value=[closed_epic_issue]),
-            patch("atelier.beads.list_descendant_changesets", return_value=[]),
+            patch("atelier.gc.worktrees.beads.list_epics", return_value=[closed_epic_issue]),
+            patch("atelier.gc.worktrees.beads.list_descendant_changesets", return_value=[]),
             patch(
                 "atelier.gc.worktrees.try_show_issue",
                 side_effect=lambda issue_id, **_kwargs: (
@@ -431,8 +431,8 @@ def test_collect_resolved_epic_artifacts_skips_ambiguous_branch_only_metadata_ma
         }
 
         with (
-            patch("atelier.beads.list_epics", return_value=[first_epic, second_epic]),
-            patch("atelier.beads.list_descendant_changesets", return_value=[]),
+            patch("atelier.gc.worktrees.beads.list_epics", return_value=[first_epic, second_epic]),
+            patch("atelier.gc.worktrees.beads.list_descendant_changesets", return_value=[]),
             patch("atelier.gc.worktrees.try_show_issue", return_value=None),
             patch("atelier.git.git_default_branch", return_value="main"),
             patch(
@@ -480,8 +480,8 @@ def test_collect_resolved_epic_artifacts_skips_placeholder_mapping_epic_id() -> 
         }
 
         with (
-            patch("atelier.beads.list_epics", return_value=[matching_epic]),
-            patch("atelier.beads.list_descendant_changesets", return_value=[]),
+            patch("atelier.gc.worktrees.beads.list_epics", return_value=[matching_epic]),
+            patch("atelier.gc.worktrees.beads.list_descendant_changesets", return_value=[]),
             patch(
                 "atelier.gc.worktrees.try_show_issue",
                 side_effect=AssertionError("placeholder epic_id should not trigger issue lookup"),
@@ -532,8 +532,8 @@ def test_collect_orphan_worktrees_resolves_prefix_migrated_mapping_by_metadata()
         }
 
         with (
-            patch("atelier.beads.list_epics", return_value=[resolved_epic]),
-            patch("atelier.beads.list_descendant_changesets", return_value=[]),
+            patch("atelier.gc.worktrees.beads.list_epics", return_value=[resolved_epic]),
+            patch("atelier.gc.worktrees.beads.list_descendant_changesets", return_value=[]),
             patch(
                 "atelier.gc.worktrees.try_show_issue",
                 side_effect=AssertionError("direct lookup should not be used for migrated mapping"),
@@ -570,8 +570,8 @@ def test_collect_orphan_worktrees_skips_non_bead_planner_mapping() -> None:
         )
 
         with (
-            patch("atelier.beads.list_epics", return_value=[]),
-            patch("atelier.beads.list_descendant_changesets", return_value=[]),
+            patch("atelier.gc.worktrees.beads.list_epics", return_value=[]),
+            patch("atelier.gc.worktrees.beads.list_descendant_changesets", return_value=[]),
             patch(
                 "atelier.gc.worktrees.try_show_issue",
                 side_effect=AssertionError("non-bead planner mapping should skip direct lookup"),
@@ -620,7 +620,7 @@ def test_collect_closed_workspace_branches_without_mapping_prunes_integrated_roo
 
         with (
             patch(
-                "atelier.beads.list_all_changesets",
+                "atelier.gc.worktrees.beads.list_all_changesets",
                 return_value=[issue],
             ),
             patch("atelier.git.git_default_branch", return_value="main"),
@@ -684,7 +684,7 @@ def test_collect_closed_workspace_branches_prunes_worktree_without_branch_refs()
 
         with (
             patch(
-                "atelier.beads.list_all_changesets",
+                "atelier.gc.worktrees.beads.list_all_changesets",
                 return_value=[issue],
             ),
             patch("atelier.git.git_default_branch", return_value="main"),
@@ -742,7 +742,7 @@ def test_collect_closed_workspace_branches_without_mapping_emits_dry_run_skip_re
 
         with (
             patch(
-                "atelier.beads.list_all_changesets",
+                "atelier.gc.worktrees.beads.list_all_changesets",
                 return_value=[issue],
             ),
             patch("atelier.git.git_default_branch", return_value="main"),
@@ -798,7 +798,7 @@ def test_collect_closed_workspace_branches_without_mapping_skips_not_integrated(
 
         with (
             patch(
-                "atelier.beads.list_all_changesets",
+                "atelier.gc.worktrees.beads.list_all_changesets",
                 return_value=[issue],
             ),
             patch("atelier.git.git_default_branch", return_value="main"),
@@ -850,7 +850,7 @@ def test_collect_closed_workspace_branches_without_mapping_prunes_label_free_mer
 
         with (
             patch(
-                "atelier.beads.list_all_changesets",
+                "atelier.gc.worktrees.beads.list_all_changesets",
                 return_value=[issue],
             ),
             patch("atelier.git.git_default_branch", return_value="main"),

@@ -22,7 +22,7 @@ _BOOTSTRAP_REPO_ROOT = bootstrap_projected_atelier_script(
     require_runtime_health=__name__ == "__main__",
 )
 
-from atelier import beads  # noqa: E402
+from atelier.worker import epic_close_compat  # noqa: E402
 
 
 def close_epic(
@@ -46,19 +46,18 @@ def close_epic(
         `True` when the epic was closed during this call.
     """
     if direct_close:
-        beads.close_issue(epic_id, beads_root=beads_root, cwd=cwd)
-        beads.clear_agent_hook(
+        epic_close_compat.direct_close_epic(
+            epic_id,
             agent_bead_id,
             beads_root=beads_root,
-            cwd=cwd,
-            expected_hook=epic_id,
+            repo_root=cwd,
         )
         return True
-    return beads.close_epic_if_complete(
+    return epic_close_compat.close_epic_if_complete(
         epic_id,
         agent_bead_id,
         beads_root=beads_root,
-        cwd=cwd,
+        repo_root=cwd,
     )
 
 

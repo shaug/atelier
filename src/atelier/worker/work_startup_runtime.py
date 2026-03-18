@@ -9,11 +9,11 @@ from pathlib import Path
 from .. import agent_home, beads, changeset_fields, prs, work_feedback
 from ..io import die, prompt, say, select
 from ..work_feedback import ReviewFeedbackSnapshot
+from ..worker import epic_close_compat, stale_pr_lifecycle
 from ..worker import prompts as worker_prompts
 from ..worker import queueing as worker_queueing
 from ..worker import review as worker_review
 from ..worker import selection as worker_selection
-from ..worker import stale_pr_lifecycle
 from ..worker import store_adapter as worker_store
 from ..worker.models import StartupContractResult, StartupFinalizePreflightResult
 from ..worker.session import startup as worker_startup
@@ -848,11 +848,11 @@ class _StartupContractService(worker_startup.StartupContractService):
         )
 
     def close_epic_if_complete(self, epic_id: str, agent_bead_id: str | None) -> bool:
-        return beads.close_epic_if_complete(
+        return epic_close_compat.close_epic_if_complete(
             epic_id,
             agent_bead_id,
             beads_root=self._beads_root,
-            cwd=self._repo_root,
+            repo_root=self._repo_root,
             dry_run=self._dry_run,
             dry_run_log=self.dry_run_log if self._dry_run else None,
         )
