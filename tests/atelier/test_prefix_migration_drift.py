@@ -8,9 +8,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-import atelier.bead_description_fields as bead_fields
 import atelier.prefix_migration_drift as prefix_migration_drift
 import atelier.worktrees as worktrees
+from atelier.lib.beads import description_fields as bead_fields
 
 
 def _git_worktree_output(path: Path, branch: str) -> str:

@@ -22,11 +22,11 @@ bootstrap_projected_atelier_script(
     require_runtime_health=__name__ == "__main__",
 )
 
-from atelier import bead_description_fields as bead_fields  # noqa: E402
 from atelier.beads_context import (  # noqa: E402
     resolve_runtime_repo_dir_hint,
     resolve_skill_beads_context,
 )
+from atelier.lib.beads import description_fields as bead_fields  # noqa: E402
 
 
 def _build_store_and_client(*, beads_root: Path, repo_root: Path):

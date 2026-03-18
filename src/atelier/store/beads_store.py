@@ -8,7 +8,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import cast
 
-from atelier import bead_description_fields as bead_fields
 from atelier import changesets, lifecycle, messages
 from atelier.external_tickets import external_ticket_payload
 from atelier.lib.beads import (
@@ -25,6 +24,7 @@ from atelier.lib.beads import (
     SupportedOperation,
     UpdateIssueRequest,
 )
+from atelier.lib.beads import description_fields as bead_fields
 
 from .contract import (
     AppendNotesRequest,

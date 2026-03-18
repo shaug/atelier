@@ -26,20 +26,20 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import bd_invocation, changesets, config, exec, git, lifecycle, messages, paths, prs
 from . import log as atelier_log
-from .bead_description_fields import (
-    normalize_description as _normalize_description_text,
-)
-from .bead_description_fields import (
-    normalize_field_value as _normalize_description_field_text,
-)
-from .bead_description_fields import (
-    parse_description_fields as _parse_description_field_map,
-)
-from .bead_description_fields import (
-    parse_external_tickets as _parse_external_tickets_from_description,
-)
 from .external_tickets import ExternalTicketRef, external_ticket_payload
 from .io import die, say
+from .lib.beads.description_fields import (
+    normalize_description as _normalize_description_text,
+)
+from .lib.beads.description_fields import (
+    normalize_field_value as _normalize_description_field_text,
+)
+from .lib.beads.description_fields import (
+    parse_description_fields as _parse_description_field_map,
+)
+from .lib.beads.description_fields import (
+    parse_external_tickets as _parse_external_tickets_from_description,
+)
 from .worker.models_boundary import BeadsIssueBoundary, parse_issue_boundary
 
 _LABEL_AGENT = "agent"

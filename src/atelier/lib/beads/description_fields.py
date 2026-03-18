@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from .external_tickets import ExternalTicketRef, normalize_external_ticket_entry
+from atelier.external_tickets import ExternalTicketRef, normalize_external_ticket_entry
 
 EXTERNAL_TICKETS_KEY = "external_tickets"
 
