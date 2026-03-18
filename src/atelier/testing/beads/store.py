@@ -116,6 +116,7 @@ class InMemoryIssueStore:
         self._slots: dict[str, dict[str, str]] = {
             issue_id: _clean_slot_map(slot_map) for issue_id, slot_map in (slots or {}).items()
         }
+        self._description_history: dict[str, list[tuple[str | None, str | None]]] = {}
         self._next_numeric_id = 1
         self._event_counter = 0
         self._lock = threading.RLock()
@@ -254,6 +255,7 @@ class InMemoryIssueStore:
 
         with self._lock:
             issue = self._require_issue(issue_id)
+            previous_description = issue.description
             if title is not None:
                 issue.title = title
             if description is not None:
@@ -279,6 +281,10 @@ class InMemoryIssueStore:
                 issue.labels = tuple(label for label in issue.labels if label not in removed)
             if append_notes:
                 issue.description = _append_issue_notes(issue.description, append_notes)
+            if issue.description != previous_description:
+                self._description_history.setdefault(issue_id, []).append(
+                    (previous_description, issue.description)
+                )
             issue.extra_fields["updated_at"] = self._next_timestamp()
             return self._export_issue(issue_id)
 
@@ -312,6 +318,12 @@ class InMemoryIssueStore:
 
         with self._lock:
             return dict(self._slots.get(issue_id, {}))
+
+    def description_history(self, issue_id: str) -> tuple[tuple[str | None, str | None], ...]:
+        """Return recorded description transitions for one issue."""
+
+        with self._lock:
+            return tuple(self._description_history.get(issue_id, ()))
 
     def set_slot(self, issue_id: str, slot_name: str, slot_value: str) -> None:
         """Persist one slot value for one issue."""
