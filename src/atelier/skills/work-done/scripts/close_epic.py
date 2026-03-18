@@ -46,16 +46,16 @@ def close_epic(
     Returns:
         `True` when the epic was closed during this call.
     """
-    compat = _epic_close_compat()
+    runtime = _epic_close_runtime()
     if direct_close:
-        compat.direct_close_epic(
+        runtime.direct_close_epic(
             epic_id,
             agent_bead_id,
             beads_root=beads_root,
             repo_root=cwd,
         )
         return True
-    return compat.close_epic_if_complete(
+    return runtime.close_epic_if_complete(
         epic_id,
         agent_bead_id,
         beads_root=beads_root,
@@ -63,10 +63,10 @@ def close_epic(
     )
 
 
-def _epic_close_compat():
-    from atelier.worker import epic_close_compat
+def _epic_close_runtime():
+    from atelier.worker import epic_close
 
-    return epic_close_compat
+    return epic_close
 
 
 def main() -> None:
