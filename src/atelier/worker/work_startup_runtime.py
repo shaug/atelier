@@ -9,7 +9,7 @@ from pathlib import Path
 from .. import agent_home, beads, changeset_fields, prs, work_feedback
 from ..io import die, prompt, say, select
 from ..work_feedback import ReviewFeedbackSnapshot
-from ..worker import epic_close_compat, stale_pr_lifecycle
+from ..worker import epic_close, stale_pr_lifecycle
 from ..worker import prompts as worker_prompts
 from ..worker import queueing as worker_queueing
 from ..worker import review as worker_review
@@ -848,7 +848,7 @@ class _StartupContractService(worker_startup.StartupContractService):
         )
 
     def close_epic_if_complete(self, epic_id: str, agent_bead_id: str | None) -> bool:
-        return epic_close_compat.close_epic_if_complete(
+        return epic_close.close_epic_if_complete(
             epic_id,
             agent_bead_id,
             beads_root=self._beads_root,
