@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-import atelier.beads as beads
+import atelier.bead_description_fields as bead_fields
 import atelier.prefix_migration_drift as prefix_migration_drift
 import atelier.worktrees as worktrees
 
@@ -1355,7 +1355,7 @@ def test_repair_prefix_migration_drift_apply_backfills_missing_mapping_lineage(
     )
 
     def set_description_field(issue: dict[str, object], key: str, value: str) -> None:
-        fields = beads.parse_description_fields(issue.get("description"))
+        fields = bead_fields.parse_description_fields(issue.get("description"))
         fields[key] = value
         issue["description"] = "".join(
             f"{field_key}: {field_value}\n" for field_key, field_value in fields.items()
@@ -1677,7 +1677,7 @@ def test_repair_prefix_migration_drift_apply_is_idempotent(tmp_path: Path) -> No
     }
 
     def set_description_field(issue: dict[str, object], key: str, value: str) -> None:
-        fields = beads.parse_description_fields(issue.get("description"))
+        fields = bead_fields.parse_description_fields(issue.get("description"))
         fields[key] = value
         issue["description"] = "".join(
             f"{field_key}: {field_value}\n" for field_key, field_value in fields.items()

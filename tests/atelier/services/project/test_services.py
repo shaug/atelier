@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from contextlib import ExitStack
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
-import atelier.beads as beads
 from atelier.external_registry import PlannerProviderResolution
 from atelier.models import ProjectConfig, ProjectSection
 from atelier.services import (
@@ -29,6 +29,14 @@ from atelier.services.project import (
     ResolveExternalProviderRequest,
     ResolveExternalProviderService,
 )
+
+
+@dataclass(frozen=True)
+class _IssuePrefixRenamePreview:
+    count: int
+    current_prefix: str
+    target_prefix: str
+    detail: str
 
 
 def test_compose_and_provider_contract_failures() -> None:
@@ -410,7 +418,7 @@ def test_initialize_project_service_prompts_before_prefix_rename_when_interactiv
             messages=(),
         )
     )
-    preview = beads.IssuePrefixRenamePreview(
+    preview = _IssuePrefixRenamePreview(
         count=3,
         current_prefix="at",
         target_prefix="as",
@@ -557,7 +565,7 @@ def test_initialize_project_service_runs_prefix_rename_after_confirmation() -> N
             messages=(),
         )
     )
-    preview = beads.IssuePrefixRenamePreview(
+    preview = _IssuePrefixRenamePreview(
         count=1,
         current_prefix="at",
         target_prefix="as",

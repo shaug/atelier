@@ -8,8 +8,9 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import cast
 
-from atelier import beads as beads_metadata
+from atelier import bead_description_fields as bead_fields
 from atelier import changesets, lifecycle, messages
+from atelier.external_tickets import external_ticket_payload
 from atelier.lib.beads import (
     BeadError,
     Beads,
@@ -162,7 +163,7 @@ def _canonical_status(issue: IssueRecord) -> LifecycleStatus:
 
 def _review_metadata(issue: IssueRecord) -> ReviewMetadata:
     description = issue.description or ""
-    fields = beads_metadata.parse_description_fields(description)
+    fields = bead_fields.parse_description_fields(description)
     review = changesets.parse_review_metadata(description)
     pr_number = review.pr_number
     normalized_pr_number = int(pr_number) if pr_number and pr_number.isdigit() else None
@@ -177,7 +178,7 @@ def _review_metadata(issue: IssueRecord) -> ReviewMetadata:
 
 
 def _external_ticket_links(issue: IssueRecord) -> tuple[ExternalTicketLink, ...]:
-    tickets = beads_metadata.parse_external_tickets(issue.description or "")
+    tickets = bead_fields.parse_external_tickets(issue.description or "")
     return tuple(ExternalTicketLink.from_external_ref(ticket) for ticket in tickets)
 
 
@@ -190,7 +191,7 @@ def _issue_external_ticket_labels(issue: IssueRecord) -> set[str]:
 
 
 def _changeset_branches(issue: IssueRecord) -> ChangesetBranches | None:
-    fields = beads_metadata.parse_description_fields(issue.description or "")
+    fields = bead_fields.parse_description_fields(issue.description or "")
     branches = ChangesetBranches(
         root_branch=_normalize_description_field_value(fields.get("changeset.root_branch")),
         parent_branch=_normalize_description_field_value(fields.get("changeset.parent_branch")),
@@ -204,7 +205,7 @@ def _changeset_branches(issue: IssueRecord) -> ChangesetBranches | None:
 
 
 def _epic_root_branch(issue: IssueRecord) -> str | None:
-    fields = beads_metadata.parse_description_fields(issue.description or "")
+    fields = bead_fields.parse_description_fields(issue.description or "")
     return _normalize_description_field_value(fields.get("workspace.root_branch"))
 
 
@@ -256,7 +257,7 @@ def _description_fields_match(
     *,
     fields: dict[str, str | None],
 ) -> bool:
-    parsed = beads_metadata.parse_description_fields(description)
+    parsed = bead_fields.parse_description_fields(description)
     for key, value in fields.items():
         current = _normalize_description_field_value(parsed.get(key))
         expected = _normalize_description_field_value(value)
@@ -840,7 +841,7 @@ class AtelierStore:
         agent_issue = await self._find_agent_issue(request.agent_id, state=state)
         if agent_issue is None:
             raise LookupError(f"agent issue not found: {request.agent_id}")
-        current_fields = beads_metadata.parse_description_fields(agent_issue.description or "")
+        current_fields = bead_fields.parse_description_fields(agent_issue.description or "")
         current_hook = _normalize_description_field_value(current_fields.get("hook_bead"))
         if (
             request.expected_current_epic_id is not None
@@ -854,7 +855,7 @@ class AtelierStore:
             return HookRecord(agent_id=request.agent_id, epic_id=request.epic_id)
 
         def build_request(current: IssueRecord) -> UpdateIssueRequest:
-            fields = beads_metadata.parse_description_fields(current.description or "")
+            fields = bead_fields.parse_description_fields(current.description or "")
             existing = _normalize_description_field_value(fields.get("hook_bead"))
             if (
                 request.expected_current_epic_id is not None
@@ -893,7 +894,7 @@ class AtelierStore:
         if agent_issue is None:
             raise LookupError(f"agent issue not found: {request.agent_bead_id}")
         agent_id = self._require_agent_identifier(agent_issue)
-        current_fields = beads_metadata.parse_description_fields(agent_issue.description or "")
+        current_fields = bead_fields.parse_description_fields(agent_issue.description or "")
         current_hook = _normalize_description_field_value(current_fields.get("hook_bead"))
         if (
             request.expected_current_epic_id is not None
@@ -907,7 +908,7 @@ class AtelierStore:
             return HookRecord(agent_id=agent_id, epic_id=request.epic_id)
 
         def build_request(current: IssueRecord) -> UpdateIssueRequest:
-            fields = beads_metadata.parse_description_fields(current.description or "")
+            fields = bead_fields.parse_description_fields(current.description or "")
             existing = _normalize_description_field_value(fields.get("hook_bead"))
             if (
                 request.expected_current_epic_id is not None
@@ -942,7 +943,7 @@ class AtelierStore:
         agent_issue = await self._find_agent_issue(request.agent_id, state=state)
         if agent_issue is None:
             return None
-        fields = beads_metadata.parse_description_fields(agent_issue.description or "")
+        fields = bead_fields.parse_description_fields(agent_issue.description or "")
         current_hook = _normalize_description_field_value(fields.get("hook_bead"))
         if current_hook is None:
             return None
@@ -950,7 +951,7 @@ class AtelierStore:
             return None
 
         def build_request(current: IssueRecord) -> UpdateIssueRequest:
-            current_fields = beads_metadata.parse_description_fields(current.description or "")
+            current_fields = bead_fields.parse_description_fields(current.description or "")
             existing = _normalize_description_field_value(current_fields.get("hook_bead"))
             if existing is None:
                 raise ValueError("agent hook disappeared during clear")
@@ -991,7 +992,7 @@ class AtelierStore:
         if agent_issue is None:
             return None
         agent_id = self._require_agent_identifier(agent_issue)
-        fields = beads_metadata.parse_description_fields(agent_issue.description or "")
+        fields = bead_fields.parse_description_fields(agent_issue.description or "")
         current_hook = _normalize_description_field_value(fields.get("hook_bead"))
         if current_hook is None:
             return None
@@ -999,7 +1000,7 @@ class AtelierStore:
             return None
 
         def build_request(current: IssueRecord) -> UpdateIssueRequest:
-            current_fields = beads_metadata.parse_description_fields(current.description or "")
+            current_fields = bead_fields.parse_description_fields(current.description or "")
             existing = _normalize_description_field_value(current_fields.get("hook_bead"))
             if existing is None:
                 raise ValueError("agent hook disappeared during clear")
@@ -1099,10 +1100,7 @@ class AtelierStore:
         ):
             return desired_tickets
 
-        payload = [
-            beads_metadata.external_ticket_payload(ticket.to_external_ref())
-            for ticket in desired_tickets
-        ]
+        payload = [external_ticket_payload(ticket.to_external_ref()) for ticket in desired_tickets]
         serialized = json.dumps(payload, separators=(",", ":"), sort_keys=True)
 
         def build_request(current: IssueRecord) -> UpdateIssueRequest:
@@ -1610,7 +1608,7 @@ class AtelierStore:
         for issue in candidates:
             if not self._matches_issue_kind(issue, "agent"):
                 continue
-            fields = beads_metadata.parse_description_fields(issue.description or "")
+            fields = bead_fields.parse_description_fields(issue.description or "")
             if _clean_text(fields.get("agent_id")) == agent_id:
                 description_matches.append(issue)
         if description_matches:
@@ -1642,7 +1640,7 @@ class AtelierStore:
         slot_hook = _clean_text(slots.get("hook"))
         if slot_hook is not None:
             return HookRecord(agent_id=agent_id, epic_id=slot_hook)
-        fields = beads_metadata.parse_description_fields(issue.description or "")
+        fields = bead_fields.parse_description_fields(issue.description or "")
         hooked_epic = _normalize_description_field_value(fields.get("hook_bead"))
         return None if hooked_epic is None else HookRecord(agent_id=agent_id, epic_id=hooked_epic)
 
@@ -1656,7 +1654,7 @@ class AtelierStore:
         title = _clean_text(issue.title)
         if title is not None:
             return title
-        fields = beads_metadata.parse_description_fields(issue.description or "")
+        fields = bead_fields.parse_description_fields(issue.description or "")
         return _clean_text(fields.get("agent_id"))
 
     async def _transition_issue_kind(

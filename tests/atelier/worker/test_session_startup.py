@@ -2,13 +2,25 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-from atelier import beads
 from atelier.worker import integration, work_startup_runtime
+from atelier.worker.models_boundary import parse_issue_boundary
 from atelier.worker.review import MergeConflictSelection, ReviewFeedbackSelection
 from atelier.worker.session import startup
+
+
+def _parse_issue_records(
+    issues: list[dict[str, object]],
+    *,
+    source: str,
+) -> list[SimpleNamespace]:
+    return [
+        SimpleNamespace(raw=raw, issue=parse_issue_boundary(raw, source=f"{source}[{index}]"))
+        for index, raw in enumerate(issues)
+    ]
 
 
 class FakeStartupService:
@@ -1133,7 +1145,7 @@ def test_run_startup_contract_resumes_unassigned_draft_pr_review_followup() -> N
     }
     record_by_id = {
         record.issue.id: record
-        for record in beads.parse_issue_records([changeset], source="startup_draft_pr_feedback")
+        for record in _parse_issue_records([changeset], source="startup_draft_pr_feedback")
     }
     context = startup.StartupContractContext(
         agent_id="atelier/worker/codex/p100",

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import re
@@ -26,7 +27,6 @@ _BOOTSTRAP_REPO_ROOT = bootstrap_projected_atelier_script(
     require_runtime_health=__name__ == "__main__",
 )
 
-from atelier import beads  # noqa: E402
 from atelier.bd_invocation import with_bd_mode  # noqa: E402
 from atelier.beads_context import resolve_runtime_repo_dir_hint  # noqa: E402
 from atelier.planner_contract import validate_authoring_contract  # noqa: E402
@@ -243,13 +243,23 @@ def _list_child_changesets(
     beads_dir: str | None,
     cwd: Path,
 ) -> list[dict[str, object]]:
+    from atelier.lib.beads import ShowIssueRequest, SubprocessBeadsClient
+    from atelier.store import ChangesetQuery, build_atelier_store
+
     beads_root = Path(beads_dir).resolve() if beads_dir else Path.cwd() / ".beads"
-    return beads.list_child_changesets(
-        epic_id,
-        beads_root=beads_root,
+    client = SubprocessBeadsClient(
         cwd=cwd,
-        include_closed=True,
+        beads_root=beads_root,
+        env={"BEADS_DIR": str(beads_root)},
     )
+    store = build_atelier_store(beads=client)
+    records = asyncio.run(
+        store.list_changesets(ChangesetQuery(epic_id=epic_id, include_closed=True))
+    )
+    return [
+        asyncio.run(client.show(ShowIssueRequest(issue_id=record.id))).model_dump(exclude_none=True)
+        for record in records
+    ]
 
 
 def _evaluate_guardrails(
