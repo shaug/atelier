@@ -37,6 +37,7 @@ Typed request/query models:
 - `SetHookRequest`
 - `ClearHookRequest`
 - `UpdateExternalTicketsRequest`
+- `RepairExternalTicketMetadataRequest`
 - `UpdateReviewRequest`
 - `LifecycleTransitionRequest`
 
@@ -82,7 +83,7 @@ implementation is backed by Beads:
   adapters own remote import/export/sync behavior, while `AtelierStore` owns the
   normalized persisted link shape, provider labels, and drift timestamps
   (`state_updated_at`, `content_updated_at`, `notes_updated_at`,
-  `last_synced_at`).
+  `last_synced_at`) plus metadata repair when legacy history recovery is needed.
 - Dependency satisfaction is an Atelier decision. Adapters may persist raw
   dependency edges, but whether a dependency counts as satisfied is owned by
   Atelier lifecycle policy.
@@ -125,8 +126,8 @@ backends. Representative read coverage includes epic discovery, changeset
 listing and ready discovery, message listing, hook lookup, branch metadata,
 review/dependency state decoding, and external ticket metadata reads.
 Representative mutation coverage includes epic and changeset authoring, review
-updates, external ticket metadata replacement, note appends, lifecycle
-transitions, message create/claim/read, and agent hook set/clear.
+updates, external ticket metadata replacement and repair, note appends,
+lifecycle transitions, message create/claim/read, and agent hook set/clear.
 
 This proof freezes one architecture shape: a single Atelier-owned store boundary
 implemented on top of multiple `Beads` backends. Future backend additions must
@@ -147,8 +148,9 @@ Downstream epics can rely on the following store surface today:
 - the request/query models in `atelier.store.contract`, including
   `CreateEpicRequest`, `CreateChangesetRequest`, `AppendNotesRequest`,
   `UpdateReviewRequest`, `UpdateExternalTicketsRequest`,
-  `LifecycleTransitionRequest`, `CreateMessageRequest`, `ClaimMessageRequest`,
-  `MarkMessageReadRequest`, `SetHookRequest`, and `ClearHookRequest`
+  `RepairExternalTicketMetadataRequest`, `LifecycleTransitionRequest`,
+  `CreateMessageRequest`, `ClaimMessageRequest`, `MarkMessageReadRequest`,
+  `SetHookRequest`, and `ClearHookRequest`
 - shared dual-backend parity for discovery/read flows plus notes, review,
   external-ticket metadata, lifecycle, authoring, message, and hook mutations
 

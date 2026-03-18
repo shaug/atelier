@@ -257,6 +257,21 @@ class ExternalTicketLink(StoreModel):
         )
 
 
+class ExternalTicketMetadataRepairResult(StoreModel):
+    """Outcome for one external-ticket metadata repair attempt."""
+
+    issue_id: Identifier
+    providers: tuple[Identifier, ...] = ()
+    recovered: bool
+    repaired: bool
+    ticket_count: int = Field(default=0, ge=0)
+
+    @field_validator("providers")
+    @classmethod
+    def _dedupe_providers(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _dedupe_identifiers(value)
+
+
 class ChangesetBranches(StoreModel):
     """Branch metadata needed to publish and reconcile one changeset."""
 

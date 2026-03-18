@@ -41,11 +41,13 @@ from .contract import (
     MarkMessageReadRequest,
     MessageQuery,
     ReadyChangesetQuery,
+    RepairExternalTicketMetadataRequest,
     SetAgentBeadHookRequest,
     SetHookRequest,
     UpdateExternalTicketsRequest,
     UpdateReviewRequest,
 )
+from .external_ticket_repair import repair_external_ticket_metadata
 from .models import (
     ChangesetBranches,
     ChangesetRecord,
@@ -54,6 +56,7 @@ from .models import (
     EpicIdentityViolation,
     EpicRecord,
     ExternalTicketLink,
+    ExternalTicketMetadataRepairResult,
     HookRecord,
     LifecycleStatus,
     LifecycleTransition,
@@ -1136,6 +1139,23 @@ class AtelierStore:
             ),
         )
         return _external_ticket_links(updated)
+
+    async def repair_external_ticket_metadata(
+        self,
+        request: RepairExternalTicketMetadataRequest,
+    ) -> tuple[ExternalTicketMetadataRepairResult, ...]:
+        """Repair missing external ticket metadata through store-owned logic.
+
+        Args:
+            request: Repair selection and whether recovered metadata should be
+                persisted back to the store.
+
+        Returns:
+            One repair outcome per issue with provider labels but missing
+            persisted external ticket metadata.
+        """
+
+        return await repair_external_ticket_metadata(self, request)
 
     async def append_notes(
         self,
