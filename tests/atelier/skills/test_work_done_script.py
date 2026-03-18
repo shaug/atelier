@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def _load_script_module():
@@ -41,14 +42,14 @@ def test_close_epic_uses_readiness_path(monkeypatch) -> None:
         return True
 
     monkeypatch.setattr(
-        module.epic_close_compat,
-        "close_epic_if_complete",
-        fake_close_epic_if_complete,
-    )
-    monkeypatch.setattr(
-        module.epic_close_compat,
-        "direct_close_epic",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unexpected direct close")),
+        module,
+        "_epic_close_compat",
+        lambda: SimpleNamespace(
+            close_epic_if_complete=fake_close_epic_if_complete,
+            direct_close_epic=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("unexpected direct close")
+            ),
+        ),
     )
 
     closed = module.close_epic(
@@ -84,12 +85,14 @@ def test_close_epic_direct_close_reconciles_and_clears_hook(monkeypatch) -> None
         assert beads_root == Path("/beads")
         assert repo_root == Path("/repo")
 
-    monkeypatch.setattr(module.epic_close_compat, "direct_close_epic", fake_direct_close_epic)
     monkeypatch.setattr(
-        module.epic_close_compat,
-        "close_epic_if_complete",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("unexpected readiness close")
+        module,
+        "_epic_close_compat",
+        lambda: SimpleNamespace(
+            direct_close_epic=fake_direct_close_epic,
+            close_epic_if_complete=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("unexpected readiness close")
+            ),
         ),
     )
 
