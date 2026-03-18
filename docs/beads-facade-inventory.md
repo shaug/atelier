@@ -7,23 +7,25 @@ intentionally retained while the legacy facade is drained. The checked-in
 ## Concern domains
 
 - `read-discovery-and-metadata-shims` Keeps the remaining metadata parsing,
-  startup, and read-only discovery callers visible for the `at-rhxbc.2` drain
-  slice.
+  startup, and read-only discovery callers visible for the read and discovery
+  drain slice.
 - `mutation-and-coordination-shims` Captures close/repair/GC/worktree
-  coordination callers that feed the `at-rhxbc.3` drain slice.
+  coordination callers that feed the mutation and coordination drain slice.
 - `retained-facade-contract-tests` Marks the facade-only harness and contract
-  coverage that should shrink only after the real callers are drained in
-  `at-rhxbc.4`.
+  coverage that should shrink only after the real callers are drained and the
+  remaining compatibility contract is explicit.
 
 ## Follow-on drain map
 
-- `at-rhxbc.2` Migrate the read/discovery/startup and description-field parsing
-  callers listed in the inventory.
-- `at-rhxbc.3` Migrate the mutation, GC, and worktree coordination callers
-  listed in the inventory.
-- `at-rhxbc.4` Remove the remaining facade-only harness and compatibility tests
-  by shrinking the allowlist to zero or to an explicitly documented retained
-  shim.
+- Read and discovery drain: Move the read/discovery/startup and
+  description-field parsing callers listed in the inventory onto store or
+  client boundaries.
+- Mutation and coordination drain: Move the mutation, GC, close/repair, and
+  worktree coordination callers listed in the inventory onto store or explicit
+  compatibility seams.
+- Retirement proof: Remove the remaining facade-only harness and compatibility
+  tests by shrinking the allowlist to zero or to an explicitly documented
+  retained shim.
 
 <!-- inline reference link definitions. please keep alphabetized -->
 
