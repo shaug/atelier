@@ -26,12 +26,20 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import bd_invocation, changesets, config, exec, git, lifecycle, messages, paths, prs
 from . import log as atelier_log
-from .external_tickets import (
-    ExternalTicketRef,
-    external_ticket_payload,
-    normalize_external_ticket_entry,
-)
+from .external_tickets import ExternalTicketRef, external_ticket_payload
 from .io import die, say
+from .lib.beads.description_fields import (
+    normalize_description as _normalize_description_text,
+)
+from .lib.beads.description_fields import (
+    normalize_field_value as _normalize_description_field_text,
+)
+from .lib.beads.description_fields import (
+    parse_description_fields as _parse_description_field_map,
+)
+from .lib.beads.description_fields import (
+    parse_external_tickets as _parse_external_tickets_from_description,
+)
 from .worker.models_boundary import BeadsIssueBoundary, parse_issue_boundary
 
 _LABEL_AGENT = "agent"
@@ -3964,24 +3972,11 @@ def list_all_changesets(
 
 
 def _normalize_description(description: str | None) -> str:
-    if not description:
-        return ""
-    return description.rstrip("\n")
+    return _normalize_description_text(description)
 
 
 def _parse_description_fields(description: str | None) -> dict[str, str]:
-    fields: dict[str, str] = {}
-    if not description:
-        return fields
-    for line in description.splitlines():
-        if ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        key = key.strip()
-        if not key:
-            continue
-        fields[key] = value.strip()
-    return fields
+    return _parse_description_field_map(description)
 
 
 def parse_description_fields(description: str | None) -> dict[str, str]:
@@ -3990,12 +3985,7 @@ def parse_description_fields(description: str | None) -> dict[str, str]:
 
 
 def _normalize_description_field_value(value: str | None) -> str | None:
-    if value is None:
-        return None
-    cleaned = value.strip()
-    if not cleaned or cleaned.lower() == "null":
-        return None
-    return cleaned
+    return _normalize_description_field_text(value)
 
 
 def _issue_description(issue: dict[str, object]) -> str:
@@ -4274,27 +4264,7 @@ def extract_worktree_path(issue: dict[str, object]) -> str | None:
 
 def parse_external_tickets(description: str | None) -> list[ExternalTicketRef]:
     """Parse external ticket references from a description."""
-    if not description:
-        return []
-    fields = _parse_description_fields(description)
-    tickets_raw = fields.get(EXTERNAL_TICKETS_KEY)
-    if not tickets_raw or tickets_raw.lower() == "null":
-        return []
-    try:
-        payload = json.loads(tickets_raw)
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(payload, list):
-        return []
-    tickets: list[ExternalTicketRef] = []
-    for entry in payload:
-        if not isinstance(entry, dict):
-            continue
-        normalized = normalize_external_ticket_entry(entry)
-        if normalized is None:
-            continue
-        tickets.append(normalized)
-    return tickets
+    return _parse_external_tickets_from_description(description)
 
 
 _GITHUB_API_ISSUE_PATH = re.compile(r"^/repos/(?P<owner>[^/]+)/(?P<repo>[^/]+)/issues/[^/]+$")

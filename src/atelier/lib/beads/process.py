@@ -308,6 +308,24 @@ class SubprocessBeadsClient(Beads):
         common_state = {
             "active_backend_ready": has_dolt_store,
             "backend": configured_backend,
+            "has_dolt_store": has_dolt_store,
+            "has_legacy_sqlite": has_legacy_sqlite,
+            "dolt_issue_total": dolt_issue_total,
+            "legacy_issue_total": legacy_issue_total,
+            "dolt_count_source": (
+                "bd_stats_dolt_store"
+                if dolt_issue_total is not None and has_dolt_store
+                else "bd_stats_without_dolt_store"
+                if dolt_issue_total is not None and dolt_backend_expected
+                else "bd_stats_non_dolt_backend"
+                if dolt_issue_total is not None
+                else "unavailable"
+            ),
+            "legacy_count_source": (
+                "bd_stats_legacy_sqlite" if legacy_issue_total is not None else "unavailable"
+            ),
+            "dolt_detail": dolt_detail,
+            "legacy_detail": legacy_detail,
         }
 
         if not has_dolt_store:

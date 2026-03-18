@@ -22,11 +22,11 @@ bootstrap_projected_atelier_script(
     require_runtime_health=__name__ == "__main__",
 )
 
-from atelier import beads as beads_metadata  # noqa: E402
 from atelier.beads_context import (  # noqa: E402
     resolve_runtime_repo_dir_hint,
     resolve_skill_beads_context,
 )
+from atelier.lib.beads import description_fields as bead_fields  # noqa: E402
 
 
 def _build_store_and_client(*, beads_root: Path, repo_root: Path):
@@ -115,7 +115,7 @@ def _issue_notes_text(issue: object) -> str | None:
 
 
 def _related_context(issue: object) -> tuple[str, ...]:
-    fields = beads_metadata.parse_description_fields(_issue_text(issue, "description") or "")
+    fields = bead_fields.parse_description_fields(_issue_text(issue, "description") or "")
     related = list(_split_field_values(fields.get("related_context")))
     related.extend(_split_field_values(fields.get("external_tickets")))
     deduped: list[str] = []

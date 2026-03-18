@@ -6,9 +6,6 @@ intentionally retained while the legacy facade is drained. The checked-in
 
 ## Concern domains
 
-- `read-discovery-and-metadata-shims` Keeps the remaining metadata parsing,
-  startup, and read-only discovery callers visible for the read and discovery
-  drain slice.
 - `mutation-and-coordination-shims` Captures close/repair/GC/worktree
   coordination callers that feed the mutation and coordination drain slice.
 - `retained-facade-contract-tests` Marks the facade-only harness and contract
@@ -17,9 +14,6 @@ intentionally retained while the legacy facade is drained. The checked-in
 
 ## Follow-on drain map
 
-- Read and discovery drain: Move the read/discovery/startup and
-  description-field parsing callers listed in the inventory onto store or
-  client boundaries.
 - Mutation and coordination drain: Move the mutation, GC, close/repair, and
   worktree coordination callers listed in the inventory onto store or explicit
   compatibility seams.

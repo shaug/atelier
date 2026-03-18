@@ -214,14 +214,42 @@ class BeadsStartupState(BeadsModel):
     def diagnostics(self) -> tuple[str, ...]:
         """Render stable startup diagnostics lines."""
 
-        return (
+        lines = [
             f"classification={self.classification}",
             "migration_eligible=" + ("yes" if self.migration_eligible else "no"),
             "operator_attention_required=" + ("yes" if self.operator_attention_required else "no"),
             "configured_backend=" + (self.backend if self.backend else "unspecified"),
             "active_backend=" + ("ready" if self.active_backend_ready else "not_ready"),
             f"reason={self.reason}",
-        )
+        ]
+        extras = self.extra_fields
+        if "has_dolt_store" in extras:
+            lines.append("dolt_store=" + ("present" if extras["has_dolt_store"] else "missing"))
+        if "has_legacy_sqlite" in extras:
+            lines.append(
+                "legacy_sqlite=" + ("present" if extras["has_legacy_sqlite"] else "missing")
+            )
+        if "dolt_issue_total" in extras:
+            dolt_issue_total = extras["dolt_issue_total"]
+            lines.append(
+                "dolt_issue_total="
+                + (str(dolt_issue_total) if dolt_issue_total is not None else "unavailable")
+            )
+        if "dolt_count_source" in extras:
+            lines.append(f"dolt_count_source={extras['dolt_count_source']}")
+        if "legacy_issue_total" in extras:
+            legacy_issue_total = extras["legacy_issue_total"]
+            lines.append(
+                "legacy_issue_total="
+                + (str(legacy_issue_total) if legacy_issue_total is not None else "unavailable")
+            )
+        if "legacy_count_source" in extras:
+            lines.append(f"legacy_count_source={extras['legacy_count_source']}")
+        if "dolt_detail" in extras and extras["dolt_detail"]:
+            lines.append(f"dolt_detail={extras['dolt_detail']}")
+        if "legacy_detail" in extras and extras["legacy_detail"]:
+            lines.append(f"legacy_detail={extras['legacy_detail']}")
+        return tuple(lines)
 
 
 class ShowIssueRequest(BeadsModel):

@@ -1,12 +1,14 @@
 import subprocess
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
-from atelier import beads, prs
+from atelier import prs
 from atelier.worker import review
+from atelier.worker.models_boundary import parse_issue_boundary
 
 
 def _run_git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -21,6 +23,17 @@ def _run_git(repo: Path, *args: str, check: bool = True) -> subprocess.Completed
 def _has_ref(repo: Path, ref: str) -> bool:
     result = _run_git(repo, "show-ref", "--verify", "--quiet", ref, check=False)
     return result.returncode == 0
+
+
+def _parse_issue_records(
+    issues: list[dict[str, object]],
+    *,
+    source: str,
+) -> list[SimpleNamespace]:
+    return [
+        SimpleNamespace(raw=raw, issue=parse_issue_boundary(raw, source=f"{source}[{index}]"))
+        for index, raw in enumerate(issues)
+    ]
 
 
 def test_cleanup_leaked_pr_review_branches_prunes_stale_and_keeps_active_worktree_branch(
@@ -97,7 +110,7 @@ def test_select_review_feedback_changeset_runs_review_ref_hygiene() -> None:
     ]
     record_by_id = {
         record.issue.id: record
-        for record in beads.parse_issue_records(issues, source="review_hygiene_call_test")
+        for record in _parse_issue_records(issues, source="review_hygiene_call_test")
     }
 
     with (
@@ -188,8 +201,7 @@ def test_select_review_feedback_changeset_picks_oldest_unseen() -> None:
         return "2026-02-20T11:00:00Z" if payload.get("number") == 11 else "2026-02-20T10:30:00Z"
 
     record_by_id = {
-        record.issue.id: record
-        for record in beads.parse_issue_records(issues, source="review_test")
+        record.issue.id: record for record in _parse_issue_records(issues, source="review_test")
     }
 
     with (
@@ -248,7 +260,7 @@ def test_select_review_feedback_changeset_tie_breaks_by_ids_after_parallel_scan(
     ]
     record_by_id = {
         record.issue.id: record
-        for record in beads.parse_issue_records(issues, source="review_tie_break_test")
+        for record in _parse_issue_records(issues, source="review_tie_break_test")
     }
 
     def fake_lookup(repo: str, branch: str, *, refresh: bool = False) -> prs.GithubPrLookup:
@@ -312,7 +324,7 @@ def test_select_review_feedback_changeset_includes_standalone_epic_changeset() -
     }
     record_by_id = {
         record.issue.id: record
-        for record in beads.parse_issue_records([epic_issue], source="review_standalone")
+        for record in _parse_issue_records([epic_issue], source="review_standalone")
     }
 
     with (
@@ -400,7 +412,7 @@ def test_select_review_feedback_changeset_pr_160_closed_then_reopened_sequence()
             ),
             patch(
                 "atelier.worker.review.beads.BeadsClient.show_issue",
-                return_value=beads.parse_issue_records([issue], source=source)[0],
+                return_value=_parse_issue_records([issue], source=source)[0],
             ),
             patch("atelier.worker.review.prs.lookup_github_pr_status", return_value=pr_lookup),
             patch(
@@ -561,8 +573,7 @@ def test_select_review_feedback_changeset_skips_when_no_unresolved_threads() -> 
         }
     ]
     record_by_id = {
-        record.issue.id: record
-        for record in beads.parse_issue_records(issues, source="review_test")
+        record.issue.id: record for record in _parse_issue_records(issues, source="review_test")
     }
 
     with (
@@ -618,7 +629,7 @@ def test_select_review_feedback_changeset_accepts_draft_pr_feedback() -> None:
     ]
     record_by_id = {
         record.issue.id: record
-        for record in beads.parse_issue_records(issues, source="review_draft_pr_feedback")
+        for record in _parse_issue_records(issues, source="review_draft_pr_feedback")
     }
 
     with (
@@ -680,7 +691,7 @@ def test_select_conflicted_changeset_picks_oldest_conflict() -> None:
     ]
     record_by_id = {
         record.issue.id: record
-        for record in beads.parse_issue_records(issues, source="test_select_conflicted")
+        for record in _parse_issue_records(issues, source="test_select_conflicted")
     }
 
     def fake_pr_status(_repo: str, branch: str) -> dict[str, object] | None:
@@ -737,7 +748,7 @@ def test_select_conflicted_changeset_tie_breaks_by_ids_after_parallel_scan() -> 
     ]
     record_by_id = {
         record.issue.id: record
-        for record in beads.parse_issue_records(issues, source="conflict_tie_break_test")
+        for record in _parse_issue_records(issues, source="conflict_tie_break_test")
     }
 
     def fake_pr_status(_repo: str, branch: str) -> dict[str, object] | None:
@@ -783,7 +794,7 @@ def test_select_conflicted_changeset_includes_standalone_epic_changeset() -> Non
     }
     record_by_id = {
         record.issue.id: record
-        for record in beads.parse_issue_records([epic_issue], source="conflict_standalone")
+        for record in _parse_issue_records([epic_issue], source="conflict_standalone")
     }
 
     with (
@@ -982,7 +993,7 @@ def test_select_conflicted_changeset_skips_unknown_mergeability() -> None:
     ]
     record_by_id = {
         record.issue.id: record
-        for record in beads.parse_issue_records(issues, source="test_select_conflicted_unknown")
+        for record in _parse_issue_records(issues, source="test_select_conflicted_unknown")
     }
 
     with (
