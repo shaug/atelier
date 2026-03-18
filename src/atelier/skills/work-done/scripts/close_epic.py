@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import os
 import sys
 from pathlib import Path
@@ -22,7 +23,7 @@ _BOOTSTRAP_REPO_ROOT = bootstrap_projected_atelier_script(
     require_runtime_health=__name__ == "__main__",
 )
 
-from atelier.worker import epic_close_compat  # noqa: E402
+_BEADS_RUNTIME = importlib.import_module("atelier.beads")
 
 
 def close_epic(
@@ -45,20 +46,27 @@ def close_epic(
     Returns:
         `True` when the epic was closed during this call.
     """
+    compat = _epic_close_compat()
     if direct_close:
-        epic_close_compat.direct_close_epic(
+        compat.direct_close_epic(
             epic_id,
             agent_bead_id,
             beads_root=beads_root,
             repo_root=cwd,
         )
         return True
-    return epic_close_compat.close_epic_if_complete(
+    return compat.close_epic_if_complete(
         epic_id,
         agent_bead_id,
         beads_root=beads_root,
         repo_root=cwd,
     )
+
+
+def _epic_close_compat():
+    from atelier.worker import epic_close_compat
+
+    return epic_close_compat
 
 
 def main() -> None:
