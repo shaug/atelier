@@ -23,11 +23,6 @@ _BOOTSTRAP_REPO_ROOT = bootstrap_projected_atelier_script(
     require_runtime_health=__name__ == "__main__",
 )
 
-# Import after bootstrap so projected `--help` exercises the selected
-# `atelier.beads` runtime path. A normal top-level import would run before the
-# shared bootstrap can reorder `sys.path` toward the repo runtime when present.
-_BEADS_RUNTIME = importlib.import_module("atelier.beads")
-
 
 def close_epic(
     *,
@@ -49,7 +44,7 @@ def close_epic(
     Returns:
         `True` when the epic was closed during this call.
     """
-    runtime = _epic_close_runtime()
+    runtime = _load_epic_close_runtime_for_execution()
     if direct_close:
         runtime.direct_close_epic(
             epic_id,
@@ -66,16 +61,33 @@ def close_epic(
     )
 
 
-def _epic_close_runtime():
-    # Defer the worker import until the close path actually runs so projected
-    # `--help` can exit after bootstrap without importing the heavier worker
-    # runtime, and tests can patch this seam directly.
+def _ensure_selected_beads_runtime() -> None:
+    """Import the selected Beads runtime after projected bootstrap.
+
+    Projected skill `--help` exits before the close path imports
+    `atelier.worker.epic_close`, but the bootstrap tests still need one explicit
+    import probe that shows which `atelier.*` runtime won after `sys.path`
+    reordering. Keeping that probe here makes the bootstrap workaround named and
+    localized instead of a hidden module-import side effect.
+    """
+    importlib.import_module("atelier.beads")
+
+
+def _load_epic_close_runtime_for_execution():
+    """Load the worker close runtime only for actual close execution.
+
+    The projected script's `--help` path intentionally stops after bootstrap
+    and argument parsing. Importing `atelier.worker.epic_close` eagerly would
+    force that heavier runtime onto help-only invocations and break the split
+    runtime bootstrap contract that the projected tests exercise.
+    """
     from atelier.worker import epic_close
 
     return epic_close
 
 
 def main() -> None:
+    _ensure_selected_beads_runtime()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--epic-id", required=True, help="Epic bead id")
     parser.add_argument("--agent-bead-id", required=True, help="Agent bead id")
