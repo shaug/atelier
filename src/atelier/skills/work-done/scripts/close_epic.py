@@ -67,6 +67,9 @@ def close_epic(
 
 
 def _epic_close_runtime():
+    # Defer the worker import until the close path actually runs so projected
+    # `--help` can exit after bootstrap without importing the heavier worker
+    # runtime, and tests can patch this seam directly.
     from atelier.worker import epic_close
 
     return epic_close
