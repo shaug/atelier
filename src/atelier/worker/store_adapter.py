@@ -12,7 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import cast
 
-from .. import beads, changeset_fields, changesets, lifecycle, messages
+from .. import beads, changeset_fields, lifecycle, messages
 from ..io import die
 from ..lib.beads import (
     CreateIssueRequest,
@@ -69,6 +69,23 @@ class EpicCloseCandidate:
     id: str
     lifecycle: LifecycleStatus
     review: StoreReviewMetadata
+
+
+@dataclass(frozen=True)
+class EpicChangesetSummary:
+    """Worker-owned close-readiness summary derived from typed store records."""
+
+    total: int
+    ready: int
+    merged: int
+    abandoned: int
+    remaining: int
+
+    @property
+    def ready_to_close(self) -> bool:
+        """Return whether every tracked changeset is terminal."""
+
+        return self.total > 0 and self.remaining == 0
 
 
 def _build_async_beads_client(*, beads_root: Path, repo_root: Path) -> SubprocessBeadsClient:
@@ -271,14 +288,6 @@ def _close_candidate_from_changeset(record: ChangesetRecord) -> EpicCloseCandida
     )
 
 
-def _close_candidate_from_issue(issue: IssueRecord) -> EpicCloseCandidate:
-    return EpicCloseCandidate(
-        id=issue.id,
-        lifecycle=_issue_lifecycle_status(issue),
-        review=_review_metadata_from_issue(issue),
-    )
-
-
 def list_epic_close_candidates(
     epic_id: str,
     *,
@@ -302,10 +311,10 @@ def list_epic_close_candidates(
     ):
         return []
     try:
-        issue = bundle.sync_client.show(ShowIssueRequest(issue_id=epic_id))
-    except KeyError:
+        record = asyncio.run(bundle.store.get_changeset(epic_id))
+    except LookupError:
         return []
-    return [_close_candidate_from_issue(issue)]
+    return [_close_candidate_from_changeset(record)]
 
 
 def mark_issue_in_progress(
@@ -562,19 +571,6 @@ def _issue_lifecycle_status(issue: IssueRecord) -> LifecycleStatus:
     if normalized is None:
         raise ValueError(f"issue {issue.id} is missing a canonical lifecycle status")
     return LifecycleStatus(normalized)
-
-
-def _review_metadata_from_issue(issue: IssueRecord) -> StoreReviewMetadata:
-    description = issue.description or ""
-    review = changesets.parse_review_metadata(description)
-    fields = beads.parse_description_fields(description)
-    return _review_metadata(
-        pr_url=review.pr_url,
-        pr_number=review.pr_number,
-        pr_state=review.pr_state,
-        review_owner=review.review_owner,
-        integrated_sha=fields.get("changeset.integrated_sha"),
-    )
 
 
 def _append_issue_notes(description: str | None, *, notes: tuple[str, ...]) -> str:
@@ -1297,7 +1293,7 @@ def epic_changeset_summary(
     *,
     beads_root: Path,
     repo_root: Path,
-) -> beads.ChangesetSummary:
+) -> EpicChangesetSummary:
     """Summarize one epic's changesets using store-backed changeset discovery."""
 
     bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
@@ -1322,7 +1318,7 @@ def epic_changeset_summary(
             merged += 1
         elif review_state is ReviewState.CLOSED:
             abandoned += 1
-    return beads.ChangesetSummary(
+    return EpicChangesetSummary(
         total=len(changesets),
         ready=ready_count,
         merged=merged,

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from .. import beads, lifecycle
+from .. import lifecycle
 from . import store_adapter as worker_store
 
 
@@ -26,7 +26,7 @@ def close_epic_if_complete(
     *,
     beads_root: Path,
     repo_root: Path,
-    confirm: Callable[[beads.ChangesetSummary], bool] | None = None,
+    confirm: Callable[[worker_store.EpicChangesetSummary], bool] | None = None,
     dry_run: bool = False,
     dry_run_log: Callable[[str], None] | None = None,
 ) -> bool:
