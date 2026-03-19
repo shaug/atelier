@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from pathlib import Path
 
 from atelier.store import LifecycleStatus, ReviewMetadata, ReviewState
@@ -6,27 +5,20 @@ from atelier.worker import epic_close
 from atelier.worker import store_adapter as worker_store
 
 
-@dataclass(frozen=True)
-class _Summary:
-    total: int
-    ready: int
-    merged: int
-    abandoned: int
-    remaining: int
-
-    @property
-    def ready_to_close(self) -> bool:
-        return self.total > 0 and self.remaining == 0
-
-
 def test_close_epic_if_complete_uses_typed_store_summary(monkeypatch) -> None:
-    summary = _Summary(total=2, ready=1, merged=1, abandoned=1, remaining=0)
+    summary = worker_store.EpicChangesetSummary(
+        total=2,
+        ready=1,
+        merged=1,
+        abandoned=1,
+        remaining=0,
+    )
     candidate = worker_store.EpicCloseCandidate(
         id="at-epic.1",
         lifecycle=LifecycleStatus.CLOSED,
         review=ReviewMetadata(pr_state=ReviewState.MERGED),
     )
-    confirmations: list[_Summary] = []
+    confirmations: list[worker_store.EpicChangesetSummary] = []
     transitions: list[str] = []
     cleared_hooks: list[str] = []
 
