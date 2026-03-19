@@ -74,10 +74,10 @@ def test_collect_agent_homes_prunes_stale_session_agent_beads_deterministically(
         return agent_id == live_agent
 
     with (
-        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
-        patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command),
+        patch("atelier.gc.agents.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.gc.agents.beads.run_bd_command", side_effect=fake_run_bd_command),
         patch(
-            "atelier.beads.get_agent_hook",
+            "atelier.gc.agents.beads.get_agent_hook",
             side_effect=lambda issue_id, *, beads_root, cwd: {"agent-stale-hook": "epic-1"}.get(
                 issue_id
             ),
@@ -91,7 +91,7 @@ def test_collect_agent_homes_prunes_stale_session_agent_beads_deterministically(
             side_effect=lambda epic, *, beads_root, cwd: calls.append(("release", str(epic["id"]))),
         ),
         patch(
-            "atelier.beads.clear_agent_hook",
+            "atelier.gc.agents.worker_store.clear_agent_hook",
             side_effect=lambda issue_id, **_kwargs: calls.append(("clear", issue_id)),
         ),
         patch(
@@ -147,9 +147,9 @@ def test_collect_agent_homes_scans_all_agent_pages_for_stale_sessions() -> None:
         return []
 
     with (
-        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json) as run_bd_json,
-        patch("atelier.beads.list_epics", return_value=[]),
-        patch("atelier.beads.get_agent_hook", return_value=None),
+        patch("atelier.gc.agents.beads.run_bd_json", side_effect=fake_run_bd_json) as run_bd_json,
+        patch("atelier.gc.agents.beads.list_epics", return_value=[]),
+        patch("atelier.gc.agents.beads.get_agent_hook", return_value=None),
         patch("atelier.agent_home.session_pid_from_agent_id", return_value=1234),
         patch("atelier.agent_home.is_session_agent_active", return_value=False),
     ):

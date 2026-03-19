@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -22,10 +23,27 @@ _BOOTSTRAP_REPO_ROOT = bootstrap_projected_atelier_script(
     require_runtime_health=__name__ == "__main__",
 )
 
-from atelier import beads  # noqa: E402
+from atelier.lib.beads import SubprocessBeadsClient  # noqa: E402
+from atelier.store import (  # noqa: E402
+    AtelierStore,
+    ExternalTicketMetadataRepairResult,
+    RepairExternalTicketMetadataRequest,
+    build_atelier_store,
+)
 
 
-def _render_result(result: beads.ExternalTicketMetadataRepairResult) -> str:
+def _build_store(*, beads_root: Path, repo_root: Path) -> AtelierStore:
+    client = SubprocessBeadsClient(
+        cwd=repo_root,
+        beads_root=beads_root,
+        env={"BEADS_DIR": str(beads_root)},
+    )
+    return build_atelier_store(beads=client)
+
+
+def _render_result(
+    result: ExternalTicketMetadataRepairResult,
+) -> str:
     providers = ",".join(result.providers) if result.providers else "unknown"
     if result.repaired:
         return (
@@ -68,11 +86,15 @@ def main() -> None:
             if os.environ.get("BEADS_DIR")
             else Path.cwd() / ".beads"
         )
-    results = beads.repair_external_ticket_metadata_from_history(
-        beads_root=beads_root,
-        cwd=Path.cwd(),
-        issue_ids=[issue_id for issue_id in args.issue_id if issue_id.strip()] or None,
-        apply=bool(args.apply),
+    repo_root = _BOOTSTRAP_REPO_ROOT if _BOOTSTRAP_REPO_ROOT is not None else Path.cwd()
+    store = _build_store(beads_root=beads_root, repo_root=repo_root)
+    results = asyncio.run(
+        store.repair_external_ticket_metadata(
+            RepairExternalTicketMetadataRequest(
+                issue_ids=tuple(issue_id for issue_id in args.issue_id if issue_id.strip()),
+                apply=bool(args.apply),
+            )
+        )
     )
 
     if not results:

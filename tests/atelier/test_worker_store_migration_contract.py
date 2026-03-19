@@ -237,6 +237,7 @@ def test_worker_startup_and_queue_flows_have_dual_backend_parity(
         beads_root=_BEADS_ROOT,
         repo_root=_REPO_ROOT,
     )
+    assert isinstance(summary, worker_store.EpicChangesetSummary)
     snapshot = {
         "hooked": work_startup_runtime.resolve_hooked_epic(
             "at-agent",
@@ -299,7 +300,7 @@ def test_worker_startup_and_queue_flows_have_dual_backend_parity(
         "ready": ("at-epic.1",),
         "summary": {
             "total": 2,
-            "ready": 0,
+            "ready": 1,
             "remaining": 1,
         },
         "hook_record": {
@@ -307,6 +308,65 @@ def test_worker_startup_and_queue_flows_have_dual_backend_parity(
             "epic_id": "at-epic",
         },
     }
+
+    worker_store.clear_bundle_cache()
+
+
+@pytest.mark.parametrize("backend", _BACKENDS)
+def test_worker_epic_close_summary_uses_typed_standalone_changeset_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    backend: str,
+) -> None:
+    _client, _store = _bind_worker_backend(
+        monkeypatch,
+        backend=backend,
+        issues=(
+            BUILDER.issue(
+                "at-standalone",
+                title="Standalone changeset epic",
+                status="closed",
+                labels=("at:epic", "atelier"),
+                description=(
+                    "pr_url: https://example.invalid/pr/77\n"
+                    "pr_number: 77\n"
+                    "pr_state: merged\n"
+                    "changeset.integrated_sha: abc123\n"
+                ),
+            ),
+        ),
+    )
+
+    candidates = worker_store.list_epic_close_candidates(
+        "at-standalone",
+        beads_root=_BEADS_ROOT,
+        repo_root=_REPO_ROOT,
+        include_closed=True,
+    )
+    summary = worker_store.epic_changeset_summary(
+        "at-standalone",
+        beads_root=_BEADS_ROOT,
+        repo_root=_REPO_ROOT,
+    )
+
+    assert candidates == [
+        worker_store.EpicCloseCandidate(
+            id="at-standalone",
+            lifecycle=worker_store.LifecycleStatus.CLOSED,
+            review=worker_store.StoreReviewMetadata(
+                pr_url="https://example.invalid/pr/77",
+                pr_number=77,
+                pr_state=worker_store.ReviewState.MERGED,
+                integrated_sha="abc123",
+            ),
+        )
+    ]
+    assert summary == worker_store.EpicChangesetSummary(
+        total=1,
+        ready=0,
+        merged=1,
+        abandoned=0,
+        remaining=0,
+    )
 
     worker_store.clear_bundle_cache()
 

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .. import agent_home, beads, changesets, config, git, lifecycle, prs
 from . import changeset_state as worker_changeset_state
+from . import external_ticket_reopen_compat as reopen_compat
 from . import stale_pr_lifecycle
 from . import store_adapter as worker_store
 from .models import FinalizeResult, ReconcileResult
@@ -626,7 +627,13 @@ def reconcile_blocked_merged_changesets(
             issue,
             active_pr_lifecycle=True,
         ):
-            worker_store.mark_issue_in_progress(
+            worker_store.transition_lifecycle(
+                changeset_id,
+                target_status=worker_store.LifecycleStatus.IN_PROGRESS.value,
+                beads_root=beads_root,
+                repo_root=repo_root,
+            )
+            reopen_compat.reconcile_reopened_exported_github_tickets(
                 changeset_id,
                 beads_root=beads_root,
                 repo_root=repo_root,

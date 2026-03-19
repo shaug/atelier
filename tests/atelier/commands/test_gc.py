@@ -40,7 +40,7 @@ def test_gc_reconcile_flag_runs_changeset_reconciliation(_patch_gc_prime) -> Non
             "atelier.commands.gc.config.resolve_beads_root",
             return_value=Path("/beads"),
         ),
-        patch("atelier.beads.run_bd_json", return_value=[]),
+        patch("atelier.commands.gc.beads.run_bd_json", return_value=[]),
         patch("atelier.gc.messages.collect_message_claims", return_value=[]),
         patch("atelier.gc.messages.collect_message_retention", return_value=[]),
         patch(
@@ -98,7 +98,7 @@ def test_gc_reconcile_flag_prompts_and_skips_without_confirmation() -> None:
             "atelier.commands.gc.config.resolve_beads_root",
             return_value=Path("/beads"),
         ),
-        patch("atelier.beads.run_bd_json", return_value=[]),
+        patch("atelier.commands.gc.beads.run_bd_json", return_value=[]),
         patch("atelier.gc.messages.collect_message_claims", return_value=[]),
         patch("atelier.gc.messages.collect_message_retention", return_value=[]),
         patch(
@@ -149,7 +149,7 @@ def test_gc_reconcile_flag_prompts_and_runs_with_confirmation() -> None:
             "atelier.commands.gc.config.resolve_beads_root",
             return_value=Path("/beads"),
         ),
-        patch("atelier.beads.run_bd_json", return_value=[]),
+        patch("atelier.commands.gc.beads.run_bd_json", return_value=[]),
         patch("atelier.gc.messages.collect_message_claims", return_value=[]),
         patch("atelier.gc.messages.collect_message_retention", return_value=[]),
         patch(
@@ -216,7 +216,7 @@ def test_gc_reconcile_flag_no_candidates_skips_prompts() -> None:
             "atelier.commands.gc.config.resolve_beads_root",
             return_value=Path("/beads"),
         ),
-        patch("atelier.beads.run_bd_json", return_value=[]),
+        patch("atelier.commands.gc.beads.run_bd_json", return_value=[]),
         patch("atelier.gc.messages.collect_message_claims", return_value=[]),
         patch("atelier.gc.messages.collect_message_retention", return_value=[]),
         patch(
@@ -280,7 +280,7 @@ def test_gc_orphan_worktree_dirty_prompts_force_or_exit() -> None:
                 "atelier.commands.gc.config.resolve_beads_root",
                 return_value=Path("/beads"),
             ),
-            patch("atelier.beads.run_bd_json", return_value=[]),
+            patch("atelier.commands.gc.beads.run_bd_json", return_value=[]),
             patch("atelier.gc.worktrees.try_show_issue", return_value=None),
             patch("atelier.gc.messages.collect_message_claims", return_value=[]),
             patch("atelier.gc.messages.collect_message_retention", return_value=[]),
@@ -345,7 +345,7 @@ def test_gc_orphan_worktree_dirty_force_remove_calls_force() -> None:
                 "atelier.commands.gc.config.resolve_beads_root",
                 return_value=Path("/beads"),
             ),
-            patch("atelier.beads.run_bd_json", return_value=[]),
+            patch("atelier.commands.gc.beads.run_bd_json", return_value=[]),
             patch("atelier.gc.worktrees.try_show_issue", return_value=None),
             patch("atelier.gc.messages.collect_message_claims", return_value=[]),
             patch("atelier.gc.messages.collect_message_retention", return_value=[]),

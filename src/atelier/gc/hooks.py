@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .. import beads
 from ..lib.beads import build_sync_beads_client
+from ..worker import store_adapter as worker_store
 from .common import log_warning, parse_rfc3339, try_show_issue
 from .models import GcAction
 
@@ -23,10 +24,10 @@ def release_epic(epic: dict[str, object], *, beads_root: Path, cwd: Path) -> Non
         return
     assignee_value = epic.get("assignee")
     expected_assignee = assignee_value if isinstance(assignee_value, str) else ""
-    beads.release_epic_assignment(
+    worker_store.release_epic_assignment(
         epic_id,
         beads_root=beads_root,
-        cwd=cwd,
+        repo_root=cwd,
         expected_assignee=expected_assignee,
         expected_hooked=beads.has_issue_label(_issue_labels(epic), "hooked", beads_root=beads_root),
     )
@@ -137,10 +138,10 @@ def collect_hooks(
         ) -> None:
             if epic_issue:
                 release_epic(epic_issue, beads_root=beads_root, cwd=repo_root)
-            beads.clear_agent_hook(
+            worker_store.clear_agent_hook(
                 agent_bead_id,
                 beads_root=beads_root,
-                cwd=repo_root,
+                repo_root=repo_root,
                 expected_hook=expected_hook,
             )
 
@@ -180,10 +181,10 @@ def collect_hooks(
                 if agent_payload and agent_payload.get("hook_bead") == epic_id_value:
                     agent_issue_id = agent_payload.get("issue_id")
                     if isinstance(agent_issue_id, str) and agent_issue_id:
-                        beads.clear_agent_hook(
+                        worker_store.clear_agent_hook(
                             agent_issue_id,
                             beads_root=beads_root,
-                            cwd=repo_root,
+                            repo_root=repo_root,
                             expected_hook=epic_id_value,
                         )
 
@@ -211,10 +212,10 @@ def collect_hooks(
                 if agent_payload and agent_payload.get("hook_bead") == epic_id_value:
                     agent_issue_id = agent_payload.get("issue_id")
                     if isinstance(agent_issue_id, str) and agent_issue_id:
-                        beads.clear_agent_hook(
+                        worker_store.clear_agent_hook(
                             agent_issue_id,
                             beads_root=beads_root,
-                            cwd=repo_root,
+                            repo_root=repo_root,
                             expected_hook=epic_id_value,
                         )
 
