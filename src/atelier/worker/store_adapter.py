@@ -317,27 +317,6 @@ def list_epic_close_candidates(
     return [_close_candidate_from_changeset(record)]
 
 
-def mark_issue_in_progress(
-    issue_id: str,
-    *,
-    beads_root: Path,
-    repo_root: Path,
-) -> beads.ExternalTicketReconcileResult:
-    """Restore one issue to in-progress using the store lifecycle contract."""
-
-    transition_lifecycle(
-        issue_id,
-        target_status=LifecycleStatus.IN_PROGRESS.value,
-        beads_root=beads_root,
-        repo_root=repo_root,
-    )
-    return beads.reconcile_reopened_issue_exported_github_tickets(
-        issue_id,
-        beads_root=beads_root,
-        cwd=repo_root,
-    )
-
-
 def ready_changesets_global(
     *,
     beads_root: Path,
@@ -1524,7 +1503,6 @@ __all__ = [
     "list_inbox_messages",
     "list_queue_messages",
     "list_work_children",
-    "mark_issue_in_progress",
     "mark_message_read",
     "ready_changesets_global",
     "release_epic_assignment",

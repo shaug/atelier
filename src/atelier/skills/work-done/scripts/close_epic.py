@@ -28,7 +28,7 @@ def close_epic(
     epic_id: str,
     agent_bead_id: str,
     beads_root: Path,
-    cwd: Path,
+    repo_root: Path,
     direct_close: bool,
 ) -> bool:
     """Close an epic and clear the worker hook.
@@ -37,7 +37,7 @@ def close_epic(
         epic_id: Epic bead id to close.
         agent_bead_id: Agent bead id that currently owns the hook.
         beads_root: Beads data directory.
-        cwd: Working directory for `bd` commands.
+        repo_root: Repository root for store and `bd` execution.
         direct_close: When true, skip completion checks and close immediately.
 
     Returns:
@@ -49,14 +49,14 @@ def close_epic(
             epic_id,
             agent_bead_id,
             beads_root=beads_root,
-            repo_root=cwd,
+            repo_root=repo_root,
         )
         return True
     return runtime.close_epic_if_complete(
         epic_id,
         agent_bead_id,
         beads_root=beads_root,
-        repo_root=cwd,
+        repo_root=repo_root,
     )
 
 
@@ -99,11 +99,13 @@ def main() -> None:
         print(f"error: beads dir not found: {beads_root}", file=sys.stderr)
         raise SystemExit(1)
 
+    repo_root = _BOOTSTRAP_REPO_ROOT if _BOOTSTRAP_REPO_ROOT is not None else Path.cwd()
+
     closed = close_epic(
         epic_id=args.epic_id.strip(),
         agent_bead_id=args.agent_bead_id.strip(),
         beads_root=beads_root,
-        cwd=Path.cwd(),
+        repo_root=repo_root,
         direct_close=bool(args.direct_close),
     )
     if not closed:

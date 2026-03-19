@@ -226,50 +226,6 @@ def test_update_changeset_integrated_sha_preserves_existing_review_fields(monkey
     worker_store.clear_bundle_cache()
 
 
-def test_mark_issue_in_progress_transitions_lifecycle_and_reconciles_tickets(monkeypatch) -> None:
-    builder = IssueFixtureBuilder()
-    _patch_bundle(
-        monkeypatch,
-        issues=(
-            builder.issue(
-                "at-epic",
-                issue_type="epic",
-                labels=("at:epic",),
-                children=("at-epic.1",),
-            ),
-            builder.issue(
-                "at-epic.1",
-                issue_type="task",
-                parent="at-epic",
-                status="blocked",
-            ),
-        ),
-    )
-
-    with patch(
-        "atelier.worker.store_adapter.beads.reconcile_reopened_issue_exported_github_tickets"
-    ) as reconcile_tickets:
-        worker_store.mark_issue_in_progress(
-            "at-epic.1",
-            beads_root=Path("/beads"),
-            repo_root=Path("/repo"),
-        )
-
-    refreshed = worker_store.show_issue(
-        "at-epic.1",
-        beads_root=Path("/beads"),
-        repo_root=Path("/repo"),
-    )
-    assert refreshed is not None
-    assert refreshed["status"] == "in_progress"
-    reconcile_tickets.assert_called_once_with(
-        "at-epic.1",
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
-    )
-    worker_store.clear_bundle_cache()
-
-
 def test_transition_lifecycle_updates_changeset_status(monkeypatch) -> None:
     builder = IssueFixtureBuilder()
     _patch_bundle(
