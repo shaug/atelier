@@ -25,6 +25,7 @@ from atelier.lib.beads import (
     UpdateIssueRequest,
 )
 from atelier.lib.beads import description_fields as bead_fields
+from atelier.lib.beads.client import BeadsDescriptionHistory
 
 from .contract import (
     AppendNotesRequest,
@@ -47,7 +48,6 @@ from .contract import (
     UpdateExternalTicketsRequest,
     UpdateReviewRequest,
 )
-from .external_ticket_repair import repair_external_ticket_metadata
 from .models import (
     ChangesetBranches,
     ChangesetRecord,
@@ -191,6 +191,21 @@ def _external_ticket_labels(tickets: tuple[ExternalTicketLink, ...]) -> set[str]
 
 def _issue_external_ticket_labels(issue: IssueRecord) -> set[str]:
     return {label for label in _normalized_labels(issue.labels) if label.startswith("ext:")}
+
+
+async def _recover_external_ticket_links(
+    beads: Beads,
+    issue_id: str,
+) -> tuple[ExternalTicketLink, ...]:
+    if not isinstance(beads, BeadsDescriptionHistory):
+        return ()
+    history = await beads.description_history(issue_id)
+    for old_description, new_description in reversed(history):
+        for description in (new_description, old_description):
+            tickets = bead_fields.parse_external_tickets(description)
+            if tickets:
+                return tuple(ExternalTicketLink.from_external_ref(ticket) for ticket in tickets)
+    return ()
 
 
 def _changeset_branches(issue: IssueRecord) -> ChangesetBranches | None:
@@ -1154,8 +1169,49 @@ class AtelierStore:
             One repair outcome per issue with provider labels but missing
             persisted external ticket metadata.
         """
+        if request.issue_ids:
+            issues_list: list[IssueRecord] = []
+            for issue_id in request.issue_ids:
+                issues_list.append(await self._show_issue(issue_id))
+            issues = tuple(issues_list)
+        else:
+            issues = await self._beads.list(
+                ListIssuesRequest(include_closed=True, limit=self.scan_limit)
+            )
 
-        return await repair_external_ticket_metadata(self, request)
+        results: list[ExternalTicketMetadataRepairResult] = []
+        for issue in issues:
+            providers = tuple(
+                sorted(
+                    label.removeprefix("ext:")
+                    for label in _normalized_labels(issue.labels)
+                    if label.startswith("ext:")
+                )
+            )
+            if not providers:
+                continue
+            if _external_ticket_links(issue):
+                continue
+            recovered_tickets = await _recover_external_ticket_links(self._beads, issue.id)
+            repaired = False
+            if recovered_tickets and request.apply:
+                await self.update_external_tickets(
+                    UpdateExternalTicketsRequest(
+                        issue_id=issue.id,
+                        tickets=recovered_tickets,
+                    )
+                )
+                repaired = True
+            results.append(
+                ExternalTicketMetadataRepairResult(
+                    issue_id=issue.id,
+                    providers=providers,
+                    recovered=bool(recovered_tickets),
+                    repaired=repaired,
+                    ticket_count=len(recovered_tickets),
+                )
+            )
+        return tuple(sorted(results, key=lambda item: item.issue_id))
 
     async def append_notes(
         self,
