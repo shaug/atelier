@@ -299,7 +299,7 @@ def test_worker_startup_and_queue_flows_have_dual_backend_parity(
         "ready": ("at-epic.1",),
         "summary": {
             "total": 2,
-            "ready": 0,
+            "ready": 1,
             "remaining": 1,
         },
         "hook_record": {

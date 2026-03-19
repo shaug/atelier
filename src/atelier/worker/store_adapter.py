@@ -12,7 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import cast
 
-from .. import beads, changeset_fields, lifecycle, messages
+from .. import beads, changeset_fields, changesets, lifecycle, messages
 from ..io import die
 from ..lib.beads import (
     CreateIssueRequest,
@@ -28,6 +28,7 @@ from ..store import (
     AppendNotesRequest,
     AtelierStore,
     ChangesetQuery,
+    ChangesetRecord,
     ClaimMessageRequest,
     ClearAgentBeadHookRequest,
     CreateMessageRequest,
@@ -59,6 +60,15 @@ _AGENT_LABEL_SCAN_LIMIT = 10_000
 class _StoreBundle:
     store: AtelierStore
     sync_client: SyncBeadsProtocol
+
+
+@dataclass(frozen=True)
+class EpicCloseCandidate:
+    """Typed close-readiness view for one descendant changeset candidate."""
+
+    id: str
+    lifecycle: LifecycleStatus
+    review: StoreReviewMetadata
 
 
 def _build_async_beads_client(*, beads_root: Path, repo_root: Path) -> SubprocessBeadsClient:
@@ -124,6 +134,22 @@ def show_issue(
     """Return one raw issue payload for adapter-local compatibility callers."""
 
     return _show_issue(issue_id=issue_id, beads_root=beads_root, repo_root=repo_root)
+
+
+def show_issue_lifecycle(
+    issue_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> LifecycleStatus | None:
+    """Return the canonical lifecycle state for one issue."""
+
+    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    try:
+        issue = bundle.sync_client.show(ShowIssueRequest(issue_id=issue_id))
+    except KeyError:
+        return None
+    return _issue_lifecycle_status(issue)
 
 
 def _store_ids_to_payloads(
@@ -194,6 +220,25 @@ def list_descendant_changesets(
     )
 
 
+def has_work_children(
+    parent_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+    include_closed: bool = False,
+) -> bool:
+    """Return whether a work item has any direct child work items."""
+
+    return bool(
+        list_work_children(
+            parent_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            include_closed=include_closed,
+        )
+    )
+
+
 def list_work_children(
     parent_id: str,
     *,
@@ -216,6 +261,51 @@ def list_work_children(
         for issue in issues
         if lifecycle.is_work_issue(labels=set(issue.labels), issue_type=issue.type)
     ]
+
+
+def _close_candidate_from_changeset(record: ChangesetRecord) -> EpicCloseCandidate:
+    return EpicCloseCandidate(
+        id=record.id,
+        lifecycle=record.lifecycle,
+        review=record.review,
+    )
+
+
+def _close_candidate_from_issue(issue: IssueRecord) -> EpicCloseCandidate:
+    return EpicCloseCandidate(
+        id=issue.id,
+        lifecycle=_issue_lifecycle_status(issue),
+        review=_review_metadata_from_issue(issue),
+    )
+
+
+def list_epic_close_candidates(
+    epic_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+    include_closed: bool = False,
+) -> list[EpicCloseCandidate]:
+    """List typed descendant changeset candidates for epic-close evaluation."""
+
+    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    records = asyncio.run(
+        bundle.store.list_changesets(ChangesetQuery(epic_id=epic_id, include_closed=include_closed))
+    )
+    if records:
+        return [_close_candidate_from_changeset(record) for record in records]
+    if has_work_children(
+        epic_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        include_closed=include_closed,
+    ):
+        return []
+    try:
+        issue = bundle.sync_client.show(ShowIssueRequest(issue_id=epic_id))
+    except KeyError:
+        return []
+    return [_close_candidate_from_issue(issue)]
 
 
 def mark_issue_in_progress(
@@ -465,6 +555,26 @@ def _normalize_status(value: object) -> str | None:
     if normalized is not None:
         return normalized
     return _normalize_text(value)
+
+
+def _issue_lifecycle_status(issue: IssueRecord) -> LifecycleStatus:
+    normalized = _normalize_status(issue.status)
+    if normalized is None:
+        raise ValueError(f"issue {issue.id} is missing a canonical lifecycle status")
+    return LifecycleStatus(normalized)
+
+
+def _review_metadata_from_issue(issue: IssueRecord) -> StoreReviewMetadata:
+    description = issue.description or ""
+    review = changesets.parse_review_metadata(description)
+    fields = beads.parse_description_fields(description)
+    return _review_metadata(
+        pr_url=review.pr_url,
+        pr_number=review.pr_number,
+        pr_state=review.pr_state,
+        review_owner=review.review_owner,
+        integrated_sha=fields.get("changeset.integrated_sha"),
+    )
 
 
 def _append_issue_notes(description: str | None, *, notes: tuple[str, ...]) -> str:
@@ -1190,24 +1300,35 @@ def epic_changeset_summary(
 ) -> beads.ChangesetSummary:
     """Summarize one epic's changesets using store-backed changeset discovery."""
 
-    changesets = list_descendant_changesets(
+    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    ready_count = len(
+        asyncio.run(bundle.store.list_ready_changesets(ReadyChangesetQuery(epic_id=epic_id)))
+    )
+    changesets = list_epic_close_candidates(
         epic_id,
         beads_root=beads_root,
         repo_root=repo_root,
         include_closed=True,
     )
-    if not changesets:
-        work_children = list_work_children(
-            epic_id,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            include_closed=True,
-        )
-        if not work_children:
-            issue = show_issue(epic_id, beads_root=beads_root, repo_root=repo_root)
-            if issue is not None:
-                changesets = [issue]
-    return beads.summarize_changesets(changesets)
+    merged = 0
+    abandoned = 0
+    remaining = 0
+    for changeset in changesets:
+        if changeset.lifecycle is not LifecycleStatus.CLOSED:
+            remaining += 1
+            continue
+        review_state = changeset.review.pr_state
+        if review_state is ReviewState.MERGED:
+            merged += 1
+        elif review_state is ReviewState.CLOSED:
+            abandoned += 1
+    return beads.ChangesetSummary(
+        total=len(changesets),
+        ready=ready_count,
+        merged=merged,
+        abandoned=abandoned,
+        remaining=remaining,
+    )
 
 
 class WorkerStoreBeadsAdapter:
