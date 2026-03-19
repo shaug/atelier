@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -889,3 +891,51 @@ def test_subprocess_client_inspects_startup_state_from_configured_beads_root(
     assert startup.reason == "backend_ready"
     assert startup.diagnostics()[0] == "classification=ready"
     assert "active_issue_total" not in startup.model_dump()
+
+
+def test_subprocess_client_reads_description_history_from_events_db(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    with sqlite3.connect(beads_root / "beads.db") as connection:
+        connection.execute(
+            """
+            CREATE TABLE events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                issue_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                old_value TEXT,
+                new_value TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO events (issue_id, event_type, old_value, new_value)
+            VALUES (?, 'updated', ?, ?)
+            """,
+            (
+                "at-1",
+                json.dumps({"description": "before\n"}),
+                json.dumps({"description": "after\n"}),
+            ),
+        )
+        connection.commit()
+
+    client = SubprocessBeadsClient(
+        transport=RecordingBeadsTransport(),
+        cwd=tmp_path,
+        beads_root=beads_root,
+        env={"BEADS_DIR": str(beads_root)},
+    )
+
+    assert _run(client.description_history("at-1")) == (("before\n", "after\n"),)
+
+
+def test_in_memory_client_exposes_description_history() -> None:
+    builder = IssueFixtureBuilder()
+    client, issue_store = build_in_memory_beads_client(
+        issues=(builder.issue("at-1", title="Change", description="before\n"),)
+    )
+    issue_store.update("at-1", description="after\n")
+
+    assert _run(client.description_history("at-1")) == (("before", "after\n"),)

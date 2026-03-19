@@ -56,4 +56,19 @@ class Beads(Protocol):
     async def remove_dependency(self, request: DependencyMutationRequest) -> IssueRecord: ...
 
 
+@runtime_checkable
+class BeadsDescriptionHistory(Protocol):
+    """Optional capability for reading persisted issue description history.
+
+    This capability stays separate from the core Beads protocol because only
+    concrete local backends can expose durable history without broadening the
+    supported cross-backend command surface.
+    """
+
+    async def description_history(
+        self,
+        issue_id: str,
+    ) -> tuple[tuple[str | None, str | None], ...]: ...
+
+
 AsyncBeadsClient = Beads

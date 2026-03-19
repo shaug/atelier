@@ -113,6 +113,22 @@ class InMemoryBeadsClient(Beads):
     async def inspect_startup_state(self) -> BeadsStartupState:
         return self._startup_state
 
+    async def description_history(
+        self,
+        issue_id: str,
+    ) -> tuple[tuple[str | None, str | None], ...]:
+        """Return recorded description transitions for one issue.
+
+        Args:
+            issue_id: Beads issue identifier to inspect.
+
+        Returns:
+            Chronological `(old_description, new_description)` transitions
+            captured by the in-memory issue store.
+        """
+
+        return self._issue_store.description_history(issue_id)
+
     async def show(self, request: ShowIssueRequest) -> IssueRecord:
         await self._ensure_operation_supported(SupportedOperation.SHOW)
         return IssueRecord.model_validate(self._issue_store.show(request.issue_id))

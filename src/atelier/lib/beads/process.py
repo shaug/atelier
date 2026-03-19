@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sqlite3
 from asyncio.subprocess import PIPE
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -203,6 +204,52 @@ def _is_embedded_backend_panic(detail: str) -> bool:
     return any(marker in normalized for marker in _EMBEDDED_BACKEND_PANIC_MARKERS)
 
 
+def _description_from_event_payload(payload: object) -> str | None:
+    if not isinstance(payload, str) or not payload.strip():
+        return None
+    try:
+        parsed = json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    description = parsed.get("description")
+    return description if isinstance(description, str) else None
+
+
+def _read_description_history(
+    beads_root: Path,
+    issue_id: str,
+) -> tuple[tuple[str | None, str | None], ...]:
+    db_path = beads_root / "beads.db"
+    if not db_path.exists():
+        return ()
+
+    records: list[tuple[str | None, str | None]] = []
+    try:
+        with sqlite3.connect(db_path) as connection:
+            rows = connection.execute(
+                """
+                SELECT old_value, new_value
+                FROM events
+                WHERE issue_id = ?
+                  AND event_type = 'updated'
+                ORDER BY id ASC
+                """,
+                (issue_id,),
+            )
+            for old_value, new_value in rows:
+                records.append(
+                    (
+                        _description_from_event_payload(old_value),
+                        _description_from_event_payload(new_value),
+                    )
+                )
+    except sqlite3.Error:
+        return ()
+    return tuple(records)
+
+
 class SubprocessBeadsClient(Beads):
     def __init__(
         self,
@@ -384,6 +431,26 @@ class SubprocessBeadsClient(Beads):
             reason="startup_state_requires_operator_attention",
             **common_state,
         )
+
+    async def description_history(
+        self,
+        issue_id: str,
+    ) -> tuple[tuple[str | None, str | None], ...]:
+        """Return persisted description transitions for one issue when available.
+
+        Args:
+            issue_id: Beads issue identifier to inspect.
+
+        Returns:
+            Chronological `(old_description, new_description)` transitions. If
+            the configured beads root or history database is unavailable, this
+            returns an empty tuple.
+        """
+
+        beads_root = self._resolve_beads_root()
+        if beads_root is None:
+            return ()
+        return _read_description_history(beads_root, issue_id)
 
     async def show(self, request: ShowIssueRequest) -> IssueRecord:
         await self._ensure_environment_supports(SupportedOperation.SHOW)
