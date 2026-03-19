@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .. import lifecycle
+from . import external_ticket_reopen_compat as reopen_compat
 from . import store_adapter as worker_store
 
 
@@ -58,7 +59,13 @@ def close_epic_if_complete(
         if not _close_transition_has_active_pr_lifecycle(candidate):
             continue
         if not dry_run:
-            worker_store.mark_issue_in_progress(
+            worker_store.transition_lifecycle(
+                candidate.id,
+                target_status=worker_store.LifecycleStatus.IN_PROGRESS.value,
+                beads_root=beads_root,
+                repo_root=repo_root,
+            )
+            reopen_compat.reconcile_reopened_exported_github_tickets(
                 candidate.id,
                 beads_root=beads_root,
                 repo_root=repo_root,

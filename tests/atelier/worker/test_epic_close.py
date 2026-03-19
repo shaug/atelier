@@ -75,7 +75,7 @@ def test_close_epic_if_complete_reopens_active_pr_candidate(monkeypatch) -> None
         lifecycle=LifecycleStatus.CLOSED,
         review=ReviewMetadata(pr_state=ReviewState.PR_OPEN),
     )
-    reopened: list[str] = []
+    events: list[tuple[str, str]] = []
 
     monkeypatch.setattr(
         worker_store,
@@ -94,8 +94,15 @@ def test_close_epic_if_complete_reopens_active_pr_candidate(monkeypatch) -> None
     )
     monkeypatch.setattr(
         worker_store,
-        "mark_issue_in_progress",
-        lambda issue_id, *, beads_root, repo_root: reopened.append(issue_id),
+        "transition_lifecycle",
+        lambda issue_id, *, target_status, beads_root, repo_root: events.append(
+            ("transition", issue_id)
+        ),
+    )
+    monkeypatch.setattr(
+        epic_close.reopen_compat,
+        "reconcile_reopened_exported_github_tickets",
+        lambda issue_id, *, beads_root, repo_root: events.append(("reconcile", issue_id)),
     )
 
     closed = epic_close.close_epic_if_complete(
@@ -106,4 +113,4 @@ def test_close_epic_if_complete_reopens_active_pr_candidate(monkeypatch) -> None
     )
 
     assert closed is False
-    assert reopened == ["at-epic.1"]
+    assert events == [("transition", "at-epic.1"), ("reconcile", "at-epic.1")]
