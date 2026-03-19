@@ -193,6 +193,12 @@ def _pydantic_provenance_sentinel_module(env_var: str) -> str:
     )
 
 
+def _instrument_runtime_env(source: str, prologue: str) -> str:
+    future_import = "from __future__ import annotations\n"
+    assert future_import in source
+    return source.replace(future_import, future_import + prologue, 1)
+
+
 def test_all_projected_skill_scripts_importing_atelier_use_shared_bootstrap() -> None:
     skills_root = _skills_source_root()
     importing_scripts: list[Path] = []
@@ -1087,6 +1093,7 @@ def test_projected_refresh_overview_fails_closed_when_repo_runtime_is_dependency
 def test_projected_close_epic_reorders_repo_src_ahead_of_installed_package(
     tmp_path: Path,
 ) -> None:
+    source_root = _project_repo_root() / "src" / "atelier"
     agent_home, projected_script = _install_projected_script(
         tmp_path,
         skill_name="work-done",
@@ -1096,22 +1103,28 @@ def test_projected_close_epic_reorders_repo_src_ahead_of_installed_package(
         tmp_path,
         sentinel_import="bootstrap_marker",
         extra_modules={
-            "beads.py": (
-                "from pathlib import Path\n"
-                "import os\n"
-                "\n"
-                "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text(__file__, encoding='utf-8')\n"
+            "runtime_env.py": _instrument_runtime_env(
+                (source_root / "runtime_env.py").read_text(encoding="utf-8"),
+                (
+                    "from pathlib import Path\n"
+                    "import os\n"
+                    "\n"
+                    "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text(__file__, encoding='utf-8')\n"
+                ),
             ),
         },
     )
     installed_root = _fake_installed_package(
         tmp_path,
         modules={
-            "beads.py": (
-                "from pathlib import Path\n"
-                "import os\n"
-                "\n"
-                "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text('installed', encoding='utf-8')\n"
+            "runtime_env.py": _instrument_runtime_env(
+                (source_root / "runtime_env.py").read_text(encoding="utf-8"),
+                (
+                    "from pathlib import Path\n"
+                    "import os\n"
+                    "\n"
+                    "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text('installed', encoding='utf-8')\n"
+                ),
             ),
         },
     )
@@ -1137,7 +1150,7 @@ def test_projected_close_epic_reorders_repo_src_ahead_of_installed_package(
 
     assert completed.returncode == 0
     assert sentinel_path.read_text(encoding="utf-8") == str(
-        repo_root / "src" / "atelier" / "beads.py"
+        repo_root / "src" / "atelier" / "runtime_env.py"
     )
 
 
@@ -1153,16 +1166,18 @@ def test_projected_close_epic_preserves_tool_runtime_when_repo_root_is_unresolve
     installed_root = _fake_mixed_runtime_site_packages(
         tmp_path,
         atelier_modules={
-            "runtime_env.py": (source_root / "runtime_env.py").read_text(encoding="utf-8"),
-            "beads.py": (
-                "from pathlib import Path\n"
-                "import os\n"
-                "import rich\n"
-                "\n"
-                "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text(\n"
-                "    rich.__file__ or '',\n"
-                "    encoding='utf-8',\n"
-                ")\n"
+            "runtime_env.py": _instrument_runtime_env(
+                (source_root / "runtime_env.py").read_text(encoding="utf-8"),
+                (
+                    "from pathlib import Path\n"
+                    "import os\n"
+                    "import rich\n"
+                    "\n"
+                    "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text(\n"
+                    "    rich.__file__ or '',\n"
+                    "    encoding='utf-8',\n"
+                    ")\n"
+                ),
             ),
         },
     )
@@ -1202,16 +1217,18 @@ def test_projected_close_epic_preserves_split_tool_runtime_roots_when_repo_root_
     core_runtime_root = _fake_installed_package(
         tmp_path / "core-runtime",
         modules={
-            "runtime_env.py": (source_root / "runtime_env.py").read_text(encoding="utf-8"),
-            "beads.py": (
-                "from pathlib import Path\n"
-                "import os\n"
-                "import rich\n"
-                "\n"
-                "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text(\n"
-                "    rich.__file__ or '',\n"
-                "    encoding='utf-8',\n"
-                ")\n"
+            "runtime_env.py": _instrument_runtime_env(
+                (source_root / "runtime_env.py").read_text(encoding="utf-8"),
+                (
+                    "from pathlib import Path\n"
+                    "import os\n"
+                    "import rich\n"
+                    "\n"
+                    "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text(\n"
+                    "    rich.__file__ or '',\n"
+                    "    encoding='utf-8',\n"
+                    ")\n"
+                ),
             ),
         },
     )

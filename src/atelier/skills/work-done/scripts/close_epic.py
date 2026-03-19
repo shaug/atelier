@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib
 import os
 import sys
 from pathlib import Path
@@ -61,18 +60,6 @@ def close_epic(
     )
 
 
-def _ensure_selected_beads_runtime() -> None:
-    """Import the selected Beads runtime after projected bootstrap.
-
-    Projected skill `--help` exits before the close path imports
-    `atelier.worker.epic_close`, but the bootstrap tests still need one explicit
-    import probe that shows which `atelier.*` runtime won after `sys.path`
-    reordering. Keeping that probe here makes the bootstrap workaround named and
-    localized instead of a hidden module-import side effect.
-    """
-    importlib.import_module("atelier.beads")
-
-
 def _load_epic_close_runtime_for_execution():
     """Load the worker close runtime only for actual close execution.
 
@@ -87,7 +74,6 @@ def _load_epic_close_runtime_for_execution():
 
 
 def main() -> None:
-    _ensure_selected_beads_runtime()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--epic-id", required=True, help="Epic bead id")
     parser.add_argument("--agent-bead-id", required=True, help="Agent bead id")
