@@ -23,6 +23,9 @@ _BOOTSTRAP_REPO_ROOT = bootstrap_projected_atelier_script(
     require_runtime_health=__name__ == "__main__",
 )
 
+# Import after bootstrap so projected `--help` exercises the selected
+# `atelier.beads` runtime path. A normal top-level import would run before the
+# shared bootstrap can reorder `sys.path` toward the repo runtime when present.
 _BEADS_RUNTIME = importlib.import_module("atelier.beads")
 
 
