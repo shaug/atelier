@@ -1124,6 +1124,11 @@ def test_reconcile_blocked_merged_changesets_reports_closed_active_pr_drift() ->
     logs: list[str] = []
     with (
         patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[drift_issue]),
+        patch.object(
+            reconcile.beads,
+            "close_transition_has_active_pr_lifecycle",
+            side_effect=AssertionError("worker reconcile should not use the legacy seam"),
+        ),
         patch("atelier.worker.reconcile.worker_store.transition_lifecycle") as transition_lifecycle,
         patch(
             "atelier.worker.reconcile.worker_store.reconcile_reopened_external_tickets"

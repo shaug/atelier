@@ -12,7 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import cast
 
-from .. import beads, changeset_fields, lifecycle, messages
+from .. import beads, changeset_fields, changesets, lifecycle, messages
 from ..io import die
 from ..lib.beads import (
     CreateIssueRequest,
@@ -168,6 +168,48 @@ def show_issue_lifecycle(
     except KeyError:
         return None
     return _issue_lifecycle_status(issue)
+
+
+def close_transition_has_active_pr_lifecycle(
+    candidate: dict[str, object] | EpicCloseCandidate,
+    *,
+    beads_root: Path | None = None,
+    repo_root: Path | None = None,
+    active_pr_lifecycle: bool | None = None,
+) -> bool:
+    """Return whether worker close/reopen flow must defer to active PR lifecycle."""
+
+    if active_pr_lifecycle is not None:
+        return bool(active_pr_lifecycle)
+
+    if isinstance(candidate, EpicCloseCandidate):
+        lifecycle_status = candidate.lifecycle.value
+        review_state = (
+            candidate.review.pr_state.value if candidate.review.pr_state is not None else None
+        )
+    else:
+        hydrated = candidate
+        description = hydrated.get("description")
+        if not isinstance(description, str) and beads_root is not None and repo_root is not None:
+            issue_id = _normalize_text(hydrated.get("id"))
+            if issue_id is not None:
+                detailed = _show_issue(
+                    issue_id=issue_id,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                )
+                if detailed is not None:
+                    hydrated = detailed
+                    description = detailed.get("description")
+        lifecycle_status = _normalize_status(hydrated.get("status"))
+        review = changesets.parse_review_metadata(
+            description if isinstance(description, str) else ""
+        )
+        review_state = lifecycle.normalize_review_state(review.pr_state)
+
+    if review_state == ReviewState.PUSHED.value:
+        return lifecycle_status == LifecycleStatus.CLOSED.value
+    return lifecycle.is_active_pr_lifecycle_state(review_state)
 
 
 def _store_ids_to_payloads(
@@ -1544,6 +1586,7 @@ __all__ = [
     "claim_queue_message",
     "clear_agent_hook",
     "clear_bundle_cache",
+    "close_transition_has_active_pr_lifecycle",
     "create_message",
     "ensure_agent_bead",
     "epic_changeset_summary",

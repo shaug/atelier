@@ -302,11 +302,16 @@ def test_mark_changeset_merged_reopens_when_pr_lifecycle_is_active(
     )
 
     with _patched_backend(monkeypatch, backend):
-        changeset_state.mark_changeset_merged(
-            "at-1.3",
-            beads_root=beads_root,
-            repo_root=repo_root,
-        )
+        with patch.object(
+            changeset_state.beads,
+            "close_transition_has_active_pr_lifecycle",
+            side_effect=AssertionError("worker close guard should not use the legacy seam"),
+        ):
+            changeset_state.mark_changeset_merged(
+                "at-1.3",
+                beads_root=beads_root,
+                repo_root=repo_root,
+            )
 
     issue = backend.state.show("at-1.3")
     assert issue["status"] == "in_progress"
@@ -328,11 +333,16 @@ def test_mark_changeset_abandoned_reopens_when_pr_lifecycle_is_active(
     )
 
     with _patched_backend(monkeypatch, backend):
-        changeset_state.mark_changeset_abandoned(
-            "at-1.4",
-            beads_root=beads_root,
-            repo_root=repo_root,
-        )
+        with patch.object(
+            changeset_state.beads,
+            "close_transition_has_active_pr_lifecycle",
+            side_effect=AssertionError("worker close guard should not use the legacy seam"),
+        ):
+            changeset_state.mark_changeset_abandoned(
+                "at-1.4",
+                beads_root=beads_root,
+                repo_root=repo_root,
+            )
 
     issue = backend.state.show("at-1.4")
     assert issue["status"] == "in_progress"

@@ -622,8 +622,10 @@ def reconcile_blocked_merged_changesets(
                     f"closed+active-pr-lifecycle({_format_reopen_evidence(drift_evidence)})"
                 )
             continue
-        if beads.close_transition_has_active_pr_lifecycle(
+        if worker_store.close_transition_has_active_pr_lifecycle(
             issue,
+            beads_root=beads_root,
+            repo_root=repo_root,
             active_pr_lifecycle=True,
         ):
             worker_store.transition_lifecycle(
