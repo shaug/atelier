@@ -44,45 +44,6 @@ def test_resolve_project_data_dir_prefers_config() -> None:
     assert config.resolve_project_data_dir(Path("/project"), config_payload) == Path("/custom")
 
 
-def test_default_user_config_sets_runtime_profiles_to_standard() -> None:
-    defaults = config.default_user_config()
-    assert defaults.runtime.planner.profile == "standard"
-    assert defaults.runtime.worker.profile == "standard"
-
-
-def test_merge_project_configs_preserves_user_runtime_profiles() -> None:
-    merged = config.merge_project_configs(
-        config.ProjectSystemConfig(),
-        config.ProjectUserConfig.model_validate(
-            {
-                "runtime": {
-                    "planner": {"profile": "trycycle-bounded"},
-                    "worker": {"profile": "standard"},
-                }
-            }
-        ),
-    )
-    assert merged.runtime.planner.profile == "trycycle-bounded"
-    assert merged.runtime.worker.profile == "standard"
-
-
-def test_user_config_payload_includes_runtime_section() -> None:
-    payload = config.user_config_payload(
-        config.ProjectUserConfig.model_validate(
-            {
-                "runtime": {
-                    "planner": {"profile": "trycycle-bounded"},
-                    "worker": {"profile": "standard"},
-                }
-            }
-        )
-    )
-    assert payload["runtime"] == {
-        "planner": {"profile": "trycycle-bounded"},
-        "worker": {"profile": "standard"},
-    }
-
-
 def test_resolve_beads_root_is_project_scoped() -> None:
     project_dir = Path("/project/.atelier")
     repo_root = Path("/project/repo")

@@ -1573,20 +1573,16 @@ def run_worker_once(
 
         finishstep = control.step("Prepare agent session", timings=timings, trace=trace)
         bounded_runtime_iteration_token = getattr(args, "bounded_runtime_iteration_token", None)
-        bounded_runtime_evidence_path_override = None
-        if run_context.runtime_profile == "trycycle-bounded":
-            iteration_token = (
-                str(bounded_runtime_iteration_token)
-                if isinstance(bounded_runtime_iteration_token, str)
-                and bounded_runtime_iteration_token.strip()
-                else None
-            )
-            bounded_runtime_evidence_path_override = (
-                work_runtime_profile.bounded_runtime_evidence_path(
-                    agent.path,
-                    iteration_token=iteration_token,
-                )
-            )
+        iteration_token = (
+            str(bounded_runtime_iteration_token)
+            if isinstance(bounded_runtime_iteration_token, str)
+            and bounded_runtime_iteration_token.strip()
+            else None
+        )
+        bounded_runtime_evidence_path_override = work_runtime_profile.bounded_runtime_evidence_path(
+            agent.path,
+            iteration_token=iteration_token,
+        )
         agent_prep = None
         try:
             agent_prep = infra.worker_session_agent.prepare_agent_session(
@@ -1603,7 +1599,6 @@ def run_worker_once(
                 yes=bool(getattr(args, "yes", False)),
                 yolo=bool(getattr(args, "yolo", False)),
                 dry_run=dry_run,
-                runtime_profile_override=run_context.runtime_profile,
                 bounded_runtime_evidence_path_override=bounded_runtime_evidence_path_override,
                 session_control=control,
                 command_ops=command_ports,
@@ -1647,11 +1642,7 @@ def run_worker_once(
         project_enlistment = agent_prep.project_enlistment
         workspace_branch = agent_prep.workspace_branch
         env = agent_prep.env
-        if (
-            run_context.runtime_profile == "trycycle-bounded"
-            and bounded_runtime_evidence_path_override is not None
-            and not dry_run
-        ):
+        if not dry_run:
             cleanup_reason = work_runtime_profile.clear_bounded_runtime_evidence(
                 evidence_path=bounded_runtime_evidence_path_override
             )
@@ -1691,7 +1682,6 @@ def run_worker_once(
             epic_id=selected_epic,
             changeset_id=str(changeset_id),
             changeset_title=str(changeset_title),
-            runtime_profile=run_context.runtime_profile,
             merge_conflict=merge_conflict,
             review_feedback=review_feedback,
             review_pr_url=review_pr_url,
@@ -1746,32 +1736,31 @@ def run_worker_once(
                     changeset_id=str(changeset_id) if changeset_id else None,
                 )
             )
-        if run_context.runtime_profile == "trycycle-bounded":
-            evidence_value = env.get("ATELIER_BOUNDED_RUNTIME_EVIDENCE")
-            evidence_path = (
-                Path(evidence_value)
-                if evidence_value
-                else work_runtime_profile.bounded_runtime_evidence_path(agent.path)
+        evidence_value = env.get("ATELIER_BOUNDED_RUNTIME_EVIDENCE")
+        evidence_path = (
+            Path(evidence_value)
+            if evidence_value
+            else work_runtime_profile.bounded_runtime_evidence_path(agent.path)
+        )
+        bounded_reason = work_runtime_profile.verify_bounded_runtime_evidence(
+            evidence_path=evidence_path
+        )
+        if bounded_reason is not None:
+            lifecycle.mark_changeset_blocked(
+                str(changeset_id),
+                beads_root=beads_root,
+                repo_root=repo_root,
+                reason=bounded_reason,
             )
-            bounded_reason = work_runtime_profile.verify_bounded_runtime_evidence(
-                evidence_path=evidence_path
+            finishstep(extra="fail-closed")
+            return finish(
+                WorkerRunSummary(
+                    started=False,
+                    reason="bounded_runtime_convergence_unproven",
+                    epic_id=selected_epic,
+                    changeset_id=str(changeset_id),
+                )
             )
-            if bounded_reason is not None:
-                lifecycle.mark_changeset_blocked(
-                    str(changeset_id),
-                    beads_root=beads_root,
-                    repo_root=repo_root,
-                    reason=bounded_reason,
-                )
-                finishstep(extra="fail-closed")
-                return finish(
-                    WorkerRunSummary(
-                        started=False,
-                        reason="bounded_runtime_convergence_unproven",
-                        epic_id=selected_epic,
-                        changeset_id=str(changeset_id),
-                    )
-                )
         started_at = session_result.started_at
         finishstep(extra=f"exit={session_result.returncode}")
         finishstep = control.step("Finalize changeset", timings=timings, trace=trace)

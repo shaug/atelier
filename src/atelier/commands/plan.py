@@ -20,7 +20,6 @@ from .. import (
     git,
     hooks,
     paths,
-    planner_runtime_profile,
     planner_sync,
     policy,
     prompting,
@@ -42,7 +41,6 @@ def _issue_sort_key(issue: dict[str, object]) -> tuple[str, str]:
 
 
 _PLANNER_SESSION_ID_FIELD = "planner_session.id"
-_PLANNER_RUNTIME_PROFILE_FIELD = "planner_runtime.profile"
 
 _PlannerSessionMode = Literal["resume", "fresh"]
 
@@ -157,11 +155,7 @@ def _run_interactive_agent_command(cmd: list[str], *, cwd: Path | None, env: dic
 
 
 def _planner_opening_prompt(
-    *,
-    project_enlistment: str,
-    planner_branch: str,
-    planner_workspace_uid: str | None,
-    runtime_profile: str,
+    *, project_enlistment: str, planner_branch: str, planner_workspace_uid: str | None
 ) -> str:
     session = workspace.workspace_session_identifier(
         project_enlistment,
@@ -171,7 +165,6 @@ def _planner_opening_prompt(
     return "\n".join(
         [
             session,
-            f"Planner runtime profile: {runtime_profile}",
             "Run `planner-startup-check` before any planning work.",
             ("After startup-check, summarize inbox/queue actions and continue planning in beads."),
         ]
@@ -613,10 +606,6 @@ def run_planner(args: object) -> None:
                     f"{selected_provider}; use per-bead opt-out "
                     f"(`ext:no-export`) to skip."
                 )
-            planner_runtime = planner_runtime_profile.resolve_planner_runtime_profile(
-                project_config,
-                runtime_profile_override=getattr(args, "runtime_profile", None),
-            )
             finish(selected_provider or "none")
             hooks_dir = _planner_hooks_dir(agent.path)
             finish = _step("Install read-only guardrails", timings=timings, trace=trace)
@@ -636,10 +625,6 @@ def run_planner(args: object) -> None:
                     "beads_prefix": config.resolve_beads_prefix(project_config),
                     "planner_worktree": str(worktree_path),
                     "planner_branch": planner_branch,
-                    "planner_runtime_profile": planner_runtime,
-                    "planner_runtime_profile_contract": (
-                        planner_runtime_profile.planner_runtime_profile_contract(planner_runtime)
-                    ),
                     "default_branch": default_branch,
                     "external_providers": external_providers,
                     "external_auto_export_guidance": external_auto_export_guidance,
@@ -708,16 +693,9 @@ def run_planner(args: object) -> None:
             env["BEADS_DIR"] = str(beads_root)
             env["BEADS_DB"] = str(beads_root / "beads.db")
             env["ATELIER_BEADS_PREFIX"] = config.resolve_beads_prefix(project_config)
-            env["ATELIER_PLANNER_RUNTIME_PROFILE"] = planner_runtime
             epic_id = getattr(args, "epic_id", None)
             if epic_id:
                 env["ATELIER_PLAN_EPIC"] = str(epic_id)
-            beads.update_issue_description_fields(
-                agent_bead_id,
-                {_PLANNER_RUNTIME_PROFILE_FIELD: planner_runtime},
-                beads_root=beads_root,
-                cwd=repo_root,
-            )
 
             agent_spec = agents.get_agent(project_config.agent.default)
             if agent_spec is None:
@@ -747,7 +725,6 @@ def run_planner(args: object) -> None:
                 project_enlistment=project_enlistment,
                 planner_branch=planner_branch,
                 planner_workspace_uid=planner_workspace_uid,
-                runtime_profile=planner_runtime,
             )
             try:
                 say(f"Starting {agent_spec.display_name} session")

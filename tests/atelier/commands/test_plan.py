@@ -1,6 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import call, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -64,11 +64,6 @@ def _stub_bd_command(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _stub_prefix_convergence(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(plan_cmd.beads, "ensure_atelier_issue_prefix", lambda *_a, **_k: False)
-
-
-@pytest.fixture(autouse=True)
-def _stub_planner_metadata_updates(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(plan_cmd.beads, "update_issue_description_fields", lambda *_a, **_k: None)
 
 
 def test_trace_flag_defaults_to_disabled_even_when_legacy_env_is_set(
@@ -181,24 +176,16 @@ def test_plan_starts_agent_session(tmp_path: Path) -> None:
         ),
         patch("atelier.commands.plan.say"),
     ):
-        plan_cmd.run_planner(
-            SimpleNamespace(
-                epic_id="atelier-epic",
-                reconcile=True,
-                runtime_profile="trycycle-bounded",
-            )
-        )
+        plan_cmd.run_planner(SimpleNamespace(epic_id="atelier-epic", reconcile=True))
 
     assert calls
     assert steps[0] == "ensure_prefix"
     assert steps[1] == "prime"
     assert calls[0][0] == "prime"
     assert captured_env.get("ATELIER_PLAN_EPIC") == "atelier-epic"
-    assert captured_env.get("ATELIER_PLANNER_RUNTIME_PROFILE") == "trycycle-bounded"
     assert captured_env.get("ATELIER_WORKSPACE") == "main-planner-planner"
     assert captured_cmd
     assert "Run `planner-startup-check` before any planning work." in captured_cmd[-1]
-    assert "Planner runtime profile: trycycle-bounded" in captured_cmd[-1]
     assert captured_cmd[-1].splitlines()[0] == "atelier:/repo:main-planner-planner:planner-planner"
     reconcile.assert_called_once()
     cleanup_home.assert_called_once_with(agent, project_dir=tmp_path)
@@ -774,12 +761,7 @@ def test_plan_resumes_saved_planner_session_by_default(tmp_path: Path) -> None:
 
     assert captured_cmd[-2:] == ["resume", saved]
     assert any("resume sess-saved" in str(call.args[0]) for call in say.call_args_list)
-    update_fields.assert_called_once_with(
-        "at-agent",
-        {plan_cmd._PLANNER_RUNTIME_PROFILE_FIELD: "standard"},
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
-    )
+    update_fields.assert_not_called()
 
 
 def test_plan_stale_saved_session_starts_fresh_and_clears_pointer(tmp_path: Path) -> None:
@@ -851,14 +833,8 @@ def test_plan_stale_saved_session_starts_fresh_and_clears_pointer(tmp_path: Path
 
     assert "resume" not in captured_cmd
     assert any("stale or missing" in str(call.args[0]) for call in say.call_args_list)
-    assert update_fields.call_count == 2
-    assert update_fields.call_args_list[0] == call(
-        "at-agent",
-        {plan_cmd._PLANNER_RUNTIME_PROFILE_FIELD: "standard"},
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
-    )
-    assert update_fields.call_args_list[-1] == call(
+    assert update_fields.call_count == 1
+    update_fields.assert_called_with(
         "at-agent",
         {plan_cmd._PLANNER_SESSION_ID_FIELD: None},
         beads_root=Path("/beads"),
@@ -929,13 +905,7 @@ def test_plan_uses_latest_match_when_saved_pointer_is_absent(tmp_path: Path) -> 
         plan_cmd.run_planner(SimpleNamespace(epic_id=None))
 
     assert captured_cmd[-2:] == ["resume", session_id]
-    assert update_fields.call_args_list[0] == call(
-        "at-agent",
-        {plan_cmd._PLANNER_RUNTIME_PROFILE_FIELD: "standard"},
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
-    )
-    assert update_fields.call_args_list[-1] == call(
+    update_fields.assert_called_once_with(
         "at-agent",
         {plan_cmd._PLANNER_SESSION_ID_FIELD: session_id},
         beads_root=Path("/beads"),
@@ -1071,13 +1041,7 @@ def test_plan_persists_new_session_id_when_available(tmp_path: Path) -> None:
     ):
         plan_cmd.run_planner(SimpleNamespace(epic_id=None))
 
-    assert update_fields.call_args_list[0] == call(
-        "at-agent",
-        {plan_cmd._PLANNER_RUNTIME_PROFILE_FIELD: "standard"},
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
-    )
-    assert update_fields.call_args_list[-1] == call(
+    update_fields.assert_called_once_with(
         "at-agent",
         {plan_cmd._PLANNER_SESSION_ID_FIELD: new_session_id},
         beads_root=Path("/beads"),
@@ -1190,17 +1154,7 @@ def test_plan_template_variables_include_provider_info(tmp_path: Path) -> None:
             "atelier.commands.plan.resolve_current_project_with_repo_root",
             return_value=(
                 Path("/project"),
-                _fake_project_payload().model_copy(
-                    update={
-                        "runtime": _fake_project_payload().runtime.model_copy(
-                            update={
-                                "planner": _fake_project_payload().runtime.planner.model_copy(
-                                    update={"profile": "trycycle-bounded"}
-                                )
-                            }
-                        )
-                    }
-                ),
+                _fake_project_payload(),
                 "/repo",
                 Path("/repo"),
             ),
@@ -1267,71 +1221,8 @@ def test_plan_template_variables_include_provider_info(tmp_path: Path) -> None:
     assert captured["repo_root"] == "/repo"
     assert captured["default_branch"] == "main"
     assert captured["planner_branch"] == "main-planner-planner"
-    assert captured["planner_runtime_profile"] == "trycycle-bounded"
-    assert "test expectations" in captured["planner_runtime_profile_contract"]
     assert captured["external_providers"] == "github"
     assert "disabled" in captured["external_auto_export_guidance"]
-
-
-def test_plan_records_runtime_profile_metadata(tmp_path: Path) -> None:
-    worktree_path = tmp_path / "worktrees" / "planner"
-    agent = AgentHome(
-        name="planner",
-        agent_id="atelier/planner/planner",
-        role="planner",
-        path=Path("/project/agents/planner"),
-    )
-
-    class DummyResult:
-        stdout = ""
-        returncode = 0
-
-    with (
-        patch(
-            "atelier.commands.plan.resolve_current_project_with_repo_root",
-            return_value=(
-                Path("/project"),
-                _fake_project_payload(),
-                "/repo",
-                Path("/repo"),
-            ),
-        ),
-        patch("atelier.commands.plan.config.resolve_project_data_dir", return_value=tmp_path),
-        patch("atelier.commands.plan.config.resolve_beads_root", return_value=Path("/beads")),
-        patch("atelier.commands.plan.agent_home.resolve_agent_home", return_value=agent),
-        patch("atelier.commands.plan.agent_home.cleanup_agent_home"),
-        patch(
-            "atelier.commands.plan.beads.ensure_agent_bead",
-            return_value={"id": "at-agent", "description": ""},
-        ),
-        patch("atelier.commands.plan.beads.run_bd_command", return_value=DummyResult()),
-        patch("atelier.commands.plan.beads.run_bd_json", return_value=[]),
-        patch("atelier.commands.plan.beads.list_inbox_messages", return_value=[]),
-        patch("atelier.commands.plan.beads.list_queue_messages", return_value=[]),
-        patch("atelier.commands.plan.policy.sync_agent_home_policy"),
-        patch("atelier.commands.plan.git.git_default_branch", return_value="main"),
-        patch(
-            "atelier.commands.plan.planner_sync.PlannerSyncService",
-            side_effect=_DummyPlannerSyncService,
-        ),
-        patch(
-            "atelier.commands.plan.planner_sync.PlannerSyncMonitor",
-            side_effect=_DummyPlannerSyncMonitor,
-        ),
-        patch("atelier.commands.plan.worktrees.ensure_git_worktree", return_value=worktree_path),
-        patch(
-            "atelier.commands.plan.codex.run_codex_command",
-            return_value=codex.CodexRunResult(returncode=0, session_id=None, resume_command=None),
-        ),
-        patch("atelier.commands.plan.beads.update_issue_description_fields") as update_fields,
-        patch("atelier.commands.plan.say"),
-    ):
-        plan_cmd.run_planner(SimpleNamespace(epic_id=None, runtime_profile="trycycle-bounded"))
-
-    assert any(
-        call.args[1] == {plan_cmd._PLANNER_RUNTIME_PROFILE_FIELD: "trycycle-bounded"}
-        for call in update_fields.call_args_list
-    )
 
 
 def test_plan_does_not_persist_selected_provider(tmp_path: Path) -> None:

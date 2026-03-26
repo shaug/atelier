@@ -60,20 +60,8 @@ def _build_runner_deps(
     *,
     startup_result: StartupContractResult,
     preview_agent: AgentHome,
-    runtime_profile: str = "standard",
 ) -> WorkerRuntimeDependencies:
     project_config = config.ProjectConfig(project=config.ProjectSection(origin="org/repo"))
-    project_config = project_config.model_copy(
-        update={
-            "runtime": project_config.runtime.model_copy(
-                update={
-                    "worker": project_config.runtime.worker.model_copy(
-                        update={"profile": runtime_profile}
-                    )
-                }
-            )
-        }
-    )
     resolve_project = Mock(return_value=(Path("/project"), project_config, "/repo", Path("/repo")))
     resolve_project_data_dir = Mock(return_value=Path("/project/.atelier"))
     resolve_beads_root = Mock(return_value=Path("/project/.atelier/.beads"))
@@ -1482,15 +1470,22 @@ def test_run_worker_once_finalize_dependency_gate_failure_returns_summary() -> N
             agent_options=[],
             project_enlistment=Path("/repo"),
             workspace_branch="feat/root-at-epic.1",
-            env={},
+            env={"ATELIER_BOUNDED_RUNTIME_EVIDENCE": "/tmp/bounded-p6f.json"},
         )
     )
-    deps.infra.worker_session_agent.start_agent_session = Mock(
-        return_value=SimpleNamespace(
+    evidence_path = Path("/tmp/bounded-p6f.json")
+
+    def start_agent_session(**_kwargs):
+        evidence_path.write_text(
+            '{"status":"converged","helper_session_id":"sess-p6f"}',
+            encoding="utf-8",
+        )
+        return SimpleNamespace(
             started_at=dt.datetime.now(dt.timezone.utc),
             returncode=0,
         )
-    )
+
+    deps.infra.worker_session_agent.start_agent_session = Mock(side_effect=start_agent_session)
     deps.lifecycle.finalize_changeset = Mock(
         side_effect=SystemExit(
             "cannot set changeset at-epic.1 to in_progress: blocking dependencies "
@@ -1559,15 +1554,22 @@ def test_run_worker_once_finalize_non_dependency_gate_failure_reraises() -> None
             agent_options=[],
             project_enlistment=Path("/repo"),
             workspace_branch="feat/root-at-epic.1",
-            env={},
+            env={"ATELIER_BOUNDED_RUNTIME_EVIDENCE": "/tmp/bounded-p6f1.json"},
         )
     )
-    deps.infra.worker_session_agent.start_agent_session = Mock(
-        return_value=SimpleNamespace(
+    evidence_path = Path("/tmp/bounded-p6f1.json")
+
+    def start_agent_session(**_kwargs):
+        evidence_path.write_text(
+            '{"status":"converged","helper_session_id":"sess-p6f1"}',
+            encoding="utf-8",
+        )
+        return SimpleNamespace(
             started_at=dt.datetime.now(dt.timezone.utc),
             returncode=0,
         )
-    )
+
+    deps.infra.worker_session_agent.start_agent_session = Mock(side_effect=start_agent_session)
     deps.lifecycle.finalize_changeset = Mock(
         side_effect=SystemExit("failed to persist finalize completion metadata")
     )
@@ -1625,15 +1627,22 @@ def test_run_worker_once_continues_after_review_pending_finalize() -> None:
             agent_options=[],
             project_enlistment=Path("/repo"),
             workspace_branch="feat/root",
-            env={},
+            env={"ATELIER_BOUNDED_RUNTIME_EVIDENCE": "/tmp/bounded-p7.json"},
         )
     )
-    deps.infra.worker_session_agent.start_agent_session = Mock(
-        return_value=SimpleNamespace(
+    evidence_path = Path("/tmp/bounded-p7.json")
+
+    def start_agent_session(**_kwargs):
+        evidence_path.write_text(
+            '{"status":"converged","helper_session_id":"sess-p7"}',
+            encoding="utf-8",
+        )
+        return SimpleNamespace(
             started_at=dt.datetime.now(dt.timezone.utc),
             returncode=0,
         )
-    )
+
+    deps.infra.worker_session_agent.start_agent_session = Mock(side_effect=start_agent_session)
     deps.lifecycle.finalize_changeset = lambda **_kwargs: FinalizeResult(
         continue_running=True,
         reason="changeset_review_pending",
@@ -1688,15 +1697,22 @@ def test_run_worker_once_passes_opening_prompt_to_non_codex_agents() -> None:
             agent_options=[],
             project_enlistment=Path("/repo"),
             workspace_branch="feat/root",
-            env={},
+            env={"ATELIER_BOUNDED_RUNTIME_EVIDENCE": "/tmp/bounded-p8.json"},
         )
     )
-    deps.infra.worker_session_agent.start_agent_session = Mock(
-        return_value=SimpleNamespace(
+    evidence_path = Path("/tmp/bounded-p8.json")
+
+    def start_agent_session(**_kwargs):
+        evidence_path.write_text(
+            '{"status":"converged","helper_session_id":"sess-p8"}',
+            encoding="utf-8",
+        )
+        return SimpleNamespace(
             started_at=dt.datetime.now(dt.timezone.utc),
             returncode=0,
         )
-    )
+
+    deps.infra.worker_session_agent.start_agent_session = Mock(side_effect=start_agent_session)
     deps.lifecycle.finalize_changeset = lambda **_kwargs: FinalizeResult(
         continue_running=True,
         reason="changeset_review_pending",
@@ -1735,7 +1751,6 @@ def test_run_worker_once_fails_closed_when_bounded_runtime_evidence_is_missing()
             reason="selected_auto",
         ),
         preview_agent=agent,
-        runtime_profile="trycycle-bounded",
     )
     deps.lifecycle.next_changeset = lambda **_kwargs: {"id": "at-epic.1", "title": "Changeset"}
     deps.infra.beads.run_bd_json = Mock(
@@ -1759,7 +1774,6 @@ def test_run_worker_once_fails_closed_when_bounded_runtime_evidence_is_missing()
             project_enlistment=Path("/repo"),
             workspace_branch="feat/root-at-epic.1",
             env={
-                "ATELIER_WORKER_RUNTIME_PROFILE": "trycycle-bounded",
                 "ATELIER_BOUNDED_RUNTIME_EVIDENCE": "/tmp/missing-evidence.json",
             },
         )
@@ -1772,12 +1786,7 @@ def test_run_worker_once_fails_closed_when_bounded_runtime_evidence_is_missing()
 
     summary = runner.run_worker_once(
         SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
-        run_context=WorkerRunContext(
-            mode="auto",
-            dry_run=False,
-            session_key="p-bounded-missing",
-            runtime_profile="trycycle-bounded",
-        ),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p-bounded-missing"),
         deps=deps,
     )
 
@@ -1805,7 +1814,6 @@ def test_run_worker_once_allows_bounded_runtime_with_valid_evidence(tmp_path: Pa
             reason="selected_auto",
         ),
         preview_agent=agent,
-        runtime_profile="trycycle-bounded",
     )
     deps.lifecycle.next_changeset = lambda **_kwargs: {"id": "at-epic.1", "title": "Changeset"}
     deps.infra.beads.run_bd_json = Mock(
@@ -1829,7 +1837,6 @@ def test_run_worker_once_allows_bounded_runtime_with_valid_evidence(tmp_path: Pa
             project_enlistment=Path("/repo"),
             workspace_branch="feat/root-at-epic.1",
             env={
-                "ATELIER_WORKER_RUNTIME_PROFILE": "trycycle-bounded",
                 "ATELIER_BOUNDED_RUNTIME_EVIDENCE": str(
                     kwargs["bounded_runtime_evidence_path_override"]
                 ),
@@ -1852,12 +1859,7 @@ def test_run_worker_once_allows_bounded_runtime_with_valid_evidence(tmp_path: Pa
 
     summary = runner.run_worker_once(
         SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
-        run_context=WorkerRunContext(
-            mode="auto",
-            dry_run=False,
-            session_key="p-bounded-ok",
-            runtime_profile="trycycle-bounded",
-        ),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p-bounded-ok"),
         deps=deps,
     )
 
@@ -1893,7 +1895,6 @@ def test_run_worker_once_fails_closed_when_bounded_runtime_evidence_cleanup_fail
             reason="selected_auto",
         ),
         preview_agent=agent,
-        runtime_profile="trycycle-bounded",
     )
     deps.lifecycle.next_changeset = lambda **_kwargs: {"id": "at-epic.1", "title": "Changeset"}
     deps.infra.beads.run_bd_json = Mock(
@@ -1917,7 +1918,6 @@ def test_run_worker_once_fails_closed_when_bounded_runtime_evidence_cleanup_fail
             project_enlistment=Path("/repo"),
             workspace_branch="feat/root-at-epic.1",
             env={
-                "ATELIER_WORKER_RUNTIME_PROFILE": "trycycle-bounded",
                 "ATELIER_BOUNDED_RUNTIME_EVIDENCE": str(
                     kwargs["bounded_runtime_evidence_path_override"]
                 ),
@@ -1935,10 +1935,7 @@ def test_run_worker_once_fails_closed_when_bounded_runtime_evidence_cleanup_fail
         summary = runner.run_worker_once(
             SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
             run_context=WorkerRunContext(
-                mode="auto",
-                dry_run=False,
-                session_key="p-bounded-cleanup",
-                runtime_profile="trycycle-bounded",
+                mode="auto", dry_run=False, session_key="p-bounded-cleanup"
             ),
             deps=deps,
         )
@@ -1953,105 +1950,6 @@ def test_run_worker_once_fails_closed_when_bounded_runtime_evidence_cleanup_fail
     )
     deps.infra.worker_session_agent.start_agent_session.assert_not_called()
     deps.lifecycle.finalize_changeset.assert_not_called()
-
-
-@pytest.mark.parametrize("runtime_profile", ["standard", "trycycle-bounded"])
-def test_run_worker_once_standard_and_bounded_profiles_preserve_same_end_state(
-    tmp_path: Path, runtime_profile: str
-) -> None:
-    agent = AgentHome(
-        name="worker",
-        agent_id=f"atelier/worker/codex/p-parity-{runtime_profile}",
-        role="worker",
-        path=tmp_path / f"agent-home-{runtime_profile}",
-        session_key=f"p-parity-{runtime_profile}",
-    )
-    agent.path.mkdir()
-    evidence_path = agent.path / "bounded-runtime-evidence.json"
-    deps = _build_runner_deps(
-        startup_result=StartupContractResult(
-            epic_id="at-epic",
-            changeset_id=None,
-            should_exit=False,
-            reason="selected_auto",
-        ),
-        preview_agent=agent,
-        runtime_profile=runtime_profile,
-    )
-    deps.lifecycle.next_changeset = lambda **_kwargs: {"id": "at-epic.1", "title": "Changeset"}
-    deps.infra.beads.run_bd_json = Mock(
-        side_effect=lambda args, **_kwargs: (
-            [{"id": "at-epic.1", "title": "Changeset", "description": ""}]
-            if args[:2] == ["show", "at-epic.1"]
-            else []
-        )
-    )
-    deps.infra.worker_session_worktree.prepare_worktrees = Mock(
-        return_value=SimpleNamespace(
-            epic_worktree_path=Path("/tmp/epic"),
-            changeset_worktree_path=Path("/tmp/changeset"),
-            branch="feat/root-at-epic.1",
-        )
-    )
-    deps.infra.worker_session_agent.prepare_agent_session = Mock(
-        side_effect=lambda **kwargs: SimpleNamespace(
-            agent_spec=SimpleNamespace(name="codex", display_name="Codex"),
-            agent_options=[],
-            project_enlistment=Path("/repo"),
-            workspace_branch="feat/root-at-epic.1",
-            env=(
-                {
-                    "ATELIER_WORKER_RUNTIME_PROFILE": "trycycle-bounded",
-                    "ATELIER_BOUNDED_RUNTIME_EVIDENCE": str(
-                        kwargs["bounded_runtime_evidence_path_override"]
-                    ),
-                }
-                if runtime_profile == "trycycle-bounded"
-                else {"ATELIER_WORKER_RUNTIME_PROFILE": "standard"}
-            ),
-        )
-    )
-
-    def start_agent_session(**_kwargs):
-        if runtime_profile == "trycycle-bounded":
-            evidence_path.write_text(
-                '{"status":"converged","helper_session_id":"sess-parity"}',
-                encoding="utf-8",
-            )
-        return SimpleNamespace(started_at=dt.datetime.now(dt.timezone.utc), returncode=0)
-
-    deps.infra.worker_session_agent.start_agent_session = Mock(side_effect=start_agent_session)
-    deps.lifecycle.finalize_changeset = Mock(
-        return_value=FinalizeResult(continue_running=True, reason="changeset_review_pending")
-    )
-    deps.lifecycle.mark_changeset_blocked = Mock()
-
-    summary = runner.run_worker_once(
-        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
-        run_context=WorkerRunContext(
-            mode="auto",
-            dry_run=False,
-            session_key=f"p-parity-{runtime_profile}",
-            runtime_profile=runtime_profile,
-        ),
-        deps=deps,
-    )
-
-    assert summary.started is True
-    assert summary.reason == "agent_session_complete"
-    deps.lifecycle.mark_changeset_blocked.assert_not_called()
-    deps.lifecycle.finalize_changeset.assert_called_once()
-    finalize_kwargs = deps.lifecycle.finalize_changeset.call_args.kwargs
-    assert finalize_kwargs["changeset_id"] == "at-epic.1"
-    assert finalize_kwargs["epic_id"] == "at-epic"
-    assert finalize_kwargs["project_data_dir"] == Path("/project/.atelier")
-    assert finalize_kwargs["repo_root"] == Path("/repo")
-    prepare_kwargs = deps.infra.worker_session_agent.prepare_agent_session.call_args.kwargs
-    assert prepare_kwargs["runtime_profile_override"] == runtime_profile
-    if runtime_profile == "trycycle-bounded":
-        assert prepare_kwargs["bounded_runtime_evidence_path_override"] == evidence_path
-    else:
-        assert prepare_kwargs["bounded_runtime_evidence_path_override"] is None
 
 
 def test_run_worker_once_skips_redundant_mark_in_progress_for_in_progress_changeset() -> None:
@@ -2098,15 +1996,22 @@ def test_run_worker_once_skips_redundant_mark_in_progress_for_in_progress_change
             agent_options=[],
             project_enlistment=Path("/repo"),
             workspace_branch="feat/root",
-            env={},
+            env={"ATELIER_BOUNDED_RUNTIME_EVIDENCE": "/tmp/bounded-p9.json"},
         )
     )
-    deps.infra.worker_session_agent.start_agent_session = Mock(
-        return_value=SimpleNamespace(
+    evidence_path = Path("/tmp/bounded-p9.json")
+
+    def start_agent_session(**_kwargs):
+        evidence_path.write_text(
+            '{"status":"converged","helper_session_id":"sess-p9"}',
+            encoding="utf-8",
+        )
+        return SimpleNamespace(
             started_at=dt.datetime.now(dt.timezone.utc),
             returncode=0,
         )
-    )
+
+    deps.infra.worker_session_agent.start_agent_session = Mock(side_effect=start_agent_session)
     deps.lifecycle.finalize_changeset = lambda **_kwargs: FinalizeResult(
         continue_running=False,
         reason="done",
@@ -2187,15 +2092,22 @@ def test_run_worker_once_loads_worker_thread_messages_before_agent_start() -> No
             agent_options=[],
             project_enlistment=Path("/repo"),
             workspace_branch="feat/root",
-            env={},
+            env={"ATELIER_BOUNDED_RUNTIME_EVIDENCE": "/tmp/bounded-p-thread.json"},
         )
     )
-    deps.infra.worker_session_agent.start_agent_session = Mock(
-        return_value=SimpleNamespace(
+    evidence_path = Path("/tmp/bounded-p-thread.json")
+
+    def start_agent_session(**_kwargs):
+        evidence_path.write_text(
+            '{"status":"converged","helper_session_id":"sess-p-thread"}',
+            encoding="utf-8",
+        )
+        return SimpleNamespace(
             started_at=dt.datetime.now(dt.timezone.utc),
             returncode=0,
         )
-    )
+
+    deps.infra.worker_session_agent.start_agent_session = Mock(side_effect=start_agent_session)
     deps.lifecycle.finalize_changeset = lambda **_kwargs: FinalizeResult(
         continue_running=True,
         reason="changeset_review_pending",
@@ -2278,15 +2190,22 @@ def test_run_worker_once_followup_dependency_gate_skip_is_non_blocking() -> None
                 agent_options=[],
                 project_enlistment=Path("/repo"),
                 workspace_branch="feat/root",
-                env={},
+                env={"ATELIER_BOUNDED_RUNTIME_EVIDENCE": f"/tmp/bounded-p9b-{startup_reason}.json"},
             )
         )
-        deps.infra.worker_session_agent.start_agent_session = Mock(
-            return_value=SimpleNamespace(
+        evidence_path = Path(f"/tmp/bounded-p9b-{startup_reason}.json")
+
+        def start_agent_session(**_kwargs):
+            evidence_path.write_text(
+                '{"status":"converged","helper_session_id":"sess-p9b"}',
+                encoding="utf-8",
+            )
+            return SimpleNamespace(
                 started_at=dt.datetime.now(dt.timezone.utc),
                 returncode=0,
             )
-        )
+
+        deps.infra.worker_session_agent.start_agent_session = Mock(side_effect=start_agent_session)
         deps.lifecycle.finalize_changeset = lambda **_kwargs: FinalizeResult(
             continue_running=False,
             reason="done",

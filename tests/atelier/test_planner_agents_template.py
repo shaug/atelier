@@ -60,5 +60,3 @@ def test_planner_agents_template_contains_core_sections() -> None:
     assert "concrete issue, create or update a deferred bead immediately" in content
     assert "Create or update deferred beads immediately" in content
     assert "Capture first, then ask only for decisions" in content
-    assert "Selected planner runtime profile: {{ planner_runtime_profile }}" in content
-    assert "{{ planner_runtime_profile_contract }}" in content

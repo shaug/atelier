@@ -54,8 +54,6 @@ class TestConfigCommand:
                 assert updated.branch.prefix == "team/"
                 assert updated.branch.pr is False
                 assert updated.branch.history == "rebase"
-                assert updated.runtime.planner.profile == "standard"
-                assert updated.runtime.worker.profile == "standard"
                 assert updated.editor.edit == ["vim", "-w"]
                 assert updated.editor.work == ["vim"]
             finally:
@@ -241,10 +239,6 @@ class TestConfigCommand:
                 with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
                     installed_path = paths.installed_config_path()
                 stored = json.loads(installed_path.read_text(encoding="utf-8"))
-                assert stored["runtime"] == {
-                    "planner": {"profile": "standard"},
-                    "worker": {"profile": "standard"},
-                }
                 assert stored["branch"]["prefix"] == "prefs/"
                 assert stored["branch"]["pr_mode"] == "draft"
                 assert stored["branch"]["history"] == "merge"
@@ -304,8 +298,6 @@ class TestConfigCommand:
                 )
                 assert user_config is not None
                 assert user_config.branch.prefix == "edited/"
-                assert user_config.runtime.planner.profile == "standard"
-                assert user_config.runtime.worker.profile == "standard"
                 assert user_config.branch.pr is False
                 assert user_config.branch.history == "merge"
                 assert user_config.editor.edit == ["nano", "-w"]

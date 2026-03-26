@@ -89,20 +89,6 @@ Atelier splits configuration into two JSON files at the project level:
 - `config.user.json` (user-managed): branch prefix, agent/editor configuration,
   and per-project preferences.
 
-Runtime profiles:
-
-- `runtime.planner.profile` and `runtime.worker.profile` live in
-  `config.user.json`.
-- Both roles default to `standard`.
-- `atelier plan --runtime-profile ...` and `atelier work --runtime-profile ...`
-  override the corresponding configured role for that invocation only.
-- `trycycle-bounded` is an Atelier-owned bounded contract, not a dependency on a
-  separate local trycycle install.
-- Planner bounded mode makes the selected profile explicit in planner prompts,
-  planner `AGENTS.md`, and planner session metadata.
-- Worker bounded mode keeps helper-session orchestration internal to the worker
-  session and fails closed when convergence evidence is missing or incomplete.
-
 Editor roles:
 
 - `editor.edit` for blocking edits.
@@ -161,9 +147,6 @@ Atelier planning state. They are treated as external ticket sources.
   - Suggests and validates a `workspace.root_branch` value.
   - Resumes prior planner sessions by default; `--new-session` forces a fresh
     planner run.
-  - Supports planner runtime-profile overrides via `--runtime-profile`; the
-    selected profile is rendered into planner startup context and persisted in
-    planner agent-bead metadata.
   - Installs a read-only guardrail hook for planner worktrees and warns on dirty
     working trees.
   - Runs deterministic planner teardown on exit: release owned hook/claim state
@@ -183,10 +166,6 @@ Atelier planning state. They are treated as external ticket sources.
   - Selects or claims an epic and its next ready changeset.
   - Ensures the epic worktree exists.
   - Creates/records the changeset branch mapping.
-  - Supports worker runtime-profile overrides via `--runtime-profile`.
-  - Bounded worker runs expose the selected profile in worker `AGENTS.md`,
-    worker prompts, and worker launch env, then require explicit convergence
-    evidence before finalize.
   - Uses `--run-mode` to decide whether to run once, loop while work is ready,
     or watch for new work.
   - Runs deterministic worker teardown on exit: release owned hook/claim state

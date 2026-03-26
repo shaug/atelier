@@ -21,7 +21,6 @@ class WorkerProjectContext:
     git_path: str | None
     project_config: config.ProjectConfig
     repo_slug: str | None
-    runtime_profile: str = "standard"
 
 
 @dataclass(frozen=True)
@@ -31,7 +30,6 @@ class WorkerRunContext:
     mode: str
     dry_run: bool
     session_key: str
-    runtime_profile: str = "standard"
 
 
 @dataclass(frozen=True)

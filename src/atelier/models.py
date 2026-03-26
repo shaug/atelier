@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from . import agents, runtime_profiles
+from . import agents
 
 BRANCH_HISTORY_VALUES = ("manual", "squash", "merge", "rebase")
 BranchHistory = Literal["manual", "squash", "merge", "rebase"]
@@ -151,38 +151,6 @@ class WorkerConfig(BaseModel):
         if normalized in WORKER_SELECT_VALUES:
             return normalized
         raise ValueError("select must be one of: " + ", ".join(WORKER_SELECT_VALUES))
-
-
-class RuntimeRoleConfig(BaseModel):
-    """Role-scoped runtime profile selection."""
-
-    model_config = ConfigDict(extra="allow")
-
-    profile: runtime_profiles.RuntimeProfileName = "standard"
-
-    @field_validator("profile", mode="before")
-    @classmethod
-    def normalize_profile(cls, value: object) -> object:
-        if value is None:
-            return "standard"
-        if isinstance(value, str):
-            normalized = value.strip().lower().replace("_", "-")
-            if not normalized:
-                return "standard"
-            if normalized in runtime_profiles.RUNTIME_PROFILE_VALUES:
-                return normalized
-        raise ValueError(
-            "runtime profile must be one of: " + ", ".join(runtime_profiles.RUNTIME_PROFILE_VALUES)
-        )
-
-
-class RuntimeConfig(BaseModel):
-    """User-managed runtime profile selections."""
-
-    model_config = ConfigDict(extra="allow")
-
-    planner: RuntimeRoleConfig = Field(default_factory=RuntimeRoleConfig)
-    worker: RuntimeRoleConfig = Field(default_factory=RuntimeRoleConfig)
 
 
 class GitSection(BaseModel):
@@ -659,7 +627,6 @@ class ProjectConfig(BaseModel):
     git: GitSection = Field(default_factory=GitSection)
     branch: BranchConfig = Field(default_factory=BranchConfig)
     worker: WorkerConfig = Field(default_factory=WorkerConfig)
-    runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     editor: EditorConfig = Field(default_factory=EditorConfig)
     beads: BeadsSection = Field(default_factory=BeadsSection)
@@ -685,7 +652,6 @@ class ProjectUserConfig(BaseModel):
     git: GitSection = Field(default_factory=GitSection)
     branch: BranchConfig = Field(default_factory=BranchConfig)
     worker: WorkerConfig = Field(default_factory=WorkerConfig)
-    runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     editor: EditorConfig = Field(default_factory=EditorConfig)
     atelier: AtelierUserSection = Field(default_factory=AtelierUserSection)

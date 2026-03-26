@@ -63,9 +63,8 @@ def test_worker_opening_prompt_surfaces_bounded_runtime_contract() -> None:
         epic_id="at-epic",
         changeset_id="at-epic.1",
         changeset_title="Update worker prompt text",
-        runtime_profile="trycycle-bounded",
     )
 
-    assert "Worker runtime profile: trycycle-bounded" in prompt
-    assert "emit convergence evidence before finalize" in prompt
+    assert "Bounded correctness contract:" in prompt
+    assert "emit convergence evidence" in prompt
     assert "fail closed instead of finalizing" in prompt

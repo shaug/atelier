@@ -38,10 +38,8 @@ from .models import (
     ProjectSection,
     ProjectSystemConfig,
     ProjectUserConfig,
-    RuntimeConfig,
     UpgradePolicy,
 )
-from .runtime_profiles import normalize_runtime_profile
 
 DEFAULT_BEADS_PREFIX = "at"
 _BEADS_PREFIX_PATTERN = re.compile(r"^[a-z][a-z0-9]{0,15}$")
@@ -122,7 +120,7 @@ def _backup_legacy_config(path: Path) -> None:
 
 def _split_project_payload(payload: dict) -> tuple[dict, dict]:
     user_payload: dict = {}
-    for key in ("branch", "worker", "runtime", "agent", "editor", "git"):
+    for key in ("branch", "worker", "agent", "editor", "git"):
         if key in payload:
             user_payload[key] = payload.get(key)
     project_payload = payload.get("project")
@@ -138,7 +136,7 @@ def _split_project_payload(payload: dict) -> tuple[dict, dict]:
     if "atelier" in payload and "upgrade" in payload.get("atelier", {}):
         user_payload["atelier"] = {"upgrade": upgrade}
     system_payload = dict(payload)
-    for key in ("branch", "worker", "runtime", "agent", "editor", "git"):
+    for key in ("branch", "worker", "agent", "editor", "git"):
         system_payload.pop(key, None)
     project_system = dict(system_payload.get("project", {}) or {})
     for key in ("provider", "provider_url", "owner"):
@@ -227,7 +225,7 @@ def merge_project_configs(
     system_payload = system_config.model_dump()
     user_payload = (user_config or ProjectUserConfig()).model_dump()
     merged = dict(system_payload)
-    for key in ("branch", "worker", "runtime", "agent", "editor", "git"):
+    for key in ("branch", "worker", "agent", "editor", "git"):
         merged[key] = user_payload.get(key, {})
     system_project = system_payload.get("project", {}) if system_payload else {}
     user_project = user_payload.get("project", {}) if user_payload else {}
@@ -766,7 +764,6 @@ def user_config_payload(config: ProjectConfig | ProjectUserConfig) -> dict:
         git_config = config.git
         branch = config.branch
         worker = config.worker
-        runtime = config.runtime
         agent = config.agent
         editor_config = config.editor
         upgrade = config.atelier.upgrade
@@ -775,7 +772,6 @@ def user_config_payload(config: ProjectConfig | ProjectUserConfig) -> dict:
         git_config = config.git
         branch = config.branch
         worker = config.worker
-        runtime = config.runtime
         agent = config.agent
         editor_config = config.editor
         upgrade = config.atelier.upgrade
@@ -787,7 +783,6 @@ def user_config_payload(config: ProjectConfig | ProjectUserConfig) -> dict:
     payload = {
         "branch": branch.model_dump(),
         "worker": worker.model_dump(),
-        "runtime": runtime.model_dump(),
         "git": git_config.model_dump(),
         "agent": agent.model_dump(),
         "editor": editor_config.model_dump(),
@@ -908,7 +903,6 @@ def default_user_config() -> ProjectUserConfig:
         update={
             "git": base.git,
             "branch": base.branch,
-            "runtime": base.runtime,
             "agent": AgentConfig(
                 default=agents.DEFAULT_AGENT,
                 options=agent_options,
@@ -961,14 +955,6 @@ def load_installed_defaults(path: Path | None = None) -> ProjectConfig:
     if not _path_has_value(payload, "git", "path"):
         git_config = git_config.model_copy(update={"path": default_config.git.path})
 
-    runtime_config = parsed.runtime
-    if not _path_has_value(payload, "runtime", "planner", "profile"):
-        runtime_config = runtime_config.model_copy(
-            update={"planner": default_config.runtime.planner}
-        )
-    if not _path_has_value(payload, "runtime", "worker", "profile"):
-        runtime_config = runtime_config.model_copy(update={"worker": default_config.runtime.worker})
-
     atelier_section = parsed.atelier
     if not _path_has_value(payload, "atelier", "upgrade"):
         atelier_section = atelier_section.model_copy(
@@ -981,7 +967,6 @@ def load_installed_defaults(path: Path | None = None) -> ProjectConfig:
             "agent": agent,
             "editor": editor_config,
             "git": git_config,
-            "runtime": runtime_config,
             "atelier": atelier_section,
         }
     )
@@ -1095,9 +1080,6 @@ def build_project_config(
     branch_pr_mode_default = branch_config.pr_mode
     branch_history_default = branch_config.history
     branch_squash_message_default = branch_config.squash_message
-    runtime_config = existing_config.runtime
-    planner_runtime_default = runtime_config.planner.profile
-    worker_runtime_default = runtime_config.worker.profile
 
     branch_pr_mode_arg = read_arg(args, "branch_pr_mode")
     if branch_pr_mode_arg is None:
@@ -1137,25 +1119,6 @@ def build_project_config(
             die("branch.squash_message must be one of: " + ", ".join(BRANCH_SQUASH_MESSAGE_VALUES))
     else:
         branch_squash_message = branch_squash_message_default
-
-    planner_runtime_arg = read_arg(args, "planner_runtime_profile")
-    if planner_runtime_arg is None:
-        runtime_profile_arg = read_arg(args, "runtime_profile")
-        if runtime_profile_arg is not None:
-            planner_runtime_arg = runtime_profile_arg
-    worker_runtime_arg = read_arg(args, "worker_runtime_profile")
-    if worker_runtime_arg is None:
-        runtime_profile_arg = read_arg(args, "runtime_profile")
-        if runtime_profile_arg is not None:
-            worker_runtime_arg = runtime_profile_arg
-    planner_runtime_profile = normalize_runtime_profile(
-        planner_runtime_arg if planner_runtime_arg is not None else planner_runtime_default,
-        source="runtime.planner.profile",
-    )
-    worker_runtime_profile = normalize_runtime_profile(
-        worker_runtime_arg if worker_runtime_arg is not None else worker_runtime_default,
-        source="runtime.worker.profile",
-    )
 
     available_agents = agents.available_agent_names()
     if not available_agents:
@@ -1280,12 +1243,6 @@ def build_project_config(
         git=existing_config.git,
         branch=branch_config,
         worker=existing_config.worker,
-        runtime=RuntimeConfig.model_validate(
-            {
-                "planner": {"profile": planner_runtime_profile},
-                "worker": {"profile": worker_runtime_profile},
-            }
-        ),
         agent=AgentConfig(
             default=agent_default,
             options=agent_options,

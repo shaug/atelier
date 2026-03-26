@@ -230,10 +230,9 @@ class WorkerSessionAgentService(Protocol):
         yes: bool,
         yolo: bool,
         dry_run: bool,
-        runtime_profile_override: str | None = None,
-        bounded_runtime_evidence_path_override: Path | None = None,
         session_control: AgentSessionControl,
         command_ops: AgentSessionCommandOps,
+        bounded_runtime_evidence_path_override: Path | None = None,
     ) -> AgentSessionPreparation: ...
 
     def install_agent_hooks(
@@ -459,7 +458,6 @@ class WorkerCommandService(Protocol):
         epic_id: str,
         changeset_id: str,
         changeset_title: str,
-        runtime_profile: str = "standard",
         merge_conflict: bool = False,
         review_feedback: bool = False,
         review_pr_url: str | None = None,

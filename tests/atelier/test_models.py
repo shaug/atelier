@@ -1,8 +1,6 @@
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from atelier.models import BeadsSection, BranchConfig, ProjectUserConfig
 
 
@@ -50,28 +48,3 @@ def test_beads_section_normalizes_server_runtime_aliases() -> None:
 def test_beads_section_migrates_legacy_mode_key() -> None:
     parsed = BeadsSection.model_validate({"mode": "dolt_server"})
     assert parsed.runtime_mode == "dolt-server"
-
-
-def test_project_user_config_defaults_runtime_profiles_to_standard() -> None:
-    parsed = ProjectUserConfig.model_validate({})
-    assert parsed.runtime.planner.profile == "standard"
-    assert parsed.runtime.worker.profile == "standard"
-
-
-@pytest.mark.parametrize("value", ("trycycle_bounded", "trycycle-bounded"))
-def test_project_user_config_normalizes_runtime_profile(value: str) -> None:
-    parsed = ProjectUserConfig.model_validate(
-        {
-            "runtime": {
-                "planner": {"profile": value},
-                "worker": {"profile": value},
-            }
-        }
-    )
-    assert parsed.runtime.planner.profile == "trycycle-bounded"
-    assert parsed.runtime.worker.profile == "trycycle-bounded"
-
-
-def test_project_user_config_rejects_unknown_runtime_profile() -> None:
-    with pytest.raises(ValueError, match="runtime profile must be one of"):
-        ProjectUserConfig.model_validate({"runtime": {"planner": {"profile": "bogus"}}})

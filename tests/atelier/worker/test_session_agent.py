@@ -217,50 +217,6 @@ def test_prepare_agent_session_sets_bounded_runtime_env(monkeypatch) -> None:
     monkeypatch.setattr(
         session_agent.agents, "get_agent", lambda _name: _FakeAgentSpec(name="codex")
     )
-    project_config = _project_config().model_copy(
-        update={
-            "runtime": _project_config().runtime.model_copy(
-                update={
-                    "worker": _project_config().runtime.worker.model_copy(
-                        update={"profile": "trycycle-bounded"}
-                    )
-                }
-            )
-        }
-    )
-    agent = agent_home.AgentHome(
-        name="codex",
-        agent_id="atelier/worker/codex/p100",
-        role="worker",
-        path=Path("/tmp/agent-home"),
-    )
-
-    prep = session_agent.prepare_agent_session(
-        project_config=project_config,
-        project_data_dir=Path("/project-data"),
-        repo_root=Path("/repo"),
-        beads_root=Path("/beads"),
-        agent=agent,
-        changeset_worktree_path=Path("/worktree"),
-        selected_epic="at-epic",
-        changeset_id="at-epic.1",
-        root_branch_value="feat/root",
-        enlistment_path=Path("/repo"),
-        yes=True,
-        yolo=False,
-        dry_run=True,
-        session_control=_TestControl(),
-        command_ops=_TestCommandOps(),
-    )
-
-    assert prep.env["ATELIER_WORKER_RUNTIME_PROFILE"] == "trycycle-bounded"
-    assert prep.env["ATELIER_BOUNDED_RUNTIME_EVIDENCE"].endswith("bounded-runtime-evidence.json")
-
-
-def test_prepare_agent_session_prefers_runtime_profile_override(monkeypatch) -> None:
-    monkeypatch.setattr(
-        session_agent.agents, "get_agent", lambda _name: _FakeAgentSpec(name="codex")
-    )
     agent = agent_home.AgentHome(
         name="codex",
         agent_id="atelier/worker/codex/p100",
@@ -284,10 +240,9 @@ def test_prepare_agent_session_prefers_runtime_profile_override(monkeypatch) -> 
         dry_run=True,
         session_control=_TestControl(),
         command_ops=_TestCommandOps(),
-        runtime_profile_override="trycycle-bounded",
     )
 
-    assert prep.env["ATELIER_WORKER_RUNTIME_PROFILE"] == "trycycle-bounded"
+    assert prep.env["ATELIER_BOUNDED_RUNTIME_EVIDENCE"].endswith("bounded-runtime-evidence.json")
 
 
 def test_prepare_agent_session_uses_iteration_scoped_bounded_evidence_override(
@@ -320,7 +275,6 @@ def test_prepare_agent_session_uses_iteration_scoped_bounded_evidence_override(
         dry_run=True,
         session_control=_TestControl(),
         command_ops=_TestCommandOps(),
-        runtime_profile_override="trycycle-bounded",
         bounded_runtime_evidence_path_override=evidence_path,
     )
 
