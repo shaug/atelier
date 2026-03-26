@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from ..config import ProjectConfig
 from ..runtime_profiles import RuntimeProfileName, normalize_runtime_profile
 
 _BOUNDED_EVIDENCE_FILENAME = "bounded-runtime-evidence.json"
+_BOUNDED_EVIDENCE_TOKEN_PATTERN = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def resolve_worker_runtime_profile(
@@ -35,9 +37,28 @@ def worker_runtime_profile_contract(profile: RuntimeProfileName) -> str:
     return "Standard worker contract: follow the default Atelier single-changeset execution loop."
 
 
-def bounded_runtime_evidence_path(agent_home_path: Path) -> Path:
+def bounded_runtime_evidence_path(
+    agent_home_path: Path, *, iteration_token: str | None = None
+) -> Path:
     """Return the evidence file path for bounded worker runs."""
-    return agent_home_path / _BOUNDED_EVIDENCE_FILENAME
+    if iteration_token is None:
+        return agent_home_path / _BOUNDED_EVIDENCE_FILENAME
+    normalized_token = _BOUNDED_EVIDENCE_TOKEN_PATTERN.sub("-", iteration_token).strip("-")
+    if not normalized_token:
+        return agent_home_path / _BOUNDED_EVIDENCE_FILENAME
+    stem = Path(_BOUNDED_EVIDENCE_FILENAME).stem
+    suffix = Path(_BOUNDED_EVIDENCE_FILENAME).suffix
+    return agent_home_path / f"{stem}-{normalized_token}{suffix}"
+
+
+def clear_bounded_runtime_evidence(*, evidence_path: Path) -> None:
+    """Remove any pre-existing bounded evidence file before a worker launch."""
+    try:
+        evidence_path.unlink()
+    except FileNotFoundError:
+        return
+    except OSError:
+        return
 
 
 def bounded_runtime_failure_reason(*, evidence_path: Path) -> str:

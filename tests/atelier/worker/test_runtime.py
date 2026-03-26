@@ -419,6 +419,40 @@ def test_run_worker_sessions_implicit_retries_do_not_mutate_caller_args() -> Non
     assert seen_nested == [(1,), (2,)]
 
 
+def test_run_worker_sessions_assigns_distinct_iteration_tokens() -> None:
+    args = type("Args", (), {"queue": False, "epic_id": None})()
+    seen_tokens: list[str | None] = []
+    calls = 0
+
+    def run_once(args: object, *, mode: str, dry_run: bool, session_key: str) -> WorkerRunSummary:
+        del mode, dry_run, session_key
+        nonlocal calls
+        calls += 1
+        seen_tokens.append(getattr(args, "bounded_runtime_iteration_token", None))
+        if calls == 1:
+            return WorkerRunSummary(started=True, reason="agent_session_complete")
+        return WorkerRunSummary(started=False, reason="no_eligible_epics")
+
+    runtime.run_worker_sessions(
+        args=args,
+        mode="auto",
+        run_mode="default",
+        dry_run=False,
+        session_key="sess",
+        run_worker_once=run_once,
+        report_worker_summary=lambda _summary, _dry: None,
+        watch_interval_seconds=lambda: 5,
+        dry_run_log=lambda _message: None,
+        emit=lambda _message: None,
+    )
+
+    assert len(seen_tokens) == 2
+    assert seen_tokens[0]
+    assert seen_tokens[1]
+    assert seen_tokens[0] != seen_tokens[1]
+    assert not hasattr(args, "bounded_runtime_iteration_token")
+
+
 def test_run_worker_sessions_deepcopy_type_error_falls_back_with_debug_log() -> None:
     class Args:
         def __init__(self) -> None:

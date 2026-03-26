@@ -296,6 +296,7 @@ def prepare_agent_session(
     yolo: bool,
     dry_run: bool,
     runtime_profile_override: str | None = None,
+    bounded_runtime_evidence_path_override: Path | None = None,
     session_control: AgentSessionControl,
     command_ops: AgentSessionCommandOps,
 ) -> AgentSessionPreparation:
@@ -459,9 +460,11 @@ def prepare_agent_session(
     env["ATELIER_BEADS_PREFIX"] = config.resolve_beads_prefix(project_config)
     env["ATELIER_WORKER_RUNTIME_PROFILE"] = runtime_profile
     if runtime_profile == "trycycle-bounded":
-        env["ATELIER_BOUNDED_RUNTIME_EVIDENCE"] = str(
-            work_runtime_profile.bounded_runtime_evidence_path(agent.path)
+        evidence_path = (
+            bounded_runtime_evidence_path_override
+            or work_runtime_profile.bounded_runtime_evidence_path(agent.path)
         )
+        env["ATELIER_BOUNDED_RUNTIME_EVIDENCE"] = str(evidence_path)
     return AgentSessionPreparation(
         agent_spec=agent_spec,
         agent_options=agent_options,

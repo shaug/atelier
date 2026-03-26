@@ -1572,6 +1572,21 @@ def run_worker_once(
         finishstep(extra=mark_step_extra)
 
         finishstep = control.step("Prepare agent session", timings=timings, trace=trace)
+        bounded_runtime_iteration_token = getattr(args, "bounded_runtime_iteration_token", None)
+        bounded_runtime_evidence_path_override = None
+        if run_context.runtime_profile == "trycycle-bounded":
+            iteration_token = (
+                str(bounded_runtime_iteration_token)
+                if isinstance(bounded_runtime_iteration_token, str)
+                and bounded_runtime_iteration_token.strip()
+                else None
+            )
+            bounded_runtime_evidence_path_override = (
+                work_runtime_profile.bounded_runtime_evidence_path(
+                    agent.path,
+                    iteration_token=iteration_token,
+                )
+            )
         agent_prep = None
         try:
             agent_prep = infra.worker_session_agent.prepare_agent_session(
@@ -1589,6 +1604,7 @@ def run_worker_once(
                 yolo=bool(getattr(args, "yolo", False)),
                 dry_run=dry_run,
                 runtime_profile_override=run_context.runtime_profile,
+                bounded_runtime_evidence_path_override=bounded_runtime_evidence_path_override,
                 session_control=control,
                 command_ops=command_ports,
             )
@@ -1631,6 +1647,14 @@ def run_worker_once(
         project_enlistment = agent_prep.project_enlistment
         workspace_branch = agent_prep.workspace_branch
         env = agent_prep.env
+        if (
+            run_context.runtime_profile == "trycycle-bounded"
+            and bounded_runtime_evidence_path_override is not None
+            and not dry_run
+        ):
+            work_runtime_profile.clear_bounded_runtime_evidence(
+                evidence_path=bounded_runtime_evidence_path_override
+            )
         finishstep()
         merge_conflict = startup_result.reason == "merge_conflict"
         review_feedback = startup_result.reason == "review_feedback"

@@ -1795,7 +1795,8 @@ def test_run_worker_once_allows_bounded_runtime_with_valid_evidence(tmp_path: Pa
         path=tmp_path / "agent-home",
         session_key="p-bounded-ok",
     )
-    evidence_path = tmp_path / "bounded-runtime-evidence.json"
+    agent.path.mkdir()
+    evidence_path = agent.path / "bounded-runtime-evidence.json"
     deps = _build_runner_deps(
         startup_result=StartupContractResult(
             epic_id="at-epic",
@@ -1822,14 +1823,16 @@ def test_run_worker_once_allows_bounded_runtime_with_valid_evidence(tmp_path: Pa
         )
     )
     deps.infra.worker_session_agent.prepare_agent_session = Mock(
-        return_value=SimpleNamespace(
+        side_effect=lambda **kwargs: SimpleNamespace(
             agent_spec=SimpleNamespace(name="codex", display_name="Codex"),
             agent_options=[],
             project_enlistment=Path("/repo"),
             workspace_branch="feat/root-at-epic.1",
             env={
                 "ATELIER_WORKER_RUNTIME_PROFILE": "trycycle-bounded",
-                "ATELIER_BOUNDED_RUNTIME_EVIDENCE": str(evidence_path),
+                "ATELIER_BOUNDED_RUNTIME_EVIDENCE": str(
+                    kwargs["bounded_runtime_evidence_path_override"]
+                ),
             },
         )
     )
@@ -1862,6 +1865,8 @@ def test_run_worker_once_allows_bounded_runtime_with_valid_evidence(tmp_path: Pa
     assert summary.reason == "agent_session_complete"
     deps.lifecycle.mark_changeset_blocked.assert_not_called()
     deps.lifecycle.finalize_changeset.assert_called_once()
+    prepare_kwargs = deps.infra.worker_session_agent.prepare_agent_session.call_args.kwargs
+    assert prepare_kwargs["bounded_runtime_evidence_path_override"] == evidence_path
 
 
 def test_run_worker_once_skips_redundant_mark_in_progress_for_in_progress_changeset() -> None:

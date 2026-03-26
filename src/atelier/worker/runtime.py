@@ -552,6 +552,8 @@ def run_worker_sessions(
                 f"{type(exc).__name__}: {exc}"
             )
             iteration_args = copy.copy(args)
+        iteration_token = f"{session_key}-iter-{len(excluded_implicit_epics)}-{time.monotonic_ns()}"
+        setattr(iteration_args, "bounded_runtime_iteration_token", iteration_token)
         if explicit_epic_requested:
             setattr(iteration_args, "epic_id", explicit_epic_id)
             return iteration_args

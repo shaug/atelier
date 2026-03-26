@@ -259,6 +259,43 @@ def test_prepare_agent_session_prefers_runtime_profile_override(monkeypatch) -> 
     assert prep.env["ATELIER_WORKER_RUNTIME_PROFILE"] == "trycycle-bounded"
 
 
+def test_prepare_agent_session_uses_iteration_scoped_bounded_evidence_override(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        session_agent.agents, "get_agent", lambda _name: _FakeAgentSpec(name="codex")
+    )
+    agent = agent_home.AgentHome(
+        name="codex",
+        agent_id="atelier/worker/codex/p100",
+        role="worker",
+        path=Path("/tmp/agent-home"),
+    )
+    evidence_path = Path("/tmp/agent-home/bounded-runtime-evidence-iter-2.json")
+
+    prep = session_agent.prepare_agent_session(
+        project_config=_project_config(),
+        project_data_dir=Path("/project-data"),
+        repo_root=Path("/repo"),
+        beads_root=Path("/beads"),
+        agent=agent,
+        changeset_worktree_path=Path("/worktree"),
+        selected_epic="at-epic",
+        changeset_id="at-epic.1",
+        root_branch_value="feat/root",
+        enlistment_path=Path("/repo"),
+        yes=True,
+        yolo=False,
+        dry_run=True,
+        session_control=_TestControl(),
+        command_ops=_TestCommandOps(),
+        runtime_profile_override="trycycle-bounded",
+        bounded_runtime_evidence_path_override=evidence_path,
+    )
+
+    assert prep.env["ATELIER_BOUNDED_RUNTIME_EVIDENCE"] == str(evidence_path)
+
+
 def test_prepare_agent_session_warns_for_cross_session_agent_id(monkeypatch) -> None:
     monkeypatch.setattr(
         session_agent.agents, "get_agent", lambda _name: _FakeAgentSpec(name="codex")

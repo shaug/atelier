@@ -231,6 +231,7 @@ class WorkerSessionAgentService(Protocol):
         yolo: bool,
         dry_run: bool,
         runtime_profile_override: str | None = None,
+        bounded_runtime_evidence_path_override: Path | None = None,
         session_control: AgentSessionControl,
         command_ops: AgentSessionCommandOps,
     ) -> AgentSessionPreparation: ...
