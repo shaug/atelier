@@ -21,7 +21,7 @@ to trycycle's subagent-heavy model.
 **Tech Stack:** Markdown design docs, pytest doc-contract tests, existing
 Atelier planner/worker templates, skills, runtime/session modules.
 
----
+______________________________________________________________________
 
 ## Execution prerequisites
 
@@ -65,9 +65,9 @@ Atelier planner/worker templates, skills, runtime/session modules.
 - Add a repo-owned design document that answers whether trycycle-like planner
   and worker hardening can fit Atelier's current orchestration model.
 - The document must explain the mismatches between trycycle and Atelier,
-  including subagent communication, durable Beads/message coordination,
-  multiple concurrent workers, PR-driven late phases, review-sized changesets,
-  and operator accountability.
+  including subagent communication, durable Beads/message coordination, multiple
+  concurrent workers, PR-driven late phases, review-sized changesets, and
+  operator accountability.
 - The document must state a concrete verdict:
   - full trycycle-style runtime substitution is not currently feasible without
     deeper architectural change
@@ -81,15 +81,15 @@ Atelier planner/worker templates, skills, runtime/session modules.
 
 ## Contracts and invariants
 
-- The analysis must preserve Atelier's functional intent:
-  orchestrated agent development with operator accountability.
+- The analysis must preserve Atelier's functional intent: orchestrated agent
+  development with operator accountability.
 - The document must explicitly keep these Atelier invariants in view:
   - durable planning state lives in Beads
   - planner and worker communicate through durable tickets/messages plus
     external signals, not ephemeral subagent chat
   - workers may run concurrently against available work
-  - PR review, publish/finalize, and merge-state handling are part of the
-    worker lifecycle in PR-enabled projects
+  - PR review, publish/finalize, and merge-state handling are part of the worker
+    lifecycle in PR-enabled projects
   - changesets must stay human-reviewable and may be split when they grow too
     large
 - The analysis must not collapse agent transport, runtime profile, and
@@ -115,15 +115,14 @@ Atelier planner/worker templates, skills, runtime/session modules.
 
 ## File structure
 
-- Create: `docs/trycycle-runtime-feasibility.md`
-  Responsibility: repo-owned decision document describing Atelier's current
-  planner/worker model, the trycycle-derived behaviors under review, the
-  mismatch matrix, the feasibility verdict, the recommended runtime-profile
-  cut, the required architectural changes for deeper adaptation, and the future
-  verification floor.
-- Create: `tests/atelier/test_trycycle_runtime_feasibility.py`
-  Responsibility: keep the feasibility document stable by asserting that the
-  required sections and core terms remain present.
+- Create: `docs/trycycle-runtime-feasibility.md` Responsibility: repo-owned
+  decision document describing Atelier's current planner/worker model, the
+  trycycle-derived behaviors under review, the mismatch matrix, the feasibility
+  verdict, the recommended runtime-profile cut, the required architectural
+  changes for deeper adaptation, and the future verification floor.
+- Create: `tests/atelier/test_trycycle_runtime_feasibility.py` Responsibility:
+  keep the feasibility document stable by asserting that the required sections
+  and core terms remain present.
 
 ## Strategy gate
 
@@ -160,7 +159,9 @@ surface work.
 ### Task 1: Create the feasibility document scaffold and lock its required shape
 
 **Files:**
+
 - Create: `docs/trycycle-runtime-feasibility.md`
+
 - Create: `tests/atelier/test_trycycle_runtime_feasibility.py`
 
 - [ ] **Step 1: Identify or write the failing test**
@@ -213,7 +214,9 @@ architecture rather than shipping a runtime-profile feature.
 In `## Source Inputs`, state that the analysis is based on:
 
 - the user transcript in this planning thread
+
 - the `trycycle-planning` skill
+
 - the existing Atelier planner/worker templates, docs, and runtime code
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -228,8 +231,8 @@ Expected: PASS.
 
 - [ ] **Step 5: Refactor, format, and verify**
 
-Tighten section wording, keep prose lines at 80 chars, and use
-`runtime profile` consistently.
+Tighten section wording, keep prose lines at 80 chars, and use `runtime profile`
+consistently.
 
 Run:
 
@@ -255,7 +258,9 @@ git commit -m "docs(runtime): add trycycle feasibility scaffold" \
 ### Task 2: Record the Atelier baseline and the real mismatch matrix
 
 **Files:**
+
 - Modify: `docs/trycycle-runtime-feasibility.md`
+
 - Modify: `tests/atelier/test_trycycle_runtime_feasibility.py`
 
 - [ ] **Step 1: Identify or write the failing test**
@@ -320,8 +325,11 @@ the document is not framed as "Atelier has none of this today." Include items
 such as:
 
 - planner startup discipline
+
 - worker north-star review loop
+
 - publish/finalize gating
+
 - changeset splitting expectations
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -364,7 +372,9 @@ git commit -m "docs(runtime): map trycycle mismatches against atelier" \
 ### Task 3: Publish the verdict and the future implementation shape
 
 **Files:**
+
 - Modify: `docs/trycycle-runtime-feasibility.md`
+
 - Modify: `tests/atelier/test_trycycle_runtime_feasibility.py`
 
 - [ ] **Step 1: Identify or write the failing test**
@@ -416,8 +426,8 @@ future feature:
 - no new transport type
 - no dependency on local trycycle installs
 
-Write `## Required Architectural Changes` to describe what would be needed to
-go further while preserving Atelier's functional intent. Include, at minimum:
+Write `## Required Architectural Changes` to describe what would be needed to go
+further while preserving Atelier's functional intent. Include, at minimum:
 
 - a durable feedback-loop record instead of ephemeral subagent chat
 - a coordinator/supervisor model that can drive retries or review loops across
@@ -438,7 +448,9 @@ should end with a short `## Recommended Follow-Up Slices` section naming the
 next 2-3 implementation cuts, for example:
 
 - repo-owned planner/worker runtime-profile scaffolding
+
 - durable feedback-loop state model
+
 - coordinator architecture for deeper iterative execution
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -484,7 +496,9 @@ git commit -m "docs(runtime): publish trycycle feasibility verdict" \
 ### Task 4: Verify, file follow-ups, and land the analysis package
 
 **Files:**
+
 - Modify if needed: `docs/trycycle-runtime-feasibility.md`
+
 - Modify if needed: `tests/atelier/test_trycycle_runtime_feasibility.py`
 
 - [ ] **Step 1: Identify any missing follow-up work**
@@ -543,7 +557,9 @@ git status
 Expected:
 
 - working tree is clean before push
+
 - branch pushes cleanly
+
 - final `git status` shows the branch is up to date with `origin`
 
 - [ ] **Step 6: Hand off**
@@ -566,6 +582,6 @@ In the handoff note, summarize:
 - It respects Atelier's actual functional intent: durable orchestration,
   multiple workers, operator accountability, PR-driven late phases, and
   review-sized changesets.
-- It still leaves a concrete path forward by naming the smaller `runtime
-  profile` cut that is compatible with Atelier today and the deeper
+- It still leaves a concrete path forward by naming the smaller
+  `runtime profile` cut that is compatible with Atelier today and the deeper
   architectural work required for anything more ambitious.
