@@ -15,7 +15,9 @@ selected profile into planner and worker launch preparation. Native remains the
 zero-behavior-change profile; the new `trycycle` profile adds role-specific
 prompt and `AGENTS.md` addenda that impose trycycle-like planning and execution
 discipline without changing Beads, worktree, claim, teardown, or publish
-semantics.
+semantics. Planner session resume must also become runtime-aware so switching
+between `native` and `trycycle` never silently resumes a planner session that
+was started under a different contract.
 
 **Tech Stack:** Python 3.11+, Typer, Pydantic, pytest, existing Atelier
 planner/worker runtime modules.
@@ -38,6 +40,9 @@ planner/worker runtime modules.
   external `trycycle` executable in this slice.
 - Planner and worker startup output should make the chosen runtime explicit so
   the user can see what contract is active before the session begins.
+- Planner session lookup and saved-session reuse are runtime-scoped. Changing
+  planner runtime must start a fresh session instead of reusing a session that
+  was created under the other runtime profile.
 
 ## Contracts and invariants
 
@@ -46,7 +51,10 @@ planner/worker runtime modules.
   Beads schema, worktree ownership, claim rules, planner sync, teardown,
   publish/finalize, or runtime-env sanitization semantics.
 - Resume behavior remains agent-defined. The runtime profile must not change
-  how saved Codex planner session IDs are discovered or persisted.
+  how saved Codex planner session IDs are discovered or persisted when the
+  runtime profile is unchanged. A runtime-profile change must intentionally
+  bypass resume to avoid reviving stale planner context from the wrong
+  contract.
 - Worker runtime selection must not alter one-changeset-per-session behavior or
   the fail-closed startup contract.
 - Planner runtime selection must not weaken the read-only planner worktree
@@ -79,7 +87,7 @@ planner/worker runtime modules.
   role profile.
 - Create: `src/atelier/runtime_profiles/planner.py`
   Responsibility: runtime-specific planner prompt lines and planner
-  `AGENTS.md` addenda.
+  `AGENTS.md` addenda, plus planner session namespace helpers.
 - Create: `src/atelier/runtime_profiles/worker.py`
   Responsibility: runtime-specific worker prompt lines and worker
   `AGENTS.md` addenda.
@@ -96,8 +104,11 @@ planner/worker runtime modules.
   Responsibility: expose `--runtime` on `plan` and `work`.
 - Modify: `src/atelier/commands/plan.py`
   Responsibility: resolve planner runtime, surface it to the user, append
-  planner runtime addendum to rendered `AGENTS.md`, and augment the opening
-  prompt.
+  planner runtime addendum to rendered `AGENTS.md`, augment the opening
+  prompt, and keep planner resume scoped to the selected runtime profile.
+- Modify: `src/atelier/worker/ports.py`
+  Responsibility: carry runtime-specific prompt additions and resolved runtime
+  metadata through the worker runtime protocols.
 - Modify: `src/atelier/worker/prompts.py`
   Responsibility: accept runtime-specific prompt additions without duplicating
   the base worker prompt.
@@ -109,6 +120,9 @@ planner/worker runtime modules.
 - Modify: `src/atelier/worker/session/agent.py`
   Responsibility: resolve worker runtime, append the worker runtime addendum to
   rendered `AGENTS.md`, and carry prompt additions forward to startup.
+- Modify: `src/atelier/worker/session/runner.py`
+  Responsibility: surface the selected worker runtime in startup output and use
+  the runtime-specific prompt additions from session preparation.
 - Modify: `src/atelier/runtime_env.py`
   Responsibility: preserve explicit runtime-profile env if this slice exposes
   `ATELIER_RUNTIME_PROFILE`.
@@ -125,6 +139,7 @@ planner/worker runtime modules.
   `tests/atelier/commands/test_work_runtime_wiring.py`
   `tests/atelier/worker/test_prompts.py`
   `tests/atelier/worker/test_session_agent.py`
+  `tests/atelier/worker/test_session_runner.py`
   Responsibility: cover config defaults, CLI plumbing, planner/worker runtime
   selection, native parity, and trycycle-specific prompt/addendum behavior.
 
@@ -315,6 +330,8 @@ Add planner tests for:
 def test_plan_cli_runtime_override_beats_config_runtime(...)
 def test_plan_trycycle_runtime_appends_planner_contract_lines(...)
 def test_plan_native_runtime_preserves_existing_opening_prompt(...)
+def test_plan_runtime_change_starts_fresh_planner_session(...)
+def test_plan_runtime_scopes_codex_session_lookup(...)
 ```
 
 The trycycle planner contract should require:
@@ -356,14 +373,30 @@ def planner_runtime_addendum(runtime_name: RuntimeProfileName) -> str:
     )
 ```
 
+Add planner runtime-specific session metadata helpers, for example:
+
+```python
+_PLANNER_SESSION_RUNTIME_FIELD = "planner_session.runtime"
+
+
+def planner_workspace_uid(*, agent_home_name: str, runtime_name: RuntimeProfileName) -> str:
+    return f"planner-{agent_home_name}-{runtime_name}"
+```
+
 In `run_planner(...)`:
 
 - resolve the planner runtime via the registry
 - print `Planner runtime: <name>`
+- compute the planner workspace/session namespace from the selected runtime
 - append the runtime addendum to rendered planner `AGENTS.md`
 - extend `_planner_opening_prompt(...)` to accept runtime-specific lines
+- persist both planner session id and planner runtime when Codex returns a
+  session id
+- if the saved planner runtime differs from the selected runtime, bypass resume,
+  clear the stale saved session pointer, and start a fresh session under the
+  selected runtime namespace
 - keep resume/session-id logic, sync monitor, guardrails, and teardown
-  unchanged
+  otherwise unchanged
 
 If this slice exports `ATELIER_RUNTIME_PROFILE`, set it explicitly in the
 planner env after sanitization rather than relying on ambient inheritance.
@@ -409,13 +442,16 @@ git commit -m "feat(plan): add planner runtime profiles" \
 
 **Files:**
 - Create: `src/atelier/runtime_profiles/worker.py`
+- Modify: `src/atelier/worker/ports.py`
 - Modify: `src/atelier/worker/prompts.py`
 - Modify: `src/atelier/worker/work_startup_runtime.py`
 - Modify: `src/atelier/worker/runtime.py`
 - Modify: `src/atelier/worker/session/agent.py`
+- Modify: `src/atelier/worker/session/runner.py`
 - Modify: `src/atelier/runtime_env.py`
 - Modify: `tests/atelier/worker/test_prompts.py`
 - Modify: `tests/atelier/worker/test_session_agent.py`
+- Modify: `tests/atelier/worker/test_session_runner.py`
 - Modify: `tests/atelier/commands/test_work_runtime_wiring.py`
 
 - [ ] **Step 1: Identify or write the failing test**
@@ -434,6 +470,10 @@ def test_prepare_agent_session_appends_trycycle_worker_addendum(...) -> None:
 
 def test_work_runtime_wiring_passes_runtime_override_to_worker_session(...) -> None:
     ...
+
+
+def test_worker_session_runner_reports_selected_runtime(...) -> None:
+    ...
 ```
 
 The trycycle worker contract should require:
@@ -451,6 +491,7 @@ Run:
 uv run pytest \
   tests/atelier/worker/test_prompts.py \
   tests/atelier/worker/test_session_agent.py \
+  tests/atelier/worker/test_session_runner.py \
   tests/atelier/commands/test_work_runtime_wiring.py -k runtime -v
 ```
 
@@ -478,8 +519,12 @@ Then:
 - resolve the worker runtime once in session preparation
 - carry the resolved runtime name and prompt additions in
   `AgentSessionPreparation`
+- extend the worker command/service protocols so runner code can receive the
+  runtime-specific prompt additions without ad hoc attribute access
 - append the worker addendum to rendered `AGENTS.md`
 - extend `worker_opening_prompt(...)` to accept additive runtime lines
+- surface `Worker runtime: <name>` in startup output before the agent session
+  begins so the active contract is visible to the user
 - keep startup selection, claim logic, worktree preparation, and finalize
   behavior unchanged
 - if `ATELIER_RUNTIME_PROFILE` is exported for session tooling, add it to the
@@ -493,6 +538,7 @@ Run:
 uv run pytest \
   tests/atelier/worker/test_prompts.py \
   tests/atelier/worker/test_session_agent.py \
+  tests/atelier/worker/test_session_runner.py \
   tests/atelier/commands/test_work_runtime_wiring.py -k runtime -v
 ```
 
@@ -524,13 +570,16 @@ Expected: all PASS.
 ```bash
 git add \
   src/atelier/runtime_profiles/worker.py \
+  src/atelier/worker/ports.py \
   src/atelier/worker/prompts.py \
   src/atelier/worker/work_startup_runtime.py \
   src/atelier/worker/runtime.py \
   src/atelier/worker/session/agent.py \
+  src/atelier/worker/session/runner.py \
   src/atelier/runtime_env.py \
   tests/atelier/worker/test_prompts.py \
   tests/atelier/worker/test_session_agent.py \
+  tests/atelier/worker/test_session_runner.py \
   tests/atelier/commands/test_work_runtime_wiring.py
 git commit -m "feat(work): add worker runtime profiles" \
   -m "- thread runtime selection through worker session preparation" \
@@ -547,6 +596,7 @@ git commit -m "feat(work): add worker runtime profiles" \
 - Modify: `tests/atelier/test_config.py`
 - Modify: `tests/atelier/commands/test_plan.py`
 - Modify: `tests/atelier/worker/test_session_agent.py`
+- Modify: `tests/atelier/worker/test_session_runner.py`
 
 - [ ] **Step 1: Identify or write the failing test**
 
@@ -556,6 +606,8 @@ Add or extend tests that prove the intended end-state contract:
 - planner native runtime keeps the existing prompt wording
 - worker native runtime keeps the existing prompt wording
 - trycycle runtime is additive and role-scoped
+- planner runtime changes do not resume a session created under the other
+  runtime profile
 
 Use existing tests instead of inventing doc-only coverage where possible.
 
@@ -567,7 +619,8 @@ Run:
 uv run pytest \
   tests/atelier/test_config.py \
   tests/atelier/commands/test_plan.py \
-  tests/atelier/worker/test_session_agent.py -k "runtime or native" -v
+  tests/atelier/worker/test_session_agent.py \
+  tests/atelier/worker/test_session_runner.py -k "runtime or native" -v
 ```
 
 Expected: FAIL until the native-parity and role-scoped assertions exist and
@@ -598,7 +651,8 @@ Run:
 uv run pytest \
   tests/atelier/test_config.py \
   tests/atelier/commands/test_plan.py \
-  tests/atelier/worker/test_session_agent.py -k "runtime or native" -v
+  tests/atelier/worker/test_session_agent.py \
+  tests/atelier/worker/test_session_runner.py -k "runtime or native" -v
 ```
 
 Expected: PASS.
@@ -626,7 +680,8 @@ git add \
   README.md \
   tests/atelier/test_config.py \
   tests/atelier/commands/test_plan.py \
-  tests/atelier/worker/test_session_agent.py
+  tests/atelier/worker/test_session_agent.py \
+  tests/atelier/worker/test_session_runner.py
 git commit -m "docs(runtime): document trycycle runtime profiles" \
   -m "- document config and command behavior for runtime profiles" \
   -m "- lock down native-parity and trycycle runtime regression coverage" \
