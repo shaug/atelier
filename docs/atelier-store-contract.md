@@ -16,6 +16,7 @@ Typed models:
 - `ChangesetRecord`
 - `DependencyRecord`
 - `ExternalTicketLink`
+- `ExternalTicketReconcileResult`
 - `MessageRecord`
 - `HookRecord`
 - `ReviewMetadata`
@@ -60,6 +61,8 @@ marker paths.
 Planner startup and discovery migrations may also rely on:
 
 - `AtelierStore.epic_discovery_parity()`
+- `AtelierStore.reconcile_reopened_external_tickets()`
+- `AtelierStore.reconcile_closed_external_tickets()`
 - `EpicRecord.root_branch`
 - `DependencyRecord.status`
 
@@ -83,7 +86,9 @@ implementation is backed by Beads:
   adapters own remote import/export/sync behavior, while `AtelierStore` owns the
   normalized persisted link shape, provider labels, and drift timestamps
   (`state_updated_at`, `content_updated_at`, `notes_updated_at`,
-  `last_synced_at`) plus metadata repair when legacy history recovery is needed.
+  `last_synced_at`) plus metadata repair and exported-ticket lifecycle
+  reconciliation when legacy history recovery or lifecycle drift needs a
+  store-owned owner.
 - Dependency satisfaction is an Atelier decision. Adapters may persist raw
   dependency edges, but whether a dependency counts as satisfied is owned by
   Atelier lifecycle policy.

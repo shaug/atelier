@@ -667,7 +667,7 @@ def test_reconcile_stale_terminal_metadata_next_run_uses_closed_path_without_ref
                 },
             ),
         ),
-        patch("atelier.worker.reconcile.beads.reconcile_closed_issue_exported_github_tickets"),
+        patch("atelier.worker.reconcile.worker_store.reconcile_closed_external_tickets"),
         patch("atelier.worker.reconcile.worker_store.update_changeset_integrated_sha"),
         patch("atelier.worker.reconcile.resolve_hook_agent_bead_for_epic", return_value=None),
     ):
@@ -1126,7 +1126,7 @@ def test_reconcile_blocked_merged_changesets_reports_closed_active_pr_drift() ->
         patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[drift_issue]),
         patch("atelier.worker.reconcile.worker_store.transition_lifecycle") as transition_lifecycle,
         patch(
-            "atelier.worker.reconcile.reopen_compat.reconcile_reopened_exported_github_tickets"
+            "atelier.worker.reconcile.worker_store.reconcile_reopened_external_tickets"
         ) as reopen_tickets,
         patch("atelier.worker.reconcile.git.git_ref_exists", return_value=True),
         patch(
@@ -1213,7 +1213,7 @@ def test_reconcile_does_not_reopen_closed_changeset_when_live_pr_is_merged() -> 
         ),
         patch("atelier.worker.reconcile.worker_store.transition_lifecycle") as transition_lifecycle,
         patch(
-            "atelier.worker.reconcile.reopen_compat.reconcile_reopened_exported_github_tickets"
+            "atelier.worker.reconcile.worker_store.reconcile_reopened_external_tickets"
         ) as reopen_tickets,
     ):
         result = reconcile.reconcile_blocked_merged_changesets(
@@ -1265,7 +1265,7 @@ def test_reconcile_flags_closed_pr_lookup_error_without_reopen() -> None:
         ),
         patch("atelier.worker.reconcile.worker_store.transition_lifecycle") as transition_lifecycle,
         patch(
-            "atelier.worker.reconcile.reopen_compat.reconcile_reopened_exported_github_tickets"
+            "atelier.worker.reconcile.worker_store.reconcile_reopened_external_tickets"
         ) as reopen_tickets,
     ):
         result = reconcile.reconcile_blocked_merged_changesets(
@@ -1330,7 +1330,7 @@ def test_reconcile_recovers_after_transient_pr_lookup_error_for_closed_active_pr
         ) as lookup,
         patch("atelier.worker.reconcile.worker_store.transition_lifecycle") as transition_lifecycle,
         patch(
-            "atelier.worker.reconcile.reopen_compat.reconcile_reopened_exported_github_tickets"
+            "atelier.worker.reconcile.worker_store.reconcile_reopened_external_tickets"
         ) as reopen_tickets,
     ):
         result = reconcile.reconcile_blocked_merged_changesets(

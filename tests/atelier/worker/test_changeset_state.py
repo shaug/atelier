@@ -210,7 +210,7 @@ def test_mark_changeset_in_progress_reconciles_reopened_external_tickets() -> No
             "atelier.worker.changeset_state.worker_store.transition_lifecycle"
         ) as transition_lifecycle,
         patch(
-            "atelier.worker.changeset_state.beads.reconcile_reopened_issue_exported_github_tickets"
+            "atelier.worker.changeset_state.worker_store.reconcile_reopened_external_tickets"
         ) as reconcile_reopened,
     ):
         changeset_state.mark_changeset_in_progress(
@@ -228,7 +228,7 @@ def test_mark_changeset_in_progress_reconciles_reopened_external_tickets() -> No
     reconcile_reopened.assert_called_once_with(
         "at-1.5",
         beads_root=Path("/beads"),
-        cwd=Path("/repo"),
+        repo_root=Path("/repo"),
     )
 
 

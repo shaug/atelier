@@ -500,8 +500,8 @@ def test_worker_lifecycle_and_finalize_flows_have_dual_backend_parity(
         issues=_mutation_seed_issues(),
     )
     monkeypatch.setattr(
-        changeset_state.beads,
-        "reconcile_closed_issue_exported_github_tickets",
+        worker_store,
+        "reconcile_closed_external_tickets",
         lambda *args, **kwargs: None,
     )
     monkeypatch.setattr(

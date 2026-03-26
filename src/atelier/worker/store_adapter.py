@@ -32,6 +32,7 @@ from ..store import (
     ClaimMessageRequest,
     ClearAgentBeadHookRequest,
     CreateMessageRequest,
+    ExternalTicketReconcileResult,
     LifecycleStatus,
     LifecycleTransitionRequest,
     MarkMessageReadRequest,
@@ -825,6 +826,30 @@ def update_changeset_integrated_sha(
     )
 
 
+def reconcile_reopened_external_tickets(
+    issue_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> ExternalTicketReconcileResult:
+    """Reconcile reopened exported tickets through the AtelierStore seam."""
+
+    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    return asyncio.run(bundle.store.reconcile_reopened_external_tickets(issue_id))
+
+
+def reconcile_closed_external_tickets(
+    issue_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> ExternalTicketReconcileResult:
+    """Reconcile closed exported tickets through the AtelierStore seam."""
+
+    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    return asyncio.run(bundle.store.reconcile_closed_external_tickets(issue_id))
+
+
 def update_issue_labels(
     issue_id: str,
     *,
@@ -1474,6 +1499,32 @@ class WorkerStoreBeadsAdapter:
             allow_override=allow_override,
         )
 
+    def reconcile_reopened_external_tickets(
+        self,
+        issue_id: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> ExternalTicketReconcileResult:
+        return reconcile_reopened_external_tickets(
+            issue_id,
+            beads_root=beads_root,
+            repo_root=cwd,
+        )
+
+    def reconcile_closed_external_tickets(
+        self,
+        issue_id: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> ExternalTicketReconcileResult:
+        return reconcile_closed_external_tickets(
+            issue_id,
+            beads_root=beads_root,
+            repo_root=cwd,
+        )
+
     def set_agent_hook(
         self,
         agent_bead_id: str,
@@ -1505,6 +1556,8 @@ __all__ = [
     "list_work_children",
     "mark_message_read",
     "ready_changesets_global",
+    "reconcile_closed_external_tickets",
+    "reconcile_reopened_external_tickets",
     "release_epic_assignment",
     "resolve_hooked_epic",
     "set_agent_hook",
