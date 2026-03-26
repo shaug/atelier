@@ -19,6 +19,7 @@ from ..work_feedback import ReviewFeedbackSnapshot
 from . import restart_runtime as worker_restart_runtime
 from . import store_adapter as worker_store_adapter
 from . import work_command_helpers as worker_work
+from .iteration_args import WorkerIterationArgs, build_worker_iteration_args
 from .models import (
     FinalizeResult,
     ReconcileResult,
@@ -45,7 +46,7 @@ from .session.startup import StartupContractContext
 
 class RunWorkerOnceFn(Protocol):
     def __call__(
-        self, args: object, *, mode: str, dry_run: bool, session_key: str
+        self, args: WorkerIterationArgs, *, mode: str, dry_run: bool, session_key: str
     ) -> WorkerRunSummary: ...
 
 
@@ -76,20 +77,26 @@ class ImplicitContinuationDecision:
     epic_id: str | None = None
 
 
-def _restart_runtime_if_updated(args: object, *, emit: Callable[[str], None]) -> None:
+def _restart_runtime_if_updated(
+    *,
+    restart_on_update: bool,
+    startup_runtime: object | None,
+    emit: Callable[[str], None],
+) -> object | None:
     """Re-exec the worker at an idle boundary when startup runtime changed."""
-    if not bool(getattr(args, "restart_on_update", False)):
-        return
-    startup_runtime = getattr(args, "startup_runtime", None)
+    if not restart_on_update:
+        return startup_runtime
     if startup_runtime is None:
-        return
+        return None
+    if not isinstance(startup_runtime, worker_restart_runtime.WorkerStartupRuntime):
+        return startup_runtime
     decision = startup_runtime.plan_restart()
     if decision is None:
-        return
-    setattr(args, "startup_runtime", decision.startup_runtime)
+        return startup_runtime
+    next_startup_runtime = decision.startup_runtime
     emit(decision.message)
     if not decision.should_restart:
-        return
+        return next_startup_runtime
     try:
         worker_restart_runtime.relaunch_worker_process(decision.startup_runtime)
     except OSError as exc:
@@ -101,6 +108,7 @@ def _restart_runtime_if_updated(args: object, *, emit: Callable[[str], None]) ->
             "Runtime update detected but restart failed; continuing with the current "
             f"runtime ({type(exc).__name__}: {exc}; next retry in {wait_seconds}s)."
         )
+    return next_startup_runtime
 
 
 def classify_non_watch_exit_outcome(
@@ -529,18 +537,18 @@ def run_worker_sessions(
     emit: Callable[[str], None],
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> None:
-    epic_id_value = getattr(args, "epic_id", None)
-    explicit_epic_id = (
-        epic_id_value.strip() if isinstance(epic_id_value, str) and epic_id_value.strip() else None
-    )
+    normalized_args = build_worker_iteration_args(args)
+    explicit_epic_id = normalized_args.epic_id
     explicit_epic_requested = explicit_epic_id is not None
+    restart_on_update = normalized_args.restart_on_update
+    startup_runtime = normalized_args.startup_runtime
     excluded_implicit_epics: set[str] = set()
 
-    def build_iteration_args() -> object:
+    def build_iteration_args() -> WorkerIterationArgs:
         try:
             # Deep-clone args so nested mutable fields cannot leak
             # across loop iterations.
-            iteration_args = copy.deepcopy(args)
+            iteration_raw_args = copy.deepcopy(normalized_args.raw_args)
         except (TypeError, copy.Error) as exc:
             # Preserve behavior for uncommon non-deepcopyable args
             # objects, but keep a diagnostic breadcrumb when we
@@ -549,21 +557,16 @@ def run_worker_sessions(
                 "Falling back to shallow args copy after deepcopy failure: "
                 f"{type(exc).__name__}: {exc}"
             )
-            iteration_args = copy.copy(args)
+            iteration_raw_args = copy.copy(normalized_args.raw_args)
         iteration_token = f"{session_key}-iter-{len(excluded_implicit_epics)}-{time.monotonic_ns()}"
-        setattr(iteration_args, "bounded_runtime_iteration_token", iteration_token)
-        if explicit_epic_requested:
-            setattr(iteration_args, "epic_id", explicit_epic_id)
-            return iteration_args
-        # Guard against accidental explicit-mode carryover across
-        # implicit retries.
-        setattr(iteration_args, "epic_id", None)
-        setattr(
-            iteration_args,
-            "implicit_excluded_epic_ids",
-            tuple(sorted(excluded_implicit_epics)),
+        return build_worker_iteration_args(
+            iteration_raw_args,
+            epic_id=explicit_epic_id if explicit_epic_requested else None,
+            implicit_excluded_epic_ids=tuple(sorted(excluded_implicit_epics)),
+            bounded_runtime_iteration_token=iteration_token,
+            restart_on_update=restart_on_update,
+            startup_runtime=startup_runtime,
         )
-        return iteration_args
 
     def log_continuation_decision(
         decision: ImplicitContinuationDecision, *, summary: WorkerRunSummary
@@ -575,7 +578,7 @@ def run_worker_sessions(
             f"epic={summary.epic_id or 'none'} changeset={summary.changeset_id or 'none'}"
         )
 
-    if bool(getattr(args, "queue", False)):
+    if normalized_args.queue:
         iteration_args = build_iteration_args()
         summary = run_worker_once(
             iteration_args, mode=mode, dry_run=dry_run, session_key=session_key
@@ -632,7 +635,11 @@ def run_worker_sessions(
         iteration_args = build_iteration_args()
         summary = run_worker_once(iteration_args, mode=mode, dry_run=False, session_key=session_key)
         report_worker_summary(summary, False)
-        _restart_runtime_if_updated(args, emit=emit)
+        startup_runtime = _restart_runtime_if_updated(
+            restart_on_update=restart_on_update,
+            startup_runtime=startup_runtime,
+            emit=emit,
+        )
         if summary.started:
             if run_mode == "once":
                 return
