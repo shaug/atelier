@@ -5,19 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from .. import lifecycle
 from . import store_adapter as worker_store
-
-
-def _close_transition_has_active_pr_lifecycle(
-    candidate: worker_store.EpicCloseCandidate,
-) -> bool:
-    review_state = (
-        candidate.review.pr_state.value if candidate.review.pr_state is not None else None
-    )
-    if review_state == "pushed":
-        return candidate.lifecycle.value == "closed"
-    return lifecycle.is_active_pr_lifecycle_state(review_state)
 
 
 def close_epic_if_complete(
@@ -55,7 +43,7 @@ def close_epic_if_complete(
     for candidate in changeset_candidates:
         if candidate.lifecycle.value != "closed":
             continue
-        if not _close_transition_has_active_pr_lifecycle(candidate):
+        if not worker_store.close_transition_has_active_pr_lifecycle(candidate):
             continue
         if not dry_run:
             worker_store.transition_lifecycle(

@@ -333,6 +333,40 @@ def test_mark_issue_blocked_fails_closed_when_combined_update_cannot_be_verified
         assert request.description.count("blocked_at:") == 1
 
 
+def test_close_transition_has_active_pr_lifecycle_hydrates_missing_description(monkeypatch) -> None:
+    builder = IssueFixtureBuilder()
+    _patch_bundle(
+        monkeypatch,
+        issues=(
+            builder.issue(
+                "at-epic.1",
+                issue_type="task",
+                status="closed",
+                description="pr_state: pushed\n",
+            ),
+        ),
+    )
+
+    assert (
+        worker_store.close_transition_has_active_pr_lifecycle(
+            {"id": "at-epic.1", "status": "closed"},
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+        is True
+    )
+    worker_store.clear_bundle_cache()
+
+
+def test_close_transition_has_active_pr_lifecycle_treats_pushed_as_inactive_when_open() -> None:
+    assert (
+        worker_store.close_transition_has_active_pr_lifecycle(
+            {"status": "open", "description": "pr_state: pushed\n"}
+        )
+        is False
+    )
+
+
 def test_mark_issue_blocked_reuses_same_note_when_retry_reads_partial_state(
     monkeypatch,
 ) -> None:

@@ -635,6 +635,13 @@ def test_run_finalize_pipeline_blocks_closed_changeset_while_pr_active(
         "run_bd_json",
         lambda *_args, **_kwargs: [issue],
     )
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "close_transition_has_active_pr_lifecycle",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("finalize should use worker close guard")
+        ),
+    )
 
     service = _FinalizeServiceStub()
     reopened: list[str] = []

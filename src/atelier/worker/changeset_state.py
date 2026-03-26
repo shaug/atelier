@@ -65,10 +65,10 @@ def _close_guard_allows(
         candidate = _load_changeset_issue(changeset_id, beads_root=beads_root, repo_root=repo_root)
     if candidate is None:
         return True
-    if not beads.close_transition_has_active_pr_lifecycle(
+    if not worker_store.close_transition_has_active_pr_lifecycle(
         candidate,
         beads_root=beads_root,
-        cwd=repo_root,
+        repo_root=repo_root,
         active_pr_lifecycle=active_pr_lifecycle,
     ):
         return True
