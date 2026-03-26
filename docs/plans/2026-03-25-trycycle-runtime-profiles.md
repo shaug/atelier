@@ -1,306 +1,188 @@
-# Trycycle Runtime Profiles for Planner and Worker Implementation Plan
+# Trycycle Runtime Feasibility for Atelier Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use trycycle-executing to
 > implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for
 > tracking.
 
-**Goal:** Add a first-class runtime contract option to `atelier plan` and
-`atelier work` so users can choose either the native Atelier contract or a
-repo-owned `trycycle` contract layered on top of the existing agent CLI,
-with native behavior preserved as the default.
+**Goal:** Produce a repo-owned feasibility and architecture package that
+determines which trycycle-style planner/worker hardening behaviors can be
+adapted into Atelier `runtime profile`s, which cannot, and what architectural
+changes would be required without changing Atelier's core functional intent.
 
-**Architecture:** Keep runtime contract selection separate from agent
-transport. Add a typed runtime-profile layer plus a shared registry, codify
-the shipped `trycycle` contract inside this repo as an explicit delta from
-the native planner/worker contract, and thread the selected profile into
-planner and worker AGENTS/prompt generation. Validate that behavior at the
-real launch boundary with end-to-end CLI scenario tests that run a recording
-fixture executable through the same start-command path production uses.
+**Architecture:** This slice is analysis and contract writing, not product
+surface implementation. Baseline Atelier's current planner/worker contracts,
+compare them against the trycycle-derived behaviors named by the user and the
+`trycycle-planning` skill, then publish a clear verdict: direct adaptation is
+not currently feasible as a full runtime-profile substitution, but a smaller
+repo-owned hardening profile is feasible. Record the mismatches, the adoptable
+subset, and the architectural changes that would be needed for anything closer
+to trycycle's subagent-heavy model.
 
-**Tech Stack:** Python 3.11+, Typer, Pydantic, pytest, existing Atelier
-planner/worker runtime modules, repo-owned runtime profile docs/helpers,
-subprocess-based recording test fixtures.
+**Tech Stack:** Markdown design docs, pytest doc-contract tests, existing
+Atelier planner/worker templates, skills, runtime/session modules.
 
 ---
 
 ## Execution prerequisites
 
-- Run `bash .githooks/worktree-bootstrap.sh` in this worktree before the
-  first code change so repo-local hooks are bootstrapped here as required by
+- Run `bash .githooks/worktree-bootstrap.sh` in this worktree before the first
+  code change so repo-local hooks are bootstrapped here as required by
   `AGENTS.md`.
-- Treat this plan and the repo-owned
-  `docs/trycycle-runtime-contract.md` created in Task 1 as the authoritative
-  shipped contract for the new runtime profile.
-- Do not read `~/.codex/skills/trycycle/...` at runtime, in tests, or in the
-  final implementation. Local trycycle installs were analysis input only;
-  the shipped Atelier contract must live in this repo.
-- Do not invent a new `ATELIER_*` environment contract for runtime profiles
-  in this slice. Keep the runtime signal in config, CLI output, prompts,
-  rendered `AGENTS.md`, and planner session metadata only.
-- Before writing the `trycycle` profile text, read the current native
-  planner and worker contract sources and record the native baseline in the
-  new contract doc:
+- Treat the user clarifications in the planning transcript and the
+  `trycycle-planning` skill as the only trycycle source material in this slice.
+  Do not invent external trycycle guarantees or depend on a local trycycle
+  install.
+- Do not modify `atelier plan`, `atelier work`, config models, session routing,
+  or runtime-launch code in this slice. The outcome here is a repo-owned
+  decision package, not a shipped runtime-profile feature.
+- Use `runtime profile` as the canonical term throughout the new doc and tests.
+  Reserve `contract` for statements of guarantees inside that doc.
+- Keep these user decisions fixed:
+  - repo-owned source of truth only
+  - shared workspace identifiers stay stable
+  - hybrid verification floor for any later feature work
+  - it is acceptable to conclude that direct trycycle adaptation is not
+    currently feasible
+- Before writing the new doc, read these sources and anchor the analysis in
+  them:
+  - `docs/behavior.md`
+  - `docs/dogfood.md`
+  - `docs/worker-runtime-architecture.md`
+  - `docs/north-star-review-gate.md`
   - `src/atelier/templates/AGENTS.planner.md.tmpl`
   - `src/atelier/templates/AGENTS.worker.md.tmpl`
   - `src/atelier/commands/plan.py`
+  - `src/atelier/commands/work.py`
   - `src/atelier/worker/prompts.py`
+  - `src/atelier/skills.py`
+  - `src/atelier/skills/planner-startup-check/SKILL.md`
+  - `src/atelier/skills/startup-contract/SKILL.md`
+  - `src/atelier/skills/plan-changesets/SKILL.md`
+  - `src/atelier/skills/publish/SKILL.md`
 
-## User-visible behavior
+## User-visible outcome
 
-- `atelier plan` gains `--runtime native|trycycle`.
-- `atelier work` gains `--runtime native|trycycle`.
-- Project config gains `agent.runtime.default` plus optional
-  `agent.runtime.planner` and `agent.runtime.worker` overrides.
-- Runtime selection precedence is:
-  CLI override, then role-scoped config override, then runtime default, then
-  `native`.
-- `agent.default` still selects the underlying agent CLI (`codex`,
-  `claude`, etc.). Runtime selection does not replace or rename the agent
-  transport.
-- Native remains the default and must preserve current behavior.
-- The `trycycle` runtime is an Atelier-managed profile, not a dependency on
-  an external `trycycle` executable in this slice.
-- Planner and worker startup output must make the chosen runtime explicit
-  before the session begins.
-- Planner session lookup and saved-session reuse are runtime-scoped.
-  Changing planner runtime must start a fresh session instead of reusing a
-  session that was created under the other runtime profile.
+- Add a repo-owned design document that answers whether trycycle-like planner
+  and worker hardening can fit Atelier's current orchestration model.
+- The document must explain the mismatches between trycycle and Atelier,
+  including subagent communication, durable Beads/message coordination,
+  multiple concurrent workers, PR-driven late phases, review-sized changesets,
+  and operator accountability.
+- The document must state a concrete verdict:
+  - full trycycle-style runtime substitution is not currently feasible without
+    deeper architectural change
+  - a smaller repo-owned `runtime profile` cut is feasible for planner and
+    worker hardening guidance
+- The document must describe what would have to change in Atelier to support
+  deeper trycycle-style execution hardening while preserving Atelier's core
+  featureset.
+- Add a doc-contract test so this analysis remains durable and does not drift
+  later.
 
 ## Contracts and invariants
 
-- Runtime profiles may change agent guidance, prompt construction, rendered
-  `AGENTS.md` content, and planner resume namespacing. They must not change:
-  Beads schema, worktree ownership, claim rules, planner sync, teardown,
-  publish/finalize, or runtime environment sanitization semantics.
-- The shipped `trycycle` obligations must be repo-owned. Future maintenance
-  of the profile must not depend on a developer-local skill installation.
-- The contract doc must record both:
-  - the current native Atelier planner/worker baseline
-  - the exact `trycycle` delta Atelier ships in this slice
-- Resume behavior remains agent-defined. The runtime profile must not change
-  how saved Codex planner session IDs are discovered or persisted when the
-  runtime profile is unchanged. A runtime-profile change must intentionally
-  bypass resume to avoid reviving stale planner context from the wrong
-  contract.
-- Planner runtime scoping must also apply when no saved session pointer
-  exists. Native and trycycle planner sessions need distinct Codex session
-  targets so most-recent-session fallback cannot cross runtime boundaries by
-  accident.
-- Do not change the shared worker/native workspace session identifier format
-  in `src/atelier/workspace.py`. Runtime-specific session targeting is a
-  planner concern in this slice, not a global workspace naming change.
-- Worker runtime selection must not alter one-changeset-per-session behavior
-  or the fail-closed startup contract.
-- Planner runtime selection must not weaken the read-only planner worktree
-  guardrail.
-- `trycycle` is transport-agnostic in this slice. It works with the existing
-  supported agents because it is a guidance profile layered over the agent
-  CLI, not a new agent type.
-- No migration is required. Existing configs without `agent.runtime`
-  continue to resolve to `native`.
-- Runtime addendum insertion must be centralized. Planner and worker should
-  not each hand-build their own AGENTS block markers or block replacement
-  rules.
-- Even though runtime selection is contract-level rather than transport-level,
-  the implementation must still be validated at the real agent-launch
-  boundary with subprocess-based scenario tests. Do not rely on mocked prompt
-  plumbing alone.
+- The analysis must preserve Atelier's functional intent:
+  orchestrated agent development with operator accountability.
+- The document must explicitly keep these Atelier invariants in view:
+  - durable planning state lives in Beads
+  - planner and worker communicate through durable tickets/messages plus
+    external signals, not ephemeral subagent chat
+  - workers may run concurrently against available work
+  - PR review, publish/finalize, and merge-state handling are part of the
+    worker lifecycle in PR-enabled projects
+  - changesets must stay human-reviewable and may be split when they grow too
+    large
+- The analysis must not collapse agent transport, runtime profile, and
+  orchestration architecture into the same concept.
+- If the analysis recommends a future runtime profile, it must be repo-owned and
+  layered onto existing agent CLIs. It must not depend on a local trycycle
+  installation or a new `AgentSpec`.
+- If the analysis finds a deeper mismatch, the document must explain how Atelier
+  could change its architecture without changing its core intent or operator
+  accountability model.
 
 ## Non-goals
 
-- Do not add an external `trycycle` binary dependency or installer flow.
-- Do not turn `trycycle` into a new `agents.AgentSpec`.
-- Do not read developer-local skill files at runtime.
-- Do not change Beads lifecycle semantics, worker publish rules, or planner
-  promotion rules.
-- Do not make `trycycle` the default runtime.
-- Do not add new initialization prompts just to expose this feature. Runtime
-  is an advanced opt-in and should be configured via CLI override or JSON
-  config.
+- Do not add `--runtime` flags.
+- Do not add `agent.runtime` config.
+- Do not alter planner session targeting or worker prompt wiring.
+- Do not add a `trycycle` binary dependency.
+- Do not claim that trycycle can be embedded directly unless the code/docs
+  materially support that conclusion. The expected conclusion for this slice is
+  narrower: partial adaptation is feasible, direct substitution is not.
+- Do not update `docs/behavior.md` or `README.md` to describe a feature that
+  does not exist yet.
 
 ## File structure
 
-- Create: `src/atelier/runtime_profiles/__init__.py`
-  Responsibility: public runtime-profile exports and constants.
-- Create: `src/atelier/runtime_profiles/models.py`
-  Responsibility: typed runtime profile names and shared profile payloads.
-- Create: `src/atelier/runtime_profiles/registry.py`
-  Responsibility: resolve CLI/config/default precedence and return the
-  selected role profile.
-- Create: `src/atelier/runtime_profiles/planner.py`
-  Responsibility: repo-owned planner addendum text, prompt-line helpers, and
-  planner session-target helpers.
-- Create: `src/atelier/runtime_profiles/worker.py`
-  Responsibility: repo-owned worker addendum text and prompt-line helpers.
-- Create: `docs/trycycle-runtime-contract.md`
-  Responsibility: durable contract for native vs `trycycle` runtime behavior
-  and the specific trycycle-derived obligations shipped in this slice.
-- Create: `tests/fixtures/recording_agent.py`
-  Responsibility: test-only executable that records argv/cwd/env/prompt input
-  and exits deterministically.
-- Create: `tests/atelier/runtime_profile_harness.py`
-  Responsibility: temp-project helpers for seeding config, temp repos,
-  planner/worker launch capture paths, and reading fixture artifacts.
-- Create: `tests/atelier/test_runtime_profiles.py`
-  Responsibility: runtime content, delta documentation, and selection
-  precedence coverage.
-- Create: `tests/atelier/commands/test_plan_runtime_e2e.py`
-  Responsibility: CLI-level planner scenario tests using the recording agent
-  fixture to prove runtime output, prompt, AGENTS content, and session
-  scoping at the real launch boundary.
-- Create: `tests/atelier/commands/test_work_runtime_e2e.py`
-  Responsibility: CLI-level worker scenario tests using the recording agent
-  fixture to prove runtime output, prompt, and AGENTS content at the real
-  launch boundary.
-
-- Modify: `src/atelier/agent_home.py`
-  Responsibility: add a shared helper that inserts or replaces a
-  deterministic runtime-profile addendum block in rendered `AGENTS.md`.
-- Modify: `src/atelier/models.py`
-  Responsibility: add typed runtime config to `AgentConfig`.
-- Modify: `src/atelier/config.py`
-  Responsibility: preserve runtime config through defaults and config
-  rebuilds.
-- Modify: `src/atelier/cli.py`
-  Responsibility: expose `--runtime` on `plan` and `work`.
-- Modify: `src/atelier/commands/plan.py`
-  Responsibility: resolve planner runtime, surface it to the user, apply the
-  shared AGENTS addendum helper, extend the opening prompt, and keep planner
-  resume scoped to the selected runtime profile.
-- Modify: `src/atelier/sessions.py`
-  Responsibility: allow planner runtime-specific Codex session lookup without
-  changing default workspace matching behavior.
-- Modify: `src/atelier/worker/ports.py`
-  Responsibility: carry resolved worker runtime metadata and prompt additions
-  through the worker runtime protocols.
-- Modify: `src/atelier/worker/prompts.py`
-  Responsibility: accept runtime-specific prompt additions without duplicating
-  the base worker prompt.
-- Modify: `src/atelier/worker/work_startup_runtime.py`
-  Responsibility: preserve the public `worker_opening_prompt` facade while
-  threading through runtime-specific prompt additions.
-- Modify: `src/atelier/worker/runtime.py`
-  Responsibility: extend the worker command adapter to pass runtime
-  additions.
-- Modify: `src/atelier/worker/session/agent.py`
-  Responsibility: resolve worker runtime, apply the shared AGENTS addendum
-  helper, and carry prompt additions forward to startup.
-- Modify: `src/atelier/worker/session/runner.py`
-  Responsibility: surface the selected worker runtime in startup output and
-  use the runtime-specific prompt additions from session preparation.
-- Modify: `docs/behavior.md`
-  Responsibility: document config shape, CLI options, and profile semantics.
-- Modify: `README.md`
-  Responsibility: document the new runtime option and example usage.
-
-- Modify tests:
-  `tests/atelier/test_agent_home.py`
-  `tests/atelier/test_agents.py`
-  `tests/atelier/test_config.py`
-  `tests/atelier/test_models.py`
-  `tests/atelier/test_sessions.py`
-  `tests/atelier/commands/test_plan_cli.py`
-  `tests/atelier/commands/test_work_cli.py`
-  `tests/atelier/commands/test_plan.py`
-  `tests/atelier/commands/test_work_runtime_wiring.py`
-  `tests/atelier/worker/test_prompts.py`
-  `tests/atelier/worker/test_session_agent.py`
-  `tests/atelier/worker/test_session_runner.py`
-  `tests/atelier/worker/test_session_runner_flow.py`
-  `tests/atelier/worker/test_runtime.py`
-  `tests/atelier/worker/test_work_startup_runtime.py`
-  Responsibility: cover runtime content, config defaults, CLI plumbing,
-  planner/worker runtime selection, native parity, and trycycle-specific
-  prompt/addendum behavior.
+- Create: `docs/trycycle-runtime-feasibility.md`
+  Responsibility: repo-owned decision document describing Atelier's current
+  planner/worker model, the trycycle-derived behaviors under review, the
+  mismatch matrix, the feasibility verdict, the recommended runtime-profile
+  cut, the required architectural changes for deeper adaptation, and the future
+  verification floor.
+- Create: `tests/atelier/test_trycycle_runtime_feasibility.py`
+  Responsibility: keep the feasibility document stable by asserting that the
+  required sections and core terms remain present.
 
 ## Strategy gate
 
-The wrong architecture would be to add `trycycle` as another `AgentSpec` in
-`src/atelier/agents.py`. That would collapse two distinct concerns into one:
-transport and runtime contract.
+The wrong plan would ship a user-facing `trycycle` runtime profile first and
+only then ask whether that profile actually fits Atelier's orchestration model.
+That would optimize for a CLI/config surface instead of the user's real goal.
 
-The second wrong architecture would be to read
-`~/.codex/skills/trycycle/...` from the implementation at runtime or in
-tests. That would make the feature machine-local instead of repo-owned and
-would make future maintenance depend on an external skill install.
+The second wrong plan would reduce trycycle to a few extra prompt lines in
+`AGENTS.md`. The user explicitly called out trycycle's harder planning,
+verification, and implementation feedback loops plus its use of subagent
+communication. A prompt addendum alone does not answer whether that model can
+fit Atelier.
 
-The third wrong architecture would be to append trycycle text directly in
-both `plan.py` and `worker/session/agent.py` with separate ad hoc block
-handling. That would create two divergent AGENTS mutation paths for the same
-feature.
+The third wrong plan would ignore Atelier's functional intent. Atelier is not
+just a prompt runner. It is an orchestration system with durable Beads state,
+multiple workers, operator approval points, PR-driven late phases, and
+review-sized changeset constraints. Any recommendation that ignores those
+properties would be wrong even if it sounded "trycycle-like."
 
-The fourth wrong architecture would be to ship a profile named `trycycle`
-without first codifying the native baseline and the exact shipped delta in
-repo-owned docs and helper modules. That would turn the feature into
-arbitrary prompt tweaks rather than a deliberate runtime contract.
+The clean cut for this slice is:
 
-The fifth wrong architecture would be to test this only with mocked prompt
-builders and mocked launch helpers. That would miss the critical launch
-boundary where CLI wiring, prompt composition, and AGENTS rendering actually
-come together.
+- publish one repo-owned feasibility document
+- keep the conclusion evidence-backed and explicit
+- state that direct trycycle-style runtime substitution is not currently
+  feasible in Atelier's present architecture
+- identify the smaller hardening behaviors that *are* compatible with a future
+  repo-owned `runtime profile`
+- explain the architectural changes needed to go further without changing
+  Atelier's core functional intent
 
-The clean steady-state design is:
+That lands the user's requested end state directly and avoids premature product
+surface work.
 
-- keep `agents.AgentSpec` as the CLI transport registry
-- add a separate runtime-profile layer with explicit per-role resolution
-- codify the native baseline and shipped `trycycle` delta inside this repo
-- use a shared AGENTS addendum helper for both planner and worker
-- keep native behavior encoded as the `native` profile
-- implement `trycycle` as an Atelier-managed guidance profile in this slice
-- validate planner and worker flows with real subprocess fixture launches
-- keep Beads/worktree/finalize behavior unchanged
-
-That solves the user’s actual goal: ship a real trycycle-like runtime option
-for planner and worker phases without destabilizing the lifecycle machinery
-that already exists.
-
-### Task 1: Codify the native baseline and shipped trycycle delta
+### Task 1: Create the feasibility document scaffold and lock its required shape
 
 **Files:**
-- Create: `src/atelier/runtime_profiles/__init__.py`
-- Create: `src/atelier/runtime_profiles/models.py`
-- Create: `src/atelier/runtime_profiles/planner.py`
-- Create: `src/atelier/runtime_profiles/worker.py`
-- Create: `tests/atelier/test_runtime_profiles.py`
-- Create: `docs/trycycle-runtime-contract.md`
-- Modify: `src/atelier/agent_home.py`
-- Modify: `tests/atelier/test_agent_home.py`
+- Create: `docs/trycycle-runtime-feasibility.md`
+- Create: `tests/atelier/test_trycycle_runtime_feasibility.py`
 
 - [ ] **Step 1: Identify or write the failing test**
 
-Before writing the contract text, read the current native planner and worker
-sources listed in the prerequisites and capture the baseline sections in
-`docs/trycycle-runtime-contract.md`.
-
-Add focused tests for:
+Read the prerequisite source files first, then add a doc-contract test that
+defines the minimum structure of the new document.
 
 ```python
-def test_trycycle_contract_doc_records_native_baseline_and_delta() -> None:
-    text = Path("docs/trycycle-runtime-contract.md").read_text(encoding="utf-8")
-    assert "## Native Planner Baseline" in text
-    assert "## Native Worker Baseline" in text
-    assert "## Trycycle Delta" in text
+from __future__ import annotations
+
+from pathlib import Path
+
+DOC_PATH = Path(__file__).resolve().parents[2] / "docs" / "trycycle-runtime-feasibility.md"
 
 
-def test_planner_trycycle_runtime_returns_repo_owned_addendum() -> None:
-    addendum = planner_runtime_addendum("trycycle")
-    assert "Diagnose the plan completely before deciding anything." in addendum
-
-
-def test_worker_trycycle_runtime_returns_repo_owned_prompt_lines() -> None:
-    lines = worker_runtime_prompt_lines("trycycle")
-    assert "Execute the work task-by-task." in lines
-
-
-def test_apply_runtime_profile_addendum_inserts_named_block() -> None:
-    updated = agent_home.apply_runtime_profile_addendum(
-        "# Base\n",
-        "extra guidance",
-        role="planner",
-        runtime_name="trycycle",
-    )
-    assert "## Runtime Profile Addendum" in updated
-    assert "Runtime: trycycle" in updated
+def test_trycycle_runtime_feasibility_doc_exists() -> None:
+    content = DOC_PATH.read_text(encoding="utf-8")
+    assert "# Trycycle Runtime Feasibility for Atelier" in content
+    assert "## Scope" in content
+    assert "## Source Inputs" in content
+    assert "## Atelier Invariants" in content
+    assert "## Trycycle-Derived Behaviors Under Review" in content
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -308,79 +190,52 @@ def test_apply_runtime_profile_addendum_inserts_named_block() -> None:
 Run:
 
 ```bash
-uv run pytest \
-  tests/atelier/test_runtime_profiles.py \
-  tests/atelier/test_agent_home.py -k runtime -v
+uv run pytest tests/atelier/test_trycycle_runtime_feasibility.py -v
 ```
 
-Expected: FAIL because the runtime profile helpers, contract doc sections,
-and shared AGENTS addendum helper do not exist.
+Expected: FAIL because the feasibility doc and its required sections do not
+exist yet.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Implement the repo-owned contract helpers first:
+Create `docs/trycycle-runtime-feasibility.md` with these top-level sections and
+brief initial prose in each:
 
-```python
-RuntimeProfileName = Literal["native", "trycycle"]
+- `# Trycycle Runtime Feasibility for Atelier`
+- `## Scope`
+- `## Source Inputs`
+- `## Atelier Invariants`
+- `## Trycycle-Derived Behaviors Under Review`
 
+In `## Scope`, say explicitly that this slice determines feasibility and future
+architecture rather than shipping a runtime-profile feature.
 
-def planner_runtime_addendum(runtime_name: RuntimeProfileName) -> str:
-    if runtime_name == "native":
-        return ""
-    return "\n".join(
-        [
-            "## Runtime Profile: trycycle",
-            "- Diagnose the plan completely before deciding anything.",
-            "- Capture behavior, invariants, and failure modes before task breakdown.",
-            "- Make architecture decisions before decomposition.",
-        ]
-    )
-```
+In `## Source Inputs`, state that the analysis is based on:
 
-```python
-def worker_runtime_prompt_lines(
-    runtime_name: RuntimeProfileName,
-) -> tuple[str, ...]:
-    if runtime_name == "native":
-        return ()
-    return (
-        "Restate the bead contract as a concrete checklist before coding.",
-        "Execute the work task-by-task.",
-        "Do not skip required repo gates, push, or publish steps.",
-    )
-```
-
-Add `agent_home.apply_runtime_profile_addendum(...)` so runtime addendum
-block insertion/replacement is shared and deterministic for both roles.
-
-Write `docs/trycycle-runtime-contract.md` as the authoritative shipped
-contract. It must record the current native planner/worker baseline first,
-then the exact `trycycle` delta Atelier ships in this slice.
+- the user transcript in this planning thread
+- the `trycycle-planning` skill
+- the existing Atelier planner/worker templates, docs, and runtime code
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run:
 
 ```bash
-uv run pytest \
-  tests/atelier/test_runtime_profiles.py \
-  tests/atelier/test_agent_home.py -k runtime -v
+uv run pytest tests/atelier/test_trycycle_runtime_feasibility.py -v
 ```
 
 Expected: PASS.
 
 - [ ] **Step 5: Refactor, format, and verify**
 
-Tighten naming and docstrings, keep the profile content repo-owned, and
-verify the helper surface.
+Tighten section wording, keep prose lines at 80 chars, and use
+`runtime profile` consistently.
 
 Run:
 
 ```bash
 just format
-uv run pytest \
-  tests/atelier/test_runtime_profiles.py \
-  tests/atelier/test_agent_home.py -v
+uv run pytest tests/atelier/test_trycycle_runtime_feasibility.py -v
 ```
 
 Expected: all PASS.
@@ -389,156 +244,107 @@ Expected: all PASS.
 
 ```bash
 git add \
-  src/atelier/runtime_profiles/__init__.py \
-  src/atelier/runtime_profiles/models.py \
-  src/atelier/runtime_profiles/planner.py \
-  src/atelier/runtime_profiles/worker.py \
-  src/atelier/agent_home.py \
-  docs/trycycle-runtime-contract.md \
-  tests/atelier/test_runtime_profiles.py \
-  tests/atelier/test_agent_home.py
-git commit -m "feat(runtime): codify repo-owned trycycle contract" \
-  -m "- record the native planner and worker baseline in repo docs" \
-  -m "- add repo-owned planner and worker runtime profile helpers" \
-  -m "- centralize AGENTS runtime addendum insertion and cover it with tests"
+  docs/trycycle-runtime-feasibility.md \
+  tests/atelier/test_trycycle_runtime_feasibility.py
+git commit -m "docs(runtime): add trycycle feasibility scaffold" \
+  -m "- add a repo-owned feasibility document for trycycle-style adaptation" \
+  -m "- add a doc-contract test that locks the required analysis sections" \
+  -m "- keep this slice analysis-only instead of shipping a runtime surface"
 ```
 
-### Task 2: Add typed runtime selection and a reusable launch-boundary harness
+### Task 2: Record the Atelier baseline and the real mismatch matrix
 
 **Files:**
-- Create: `src/atelier/runtime_profiles/registry.py`
-- Create: `tests/fixtures/recording_agent.py`
-- Create: `tests/atelier/runtime_profile_harness.py`
-- Modify: `src/atelier/models.py`
-- Modify: `src/atelier/config.py`
-- Modify: `src/atelier/cli.py`
-- Modify: `tests/atelier/test_agents.py`
-- Modify: `tests/atelier/test_config.py`
-- Modify: `tests/atelier/test_models.py`
-- Modify: `tests/atelier/commands/test_plan_cli.py`
-- Modify: `tests/atelier/commands/test_work_cli.py`
-- Modify: `tests/atelier/test_runtime_profiles.py`
+- Modify: `docs/trycycle-runtime-feasibility.md`
+- Modify: `tests/atelier/test_trycycle_runtime_feasibility.py`
 
 - [ ] **Step 1: Identify or write the failing test**
 
-Add focused tests for:
+Extend the doc-contract test so it requires the operational details that matter
+for this decision.
 
 ```python
-def test_agent_runtime_config_defaults_to_native() -> None:
-    config = AgentConfig(default="codex")
-    assert config.runtime.default == "native"
-    assert config.runtime.planner is None
-    assert config.runtime.worker is None
-
-
-def test_runtime_selection_precedence_cli_over_role_over_default() -> None:
-    runtime = registry.resolve_runtime_name(
-        role="worker",
-        cli_override="trycycle",
-        runtime_config=AgentRuntimeConfig(default="native", worker="native"),
-    )
-    assert runtime == "trycycle"
-
-
-def test_recording_agent_fixture_captures_prompt_and_env(tmp_path: Path) -> None:
-    result = run_recording_agent_fixture(tmp_path, prompt="hello")
-    assert result.prompt == "hello"
-    assert "PWD" in result.env
+def test_trycycle_runtime_feasibility_doc_captures_critical_mismatches() -> None:
+    content = DOC_PATH.read_text(encoding="utf-8").lower()
+    assert "shared message/ticket space" in content
+    assert "subagent" in content
+    assert "multiple workers" in content
+    assert "operator accountability" in content
+    assert "pull request" in content or "pr-driven" in content
+    assert "human cognitive review load" in content
+    assert "## mismatch matrix" in content
 ```
-
-Extend the CLI tests so `plan` and `work` must pass a `runtime` attribute
-through to the command layer.
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run:
 
 ```bash
-uv run pytest \
-  tests/atelier/test_agents.py \
-  tests/atelier/test_runtime_profiles.py \
-  tests/atelier/test_config.py \
-  tests/atelier/test_models.py \
-  tests/atelier/commands/test_plan_cli.py \
-  tests/atelier/commands/test_work_cli.py -v
+uv run pytest tests/atelier/test_trycycle_runtime_feasibility.py -v
 ```
 
-Expected: FAIL because `AgentConfig` has no runtime field, the registry does
-not exist, the CLI does not pass `runtime`, and the recording fixture/harness
-does not exist.
+Expected: FAIL because the doc does not yet capture Atelier's real constraints
+or the mismatch matrix.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Add a typed runtime config that stays separate from the agent transport:
+Fill the document with evidence-backed analysis from the prerequisite sources.
 
-```python
-class AgentRuntimeConfig(BaseModel):
-    default: RuntimeProfileName = "native"
-    planner: RuntimeProfileName | None = None
-    worker: RuntimeProfileName | None = None
-```
+In `## Atelier Invariants`, document:
 
-Add registry helpers with explicit precedence:
+- planner uses Beads as the durable planning source of truth
+- worker execution is one-changeset-per-session
+- planner/worker coordination is durable and thread-based, not ephemeral
+- workers may run concurrently
+- worker completion includes publish/PR/review lifecycle handling
+- oversized work must be split to preserve reviewability
 
-```python
-def resolve_runtime_name(
-    *,
-    role: str,
-    cli_override: str | None,
-    runtime_config: AgentRuntimeConfig | None,
-) -> RuntimeProfileName:
-    if cli_override is not None:
-        return normalize_runtime_name(cli_override, source="--runtime")
-    if runtime_config is not None:
-        role_value = getattr(runtime_config, normalize_launch_role(role), None)
-        if role_value:
-            return role_value
-        return runtime_config.default
-    return "native"
-```
+Add `## Mismatch Matrix` and compare, at minimum, these concerns:
 
-Thread the new field through `AgentConfig`, `default_user_config()`, and
-`build_project_config()` without adding new prompts.
+- planner hardening and revision loops
+- worker verification and self-review loops
+- subagent communication versus durable Beads/messages
+- concurrent workers versus session-local orchestration
+- PR-driven late phases versus prompt-completion-oriented execution
+- automatic changeset splitting to preserve human review load
+- operator accountability versus autonomous local subagent convergence
 
-Add `--runtime` to the `plan` and `work` Typer commands and pass it through
-the `SimpleNamespace`.
+For each row, state one of:
 
-Create the recording fixture and harness now so later planner/worker tasks can
-use the same real-launch assertion surface instead of inventing separate
-helpers.
+- `Compatible now as runtime-profile guidance`
+- `Compatible only with bounded adaptation`
+- `Not compatible without architectural change`
+
+Also add a short `## Observed Strengths Already Present in Atelier` section so
+the document is not framed as "Atelier has none of this today." Include items
+such as:
+
+- planner startup discipline
+- worker north-star review loop
+- publish/finalize gating
+- changeset splitting expectations
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run:
 
 ```bash
-uv run pytest \
-  tests/atelier/test_agents.py \
-  tests/atelier/test_runtime_profiles.py \
-  tests/atelier/test_config.py \
-  tests/atelier/test_models.py \
-  tests/atelier/commands/test_plan_cli.py \
-  tests/atelier/commands/test_work_cli.py -v
+uv run pytest tests/atelier/test_trycycle_runtime_feasibility.py -v
 ```
 
 Expected: PASS.
 
 - [ ] **Step 5: Refactor, format, and verify**
 
-Tighten naming and docstrings, keep the runtime helpers out of
-`src/atelier/agents.py`, and verify the broader config/model surface.
+Make the mismatch matrix crisp and non-redundant. Every claim should trace back
+to the user request or an Atelier source file already listed in the
+prerequisites.
 
 Run:
 
 ```bash
 just format
-uv run pytest \
-  tests/atelier/test_agents.py \
-  tests/atelier/test_runtime_profiles.py \
-  tests/atelier/test_config.py \
-  tests/atelier/test_models.py \
-  tests/atelier/commands/test_plan_cli.py \
-  tests/atelier/commands/test_work_cli.py -v
+uv run pytest tests/atelier/test_trycycle_runtime_feasibility.py -v
 ```
 
 Expected: all PASS.
@@ -547,283 +353,118 @@ Expected: all PASS.
 
 ```bash
 git add \
-  src/atelier/runtime_profiles/registry.py \
-  src/atelier/models.py \
-  src/atelier/config.py \
-  src/atelier/cli.py \
-  tests/fixtures/recording_agent.py \
-  tests/atelier/runtime_profile_harness.py \
-  tests/atelier/test_agents.py \
-  tests/atelier/test_runtime_profiles.py \
-  tests/atelier/test_config.py \
-  tests/atelier/test_models.py \
-  tests/atelier/commands/test_plan_cli.py \
-  tests/atelier/commands/test_work_cli.py
-git commit -m "feat(runtime): add typed runtime selection" \
-  -m "- add agent runtime config and precedence helpers" \
-  -m "- expose runtime selection through plan and work CLI wiring" \
-  -m "- add a reusable recording-agent harness for launch-boundary tests"
+  docs/trycycle-runtime-feasibility.md \
+  tests/atelier/test_trycycle_runtime_feasibility.py
+git commit -m "docs(runtime): map trycycle mismatches against atelier" \
+  -m "- record the current Atelier planner and worker invariants" \
+  -m "- add a mismatch matrix for subagents, durable messaging, PR flow, and review load" \
+  -m "- distinguish existing Atelier strengths from deeper trycycle-only assumptions"
 ```
 
-### Task 3: Integrate planner runtime profiles and prove them at the real
-launch boundary
+### Task 3: Publish the verdict and the future implementation shape
 
 **Files:**
-- Modify: `src/atelier/commands/plan.py`
-- Modify: `src/atelier/runtime_profiles/planner.py`
-- Modify: `src/atelier/sessions.py`
-- Modify: `tests/atelier/commands/test_plan.py`
-- Modify: `tests/atelier/test_sessions.py`
-- Create or modify: `tests/atelier/commands/test_plan_runtime_e2e.py`
-- Modify: `tests/atelier/runtime_profile_harness.py`
+- Modify: `docs/trycycle-runtime-feasibility.md`
+- Modify: `tests/atelier/test_trycycle_runtime_feasibility.py`
 
 - [ ] **Step 1: Identify or write the failing test**
 
-Add planner tests for:
+Extend the doc-contract test so it requires the decision and the recommended
+future cut.
 
 ```python
-def test_plan_trycycle_runtime_appends_planner_contract_lines(...)
-def test_plan_native_runtime_preserves_existing_opening_prompt(...)
-def test_plan_runtime_change_starts_fresh_planner_session(...)
-def test_plan_runtime_scopes_codex_session_lookup(...)
-def test_plan_runtime_e2e_records_runtime_output_prompt_and_agents(...) -> None
+def test_trycycle_runtime_feasibility_doc_records_verdict_and_follow_up_shape() -> None:
+    content = DOC_PATH.read_text(encoding="utf-8").lower()
+    assert "## feasibility verdict" in content
+    assert "## recommended runtime profile cut" in content
+    assert "## required architectural changes" in content
+    assert "## future verification floor" in content
+    assert "repo-owned" in content
+    assert "runtime profile" in content
+    assert "not currently feasible" in content
 ```
-
-The end-to-end planner scenario must:
-
-- invoke `atelier plan --runtime trycycle`
-- use the recording agent fixture through the actual start-command path
-- assert startup output contains `Planner runtime: trycycle`
-- assert the recorded prompt contains the trycycle planner delta
-- assert the rendered `AGENTS.md` contains the runtime addendum block
-- assert saved-session reuse is bypassed when the persisted runtime differs
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run:
 
 ```bash
-uv run pytest \
-  tests/atelier/commands/test_plan.py \
-  tests/atelier/test_sessions.py \
-  tests/atelier/commands/test_plan_runtime_e2e.py -v
+uv run pytest tests/atelier/test_trycycle_runtime_feasibility.py -v
 ```
 
-Expected: FAIL because planner runtime resolution, runtime-scoped resume, and
-the real-launch planner scenario do not exist.
+Expected: FAIL because the verdict and future-shape sections do not exist yet.
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `run_planner(...)`:
+Add the final decision sections to the document and make the verdict explicit.
 
-- resolve the planner runtime via the registry
-- print `Planner runtime: <name>`
-- compute a planner-specific session target from the selected runtime
-- apply the shared runtime addendum helper to rendered planner `AGENTS.md`
-- extend `_planner_opening_prompt(...)` to accept runtime-specific lines
-- persist both planner session id and planner runtime when Codex returns a
-  session id
-- if the saved planner runtime differs from the selected runtime, bypass
-  resume, clear the stale saved session pointer, and start a fresh session
-  under the selected runtime target
-- keep resume/session-id logic, sync monitor, guardrails, and teardown
-  otherwise unchanged
+Write `## Feasibility Verdict` to say:
 
-In `src/atelier/runtime_profiles/planner.py`, add a helper that derives the
-planner session target from the existing workspace identifier plus the runtime
-name, for example by appending a deterministic runtime suffix for non-native
-planner sessions.
+- direct trycycle-style runtime substitution is not currently feasible in
+  Atelier's present architecture
+- the deepest mismatch is trycycle's reliance on subagent communication and
+  local convergence loops versus Atelier's durable Beads/message coordination,
+  multi-worker execution, and PR/lifecycle orchestration
+- this is not a failure of Atelier; it is a difference in orchestration model
 
-In `src/atelier/sessions.py`, add either an explicit `session_target`
-override to `find_codex_session(s)` or a dedicated helper that accepts a
-fully-built target string. Do not change
-`workspace.workspace_session_identifier(...)` globally; worker prompts and
-native workspace matching must stay stable.
+Write `## Recommended Runtime Profile Cut` to define the feasible subset for a
+future feature:
 
-Use a dedicated planner session runtime field, for example:
+- repo-owned planner hardening guidance
+- repo-owned worker hardening guidance
+- additive verification/checklist behavior
+- no new transport type
+- no dependency on local trycycle installs
 
-```python
-_PLANNER_SESSION_RUNTIME_FIELD = "planner_session.runtime"
-```
+Write `## Required Architectural Changes` to describe what would be needed to
+go further while preserving Atelier's functional intent. Include, at minimum:
+
+- a durable feedback-loop record instead of ephemeral subagent chat
+- a coordinator/supervisor model that can drive retries or review loops across
+  planner and worker boundaries
+- typed Beads/message artifacts for intermediate review and retry outcomes
+- clearer planner-owned versus worker-owned split negotiation for oversized work
+- a durable way to reconcile PR/review/publish state with iterative execution
+
+Write `## Future Verification Floor` to record the agreed bar for any later
+implementation slice:
+
+- focused unit tests for config/selection/env behavior
+- one planner launch-boundary scenario
+- one worker launch-boundary scenario
+
+Do not update current behavior docs or CLI docs in this slice. The new doc
+should end with a short `## Recommended Follow-Up Slices` section naming the
+next 2-3 implementation cuts, for example:
+
+- repo-owned planner/worker runtime-profile scaffolding
+- durable feedback-loop state model
+- coordinator architecture for deeper iterative execution
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run:
 
 ```bash
-uv run pytest \
-  tests/atelier/commands/test_plan.py \
-  tests/atelier/test_sessions.py \
-  tests/atelier/commands/test_plan_runtime_e2e.py -v
+uv run pytest tests/atelier/test_trycycle_runtime_feasibility.py -v
 ```
 
 Expected: PASS.
 
 - [ ] **Step 5: Refactor, format, and verify**
 
-Re-run the full planner command suite to prove native parity and keep the
-launch-boundary scenario green.
+Re-read the document as an operator-facing decision package. It should answer:
+
+- what is feasible now
+- what is not feasible now
+- why
+- what must change later
 
 Run:
 
 ```bash
 just format
-uv run pytest \
-  tests/atelier/commands/test_plan.py \
-  tests/atelier/commands/test_plan_cli.py \
-  tests/atelier/test_sessions.py \
-  tests/atelier/commands/test_plan_runtime_e2e.py -v
-```
-
-Expected: all PASS, including the existing planner session/resume coverage.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add \
-  src/atelier/commands/plan.py \
-  src/atelier/runtime_profiles/planner.py \
-  src/atelier/sessions.py \
-  tests/atelier/commands/test_plan.py \
-  tests/atelier/test_sessions.py \
-  tests/atelier/commands/test_plan_runtime_e2e.py \
-  tests/atelier/runtime_profile_harness.py
-git commit -m "feat(plan): add planner runtime profiles" \
-  -m "- resolve planner runtime separately from agent transport" \
-  -m "- scope planner resume to the selected runtime profile" \
-  -m "- prove runtime output, prompt, and AGENTS content at the launch boundary"
-```
-
-### Task 4: Integrate worker runtime profiles and prove them at the real
-launch boundary
-
-**Files:**
-- Modify: `src/atelier/worker/ports.py`
-- Modify: `src/atelier/worker/prompts.py`
-- Modify: `src/atelier/worker/work_startup_runtime.py`
-- Modify: `src/atelier/worker/runtime.py`
-- Modify: `src/atelier/worker/session/agent.py`
-- Modify: `src/atelier/worker/session/runner.py`
-- Modify: `src/atelier/runtime_profiles/worker.py`
-- Modify: `tests/atelier/worker/test_prompts.py`
-- Modify: `tests/atelier/worker/test_session_agent.py`
-- Modify: `tests/atelier/worker/test_session_runner.py`
-- Modify: `tests/atelier/worker/test_session_runner_flow.py`
-- Modify: `tests/atelier/worker/test_runtime.py`
-- Modify: `tests/atelier/worker/test_work_startup_runtime.py`
-- Modify: `tests/atelier/commands/test_work_runtime_wiring.py`
-- Create or modify: `tests/atelier/commands/test_work_runtime_e2e.py`
-- Modify: `tests/atelier/runtime_profile_harness.py`
-
-- [ ] **Step 1: Identify or write the failing test**
-
-Add worker-facing tests for:
-
-```python
-def test_worker_opening_prompt_includes_trycycle_contract_lines() -> None:
-    prompt = worker_opening_prompt(..., runtime_lines=("Execute the work task-by-task.",))
-    assert "Execute the work task-by-task." in prompt
-
-
-def test_prepare_agent_session_applies_trycycle_worker_addendum(...) -> None:
-    ...
-
-
-def test_work_runtime_wiring_passes_runtime_override_to_worker_session(...) -> None:
-    ...
-
-
-def test_worker_session_runner_reports_selected_runtime(...) -> None:
-    ...
-
-
-def test_work_runtime_e2e_records_runtime_output_prompt_and_agents(...) -> None:
-    ...
-```
-
-The end-to-end worker scenario must:
-
-- invoke `atelier work --runtime trycycle`
-- use the recording agent fixture through the actual session start path
-- assert startup output contains `Worker runtime: trycycle`
-- assert the recorded prompt contains the trycycle worker delta
-- assert the rendered `AGENTS.md` contains the runtime addendum block
-- assert worker claim, startup-contract, and finalize behavior stay unchanged
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run:
-
-```bash
-uv run pytest \
-  tests/atelier/worker/test_prompts.py \
-  tests/atelier/worker/test_session_agent.py \
-  tests/atelier/worker/test_session_runner.py \
-  tests/atelier/worker/test_session_runner_flow.py \
-  tests/atelier/worker/test_runtime.py \
-  tests/atelier/worker/test_work_startup_runtime.py \
-  tests/atelier/commands/test_work_runtime_wiring.py \
-  tests/atelier/commands/test_work_runtime_e2e.py -v
-```
-
-Expected: FAIL because the worker prompt and session prep do not accept
-runtime additions, the runner does not surface runtime selection, and the
-real-launch worker scenario does not exist.
-
-- [ ] **Step 3: Write minimal implementation**
-
-Then:
-
-- resolve the worker runtime once in session preparation
-- carry the resolved runtime name and prompt additions in
-  `AgentSessionPreparation`
-- extend the worker command/service protocols so runner code can receive the
-  runtime-specific prompt additions without ad hoc attribute access
-- apply the shared runtime addendum helper to rendered worker `AGENTS.md`
-- extend `worker_opening_prompt(...)` to accept additive runtime lines
-- surface `Worker runtime: <name>` in startup output before the agent session
-  begins
-- keep startup selection, claim logic, worktree preparation, and finalize
-  behavior unchanged
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run:
-
-```bash
-uv run pytest \
-  tests/atelier/worker/test_prompts.py \
-  tests/atelier/worker/test_session_agent.py \
-  tests/atelier/worker/test_session_runner.py \
-  tests/atelier/worker/test_session_runner_flow.py \
-  tests/atelier/worker/test_runtime.py \
-  tests/atelier/worker/test_work_startup_runtime.py \
-  tests/atelier/commands/test_work_runtime_wiring.py \
-  tests/atelier/commands/test_work_runtime_e2e.py -v
-```
-
-Expected: PASS.
-
-- [ ] **Step 5: Refactor, format, and verify**
-
-Run the broader worker startup and runtime suites to prove the new profile is
-additive only and keep the launch-boundary scenario green.
-
-Run:
-
-```bash
-just format
-uv run pytest \
-  tests/atelier/worker/test_prompts.py \
-  tests/atelier/worker/test_session_agent.py \
-  tests/atelier/worker/test_session_runner.py \
-  tests/atelier/worker/test_session_runner_flow.py \
-  tests/atelier/worker/test_runtime.py \
-  tests/atelier/worker/test_work_startup_runtime.py \
-  tests/atelier/commands/test_work.py \
-  tests/atelier/commands/test_work_cli.py \
-  tests/atelier/commands/test_work_runtime_wiring.py \
-  tests/atelier/commands/test_work_runtime_e2e.py -v
+uv run pytest tests/atelier/test_trycycle_runtime_feasibility.py -v
 ```
 
 Expected: all PASS.
@@ -832,111 +473,39 @@ Expected: all PASS.
 
 ```bash
 git add \
-  src/atelier/worker/ports.py \
-  src/atelier/worker/prompts.py \
-  src/atelier/worker/work_startup_runtime.py \
-  src/atelier/worker/runtime.py \
-  src/atelier/worker/session/agent.py \
-  src/atelier/worker/session/runner.py \
-  src/atelier/runtime_profiles/worker.py \
-  tests/atelier/worker/test_prompts.py \
-  tests/atelier/worker/test_session_agent.py \
-  tests/atelier/worker/test_session_runner.py \
-  tests/atelier/worker/test_session_runner_flow.py \
-  tests/atelier/worker/test_runtime.py \
-  tests/atelier/worker/test_work_startup_runtime.py \
-  tests/atelier/commands/test_work_runtime_wiring.py \
-  tests/atelier/commands/test_work_runtime_e2e.py \
-  tests/atelier/runtime_profile_harness.py
-git commit -m "feat(work): add worker runtime profiles" \
-  -m "- thread runtime selection through worker session preparation" \
-  -m "- add repo-owned trycycle worker guidance without changing lifecycle logic" \
-  -m "- prove runtime output, prompt, and AGENTS content at the launch boundary"
+  docs/trycycle-runtime-feasibility.md \
+  tests/atelier/test_trycycle_runtime_feasibility.py
+git commit -m "docs(runtime): publish trycycle feasibility verdict" \
+  -m "- conclude that full trycycle-style runtime substitution is not currently feasible" \
+  -m "- define the smaller repo-owned runtime-profile cut that is compatible with Atelier" \
+  -m "- describe the architectural changes needed for deeper adaptation"
 ```
 
-### Task 5: Document the public surface, lock down parity, and land it
+### Task 4: Verify, file follow-ups, and land the analysis package
 
 **Files:**
-- Modify: `docs/behavior.md`
-- Modify: `README.md`
-- Modify: `tests/atelier/test_config.py`
-- Modify: `tests/atelier/commands/test_plan_runtime_e2e.py`
-- Modify: `tests/atelier/commands/test_work_runtime_e2e.py`
-- Modify: `tests/atelier/commands/test_plan.py`
-- Modify: `tests/atelier/worker/test_session_agent.py`
-- Modify: `tests/atelier/worker/test_session_runner.py`
+- Modify if needed: `docs/trycycle-runtime-feasibility.md`
+- Modify if needed: `tests/atelier/test_trycycle_runtime_feasibility.py`
 
-- [ ] **Step 1: Identify or write the failing test**
+- [ ] **Step 1: Identify any missing follow-up work**
 
-Add or extend tests that prove the intended end-state contract:
+Review the final `## Recommended Follow-Up Slices` section in
+`docs/trycycle-runtime-feasibility.md`. If the document names concrete next
+slices, create matching `bd` issues before ending the session.
 
-- config without `agent.runtime` still behaves as native
-- planner native runtime keeps the existing prompt wording
-- worker native runtime keeps the existing prompt wording
-- trycycle runtime is additive and role-scoped
-- planner runtime changes do not resume a session created under the other
-  runtime profile
-- the planner and worker end-to-end scenarios both pass in native mode and in
-  trycycle mode with the expected deltas only
-
-Use the scenario tests added earlier instead of inventing doc-only coverage
-where possible.
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run:
+Use exact titles from the document. Example commands:
 
 ```bash
-uv run pytest \
-  tests/atelier/test_config.py \
-  tests/atelier/commands/test_plan.py \
-  tests/atelier/commands/test_plan_runtime_e2e.py \
-  tests/atelier/commands/test_work_runtime_e2e.py \
-  tests/atelier/worker/test_session_agent.py \
-  tests/atelier/worker/test_session_runner.py -k "runtime or native" -v
+bd create "Add repo-owned runtime profile scaffolding" \
+  --description="Implement the feasible planner/worker hardening profile cut described in docs/trycycle-runtime-feasibility.md." \
+  -t feature -p 1 --json
+
+bd create "Design durable feedback-loop state for iterative worker runs" \
+  --description="Define Beads/message artifacts for retry/review loop state without relying on ephemeral subagent chat." \
+  -t feature -p 1 --json
 ```
 
-Expected: FAIL until the native-parity and role-scoped assertions exist and
-pass.
-
-- [ ] **Step 3: Write minimal implementation**
-
-Document the behavior explicitly:
-
-- `docs/behavior.md`
-  Add the new config shape and `--runtime` command behavior.
-- `README.md`
-  Add one short example for planner and worker usage:
-
-```bash
-atelier plan --runtime trycycle
-atelier work --runtime trycycle
-```
-
-Keep `docs/trycycle-runtime-contract.md` as the deep contract and reference it
-from the high-level docs rather than duplicating the full guidance in
-multiple places.
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run:
-
-```bash
-uv run pytest \
-  tests/atelier/test_config.py \
-  tests/atelier/commands/test_plan.py \
-  tests/atelier/commands/test_plan_runtime_e2e.py \
-  tests/atelier/commands/test_work_runtime_e2e.py \
-  tests/atelier/worker/test_session_agent.py \
-  tests/atelier/worker/test_session_runner.py -k "runtime or native" -v
-```
-
-Expected: PASS.
-
-- [ ] **Step 5: Refactor, format, and verify**
-
-Run the repo-required gates for the completed slice on the final formatted
-state.
+- [ ] **Step 2: Run the required repo gates**
 
 Run:
 
@@ -949,30 +518,20 @@ just lint
 
 Expected: all PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 3: Fix any gate failures and rerun**
 
-```bash
-git add \
-  docs/behavior.md \
-  README.md \
-  tests/atelier/test_config.py \
-  tests/atelier/commands/test_plan.py \
-  tests/atelier/commands/test_plan_runtime_e2e.py \
-  tests/atelier/commands/test_work_runtime_e2e.py \
-  tests/atelier/worker/test_session_agent.py \
-  tests/atelier/worker/test_session_runner.py
-git commit -m "docs(runtime): document trycycle runtime profiles" \
-  -m "- document config and command behavior for runtime profiles" \
-  -m "- lock down native-parity and role-scoped scenario coverage" \
-  -m "- reference the repo-owned runtime contract from user-facing docs"
-```
+If any gate fails, repair the document or test and rerun the exact failing
+command until it passes. Do not weaken the doc-contract test to force a green
+result.
 
-## Final verification and landing
+- [ ] **Step 4: Commit any last verification fixes**
 
-- [ ] If any follow-up work remains, create linked `bd` issues for it before
-  ending the session. If nothing remains, explicitly note that no follow-up
-  issues were required.
-- [ ] Run:
+If the quality gates required additional edits, commit them with a docs/test
+message that reflects the actual delta.
+
+- [ ] **Step 5: Push and verify**
+
+Run:
 
 ```bash
 git status --short
@@ -983,24 +542,30 @@ git status
 
 Expected:
 
-- quality gates already passed
+- working tree is clean before push
 - branch pushes cleanly
 - final `git status` shows the branch is up to date with `origin`
 
-- [ ] Clean up any stale local session residue that this slice created and
-  verify there are no leftover stashes before handing off.
+- [ ] **Step 6: Hand off**
+
+In the handoff note, summarize:
+
+- the feasibility verdict
+- the adoptable runtime-profile subset
+- the architectural changes required for anything deeper
+- any `bd` follow-up issues that were created
 
 ## Why this plan is the right cutover
 
-- It lands the full feature directly: a real per-role runtime option with a
-  shipped `trycycle` profile.
-- It avoids the main design mistake of conflating runtime behavior with agent
-  transport.
-- It records the native baseline before defining the shipped trycycle delta,
-  so the feature is an explicit contract rather than arbitrary prompt edits.
-- It centralizes AGENTS addendum handling instead of duplicating string
-  mutation logic across planner and worker.
-- It adds the launch-boundary scenario tests the approved testing strategy
-  called for, so prompt/addendum behavior is proven where production actually
-  launches agents.
-- It keeps native behavior stable and testable.
+- It lands the user's requested end state directly: a determination of whether
+  trycycle-like planner/worker hardening fits Atelier, plus the mismatch
+  analysis and future architecture guidance.
+- It does not prematurely ship a `trycycle` feature that may be the wrong
+  abstraction.
+- It keeps the repo-owned source of truth decision intact.
+- It respects Atelier's actual functional intent: durable orchestration,
+  multiple workers, operator accountability, PR-driven late phases, and
+  review-sized changesets.
+- It still leaves a concrete path forward by naming the smaller `runtime
+  profile` cut that is compatible with Atelier today and the deeper
+  architectural work required for anything more ambitious.
