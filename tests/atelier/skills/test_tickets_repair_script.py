@@ -88,3 +88,36 @@ def test_repair_external_ticket_metadata_script_uses_store_repair_contract(
         in captured.out
     )
     assert "- at-123: recoverable (2 ticket(s), providers=github)" in captured.out
+
+
+def test_repair_external_ticket_metadata_defaults_beads_root_from_bootstrap_repo_root(
+    monkeypatch,
+) -> None:
+    module = _load_script_module()
+    repo_root = Path("/bootstrap/repo")
+    captured: dict[str, Path] = {}
+
+    monkeypatch.setattr(module, "_BOOTSTRAP_REPO_ROOT", repo_root)
+    monkeypatch.chdir(Path("/tmp"))
+    monkeypatch.delenv("BEADS_DIR", raising=False)
+    monkeypatch.setattr(
+        module,
+        "_build_store",
+        lambda *, beads_root, repo_root: (
+            captured.update({"beads_root": beads_root, "repo_root": repo_root})
+            or SimpleNamespace(repair_external_ticket_metadata=lambda request: ())
+        ),
+    )
+    monkeypatch.setattr(
+        module.asyncio,
+        "run",
+        lambda awaitable: (),
+    )
+    monkeypatch.setattr(sys, "argv", ["repair_external_ticket_metadata.py"])
+
+    module.main()
+
+    assert captured == {
+        "beads_root": (repo_root / ".beads").resolve(),
+        "repo_root": repo_root,
+    }
