@@ -14,3 +14,4 @@ src/atelier/_version.py
 .vscode/
 uv.lock
 evals/artifacts/
+/.worktrees/
