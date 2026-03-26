@@ -16,7 +16,9 @@ planner and worker AGENTS/prompt generation. Use a shared AGENTS addendum
 helper so planner and worker do not hand-roll separate string-splicing logic.
 The selected profile may change guidance, prompt lines, and planner resume
 namespacing, but it must not change Beads, worktree, claim, teardown, or
-publish semantics.
+publish semantics. Keep planner runtime scoping planner-specific: add a
+planner session-target helper and matching support instead of mutating the
+shared workspace identifier used elsewhere.
 
 **Tech Stack:** Python 3.11+, Typer, Pydantic, pytest, existing Atelier
 planner/worker runtime modules, repo-owned runtime profile docs/helpers.
@@ -71,6 +73,12 @@ planner/worker runtime modules, repo-owned runtime profile docs/helpers.
   runtime profile is unchanged. A runtime-profile change must intentionally
   bypass resume to avoid reviving stale planner context from the wrong
   contract.
+- Planner runtime scoping must also apply when no saved session pointer exists.
+  Native and trycycle planner sessions need distinct Codex session targets so
+  most-recent-session fallback cannot cross runtime boundaries by accident.
+- Do not change the shared worker/native workspace session identifier format in
+  `src/atelier/workspace.py`. Runtime-specific session targeting is a planner
+  concern in this slice, not a global workspace naming change.
 - Worker runtime selection must not alter one-changeset-per-session behavior or
   the fail-closed startup contract.
 - Planner runtime selection must not weaken the read-only planner worktree
@@ -105,7 +113,7 @@ planner/worker runtime modules, repo-owned runtime profile docs/helpers.
   role profile.
 - Create: `src/atelier/runtime_profiles/planner.py`
   Responsibility: repo-owned planner addendum text, prompt-line helpers, and
-  planner session namespace helpers.
+  planner session-target helpers.
 - Create: `src/atelier/runtime_profiles/worker.py`
   Responsibility: repo-owned worker addendum text and prompt-line helpers.
 - Create: `tests/atelier/test_runtime_profiles.py`
@@ -127,6 +135,9 @@ planner/worker runtime modules, repo-owned runtime profile docs/helpers.
   Responsibility: resolve planner runtime, surface it to the user, apply the
   shared AGENTS addendum helper, extend the opening prompt, and keep planner
   resume scoped to the selected runtime profile.
+- Modify: `src/atelier/sessions.py`
+  Responsibility: allow planner runtime-specific Codex session lookup without
+  changing default workspace matching behavior.
 - Modify: `src/atelier/worker/ports.py`
   Responsibility: carry resolved worker runtime metadata and prompt additions
   through the worker runtime protocols.
@@ -153,6 +164,7 @@ planner/worker runtime modules, repo-owned runtime profile docs/helpers.
   `tests/atelier/test_agent_home.py`
   `tests/atelier/test_agents.py`
   `tests/atelier/test_config.py`
+  `tests/atelier/test_sessions.py`
   `tests/atelier/commands/test_plan_cli.py`
   `tests/atelier/commands/test_work_cli.py`
   `tests/atelier/commands/test_plan.py`
@@ -162,6 +174,7 @@ planner/worker runtime modules, repo-owned runtime profile docs/helpers.
   `tests/atelier/worker/test_session_runner.py`
   `tests/atelier/worker/test_session_runner_flow.py`
   `tests/atelier/worker/test_runtime.py`
+  `tests/atelier/worker/test_work_startup_runtime.py`
   Responsibility: cover runtime content, config defaults, CLI plumbing,
   planner/worker runtime selection, native parity, and trycycle-specific
   prompt/addendum behavior.
@@ -485,7 +498,9 @@ git commit -m "feat(runtime): add typed runtime profile selection" \
 **Files:**
 - Modify: `src/atelier/commands/plan.py`
 - Modify: `src/atelier/runtime_profiles/planner.py`
+- Modify: `src/atelier/sessions.py`
 - Modify: `tests/atelier/commands/test_plan.py`
+- Modify: `tests/atelier/test_sessions.py`
 
 - [ ] **Step 1: Identify or write the failing test**
 
@@ -496,6 +511,7 @@ def test_plan_trycycle_runtime_appends_planner_contract_lines(...)
 def test_plan_native_runtime_preserves_existing_opening_prompt(...)
 def test_plan_runtime_change_starts_fresh_planner_session(...)
 def test_plan_runtime_scopes_codex_session_lookup(...)
+def test_find_codex_sessions_accepts_runtime_scoped_planner_target(...) -> None
 ```
 
 The trycycle planner contract should require:
@@ -510,7 +526,9 @@ The trycycle planner contract should require:
 Run:
 
 ```bash
-uv run pytest tests/atelier/commands/test_plan.py -k runtime -v
+uv run pytest \
+  tests/atelier/commands/test_plan.py \
+  tests/atelier/test_sessions.py -k runtime -v
 ```
 
 Expected: FAIL because planner runtime resolution and runtime-scoped resume do
@@ -522,16 +540,26 @@ In `run_planner(...)`:
 
 - resolve the planner runtime via the registry
 - print `Planner runtime: <name>`
-- compute the planner workspace/session namespace from the selected runtime
+- compute a planner-specific session target from the selected runtime
 - apply the shared runtime addendum helper to rendered planner `AGENTS.md`
 - extend `_planner_opening_prompt(...)` to accept runtime-specific lines
 - persist both planner session id and planner runtime when Codex returns a
   session id
 - if the saved planner runtime differs from the selected runtime, bypass
   resume, clear the stale saved session pointer, and start a fresh session
-  under the selected runtime namespace
+  under the selected runtime target
 - keep resume/session-id logic, sync monitor, guardrails, and teardown
   otherwise unchanged
+
+In `src/atelier/runtime_profiles/planner.py`, add a helper that derives the
+planner session target from the existing workspace identifier plus the runtime
+name, for example by appending a deterministic runtime suffix for non-native
+planner sessions.
+
+In `src/atelier/sessions.py`, add either an explicit `session_target` override
+to `find_codex_session(s)` or a dedicated helper that accepts a fully-built
+target string. Do not change `workspace.workspace_session_identifier(...)`
+globally; worker prompts and native workspace matching must stay stable.
 
 Use a dedicated planner session runtime field, for example:
 
@@ -544,7 +572,9 @@ _PLANNER_SESSION_RUNTIME_FIELD = "planner_session.runtime"
 Run:
 
 ```bash
-uv run pytest tests/atelier/commands/test_plan.py -k runtime -v
+uv run pytest \
+  tests/atelier/commands/test_plan.py \
+  tests/atelier/test_sessions.py -k runtime -v
 ```
 
 Expected: PASS.
@@ -559,7 +589,8 @@ Run:
 just format
 uv run pytest \
   tests/atelier/commands/test_plan.py \
-  tests/atelier/commands/test_plan_cli.py -v
+  tests/atelier/commands/test_plan_cli.py \
+  tests/atelier/test_sessions.py -v
 ```
 
 Expected: all PASS, including the existing planner session/resume coverage.
@@ -570,7 +601,9 @@ Expected: all PASS, including the existing planner session/resume coverage.
 git add \
   src/atelier/commands/plan.py \
   src/atelier/runtime_profiles/planner.py \
-  tests/atelier/commands/test_plan.py
+  src/atelier/sessions.py \
+  tests/atelier/commands/test_plan.py \
+  tests/atelier/test_sessions.py
 git commit -m "feat(plan): add planner runtime profiles" \
   -m "- resolve planner runtime separately from agent transport" \
   -m "- scope planner resume to the selected runtime profile" \
@@ -592,6 +625,7 @@ git commit -m "feat(plan): add planner runtime profiles" \
 - Modify: `tests/atelier/worker/test_session_runner.py`
 - Modify: `tests/atelier/worker/test_session_runner_flow.py`
 - Modify: `tests/atelier/worker/test_runtime.py`
+- Modify: `tests/atelier/worker/test_work_startup_runtime.py`
 - Modify: `tests/atelier/commands/test_work_runtime_wiring.py`
 
 - [ ] **Step 1: Identify or write the failing test**
@@ -614,6 +648,10 @@ def test_work_runtime_wiring_passes_runtime_override_to_worker_session(...) -> N
 
 def test_worker_session_runner_reports_selected_runtime(...) -> None:
     ...
+
+
+def test_work_startup_runtime_facade_accepts_runtime_prompt_lines(...) -> None:
+    ...
 ```
 
 The trycycle worker contract should require:
@@ -633,6 +671,7 @@ uv run pytest \
   tests/atelier/worker/test_session_runner.py \
   tests/atelier/worker/test_session_runner_flow.py \
   tests/atelier/worker/test_runtime.py \
+  tests/atelier/worker/test_work_startup_runtime.py \
   tests/atelier/commands/test_work_runtime_wiring.py -k runtime -v
 ```
 
@@ -666,6 +705,7 @@ uv run pytest \
   tests/atelier/worker/test_session_runner.py \
   tests/atelier/worker/test_session_runner_flow.py \
   tests/atelier/worker/test_runtime.py \
+  tests/atelier/worker/test_work_startup_runtime.py \
   tests/atelier/commands/test_work_runtime_wiring.py -k runtime -v
 ```
 
@@ -686,6 +726,7 @@ uv run pytest \
   tests/atelier/worker/test_session_runner.py \
   tests/atelier/worker/test_session_runner_flow.py \
   tests/atelier/worker/test_runtime.py \
+  tests/atelier/worker/test_work_startup_runtime.py \
   tests/atelier/commands/test_work.py \
   tests/atelier/commands/test_work_cli.py \
   tests/atelier/commands/test_work_runtime_wiring.py -v
@@ -709,6 +750,7 @@ git add \
   tests/atelier/worker/test_session_runner.py \
   tests/atelier/worker/test_session_runner_flow.py \
   tests/atelier/worker/test_runtime.py \
+  tests/atelier/worker/test_work_startup_runtime.py \
   tests/atelier/commands/test_work_runtime_wiring.py
 git commit -m "feat(work): add worker runtime profiles" \
   -m "- thread runtime selection through worker session preparation" \
