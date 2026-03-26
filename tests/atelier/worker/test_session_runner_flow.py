@@ -1955,6 +1955,105 @@ def test_run_worker_once_fails_closed_when_bounded_runtime_evidence_cleanup_fail
     deps.lifecycle.finalize_changeset.assert_not_called()
 
 
+@pytest.mark.parametrize("runtime_profile", ["standard", "trycycle-bounded"])
+def test_run_worker_once_standard_and_bounded_profiles_preserve_same_end_state(
+    tmp_path: Path, runtime_profile: str
+) -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id=f"atelier/worker/codex/p-parity-{runtime_profile}",
+        role="worker",
+        path=tmp_path / f"agent-home-{runtime_profile}",
+        session_key=f"p-parity-{runtime_profile}",
+    )
+    agent.path.mkdir()
+    evidence_path = agent.path / "bounded-runtime-evidence.json"
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-epic",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+        runtime_profile=runtime_profile,
+    )
+    deps.lifecycle.next_changeset = lambda **_kwargs: {"id": "at-epic.1", "title": "Changeset"}
+    deps.infra.beads.run_bd_json = Mock(
+        side_effect=lambda args, **_kwargs: (
+            [{"id": "at-epic.1", "title": "Changeset", "description": ""}]
+            if args[:2] == ["show", "at-epic.1"]
+            else []
+        )
+    )
+    deps.infra.worker_session_worktree.prepare_worktrees = Mock(
+        return_value=SimpleNamespace(
+            epic_worktree_path=Path("/tmp/epic"),
+            changeset_worktree_path=Path("/tmp/changeset"),
+            branch="feat/root-at-epic.1",
+        )
+    )
+    deps.infra.worker_session_agent.prepare_agent_session = Mock(
+        side_effect=lambda **kwargs: SimpleNamespace(
+            agent_spec=SimpleNamespace(name="codex", display_name="Codex"),
+            agent_options=[],
+            project_enlistment=Path("/repo"),
+            workspace_branch="feat/root-at-epic.1",
+            env=(
+                {
+                    "ATELIER_WORKER_RUNTIME_PROFILE": "trycycle-bounded",
+                    "ATELIER_BOUNDED_RUNTIME_EVIDENCE": str(
+                        kwargs["bounded_runtime_evidence_path_override"]
+                    ),
+                }
+                if runtime_profile == "trycycle-bounded"
+                else {"ATELIER_WORKER_RUNTIME_PROFILE": "standard"}
+            ),
+        )
+    )
+
+    def start_agent_session(**_kwargs):
+        if runtime_profile == "trycycle-bounded":
+            evidence_path.write_text(
+                '{"status":"converged","helper_session_id":"sess-parity"}',
+                encoding="utf-8",
+            )
+        return SimpleNamespace(started_at=dt.datetime.now(dt.timezone.utc), returncode=0)
+
+    deps.infra.worker_session_agent.start_agent_session = Mock(side_effect=start_agent_session)
+    deps.lifecycle.finalize_changeset = Mock(
+        return_value=FinalizeResult(continue_running=True, reason="changeset_review_pending")
+    )
+    deps.lifecycle.mark_changeset_blocked = Mock()
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+        run_context=WorkerRunContext(
+            mode="auto",
+            dry_run=False,
+            session_key=f"p-parity-{runtime_profile}",
+            runtime_profile=runtime_profile,
+        ),
+        deps=deps,
+    )
+
+    assert summary.started is True
+    assert summary.reason == "agent_session_complete"
+    deps.lifecycle.mark_changeset_blocked.assert_not_called()
+    deps.lifecycle.finalize_changeset.assert_called_once()
+    finalize_kwargs = deps.lifecycle.finalize_changeset.call_args.kwargs
+    assert finalize_kwargs["changeset_id"] == "at-epic.1"
+    assert finalize_kwargs["epic_id"] == "at-epic"
+    assert finalize_kwargs["project_data_dir"] == Path("/project/.atelier")
+    assert finalize_kwargs["repo_root"] == Path("/repo")
+    prepare_kwargs = deps.infra.worker_session_agent.prepare_agent_session.call_args.kwargs
+    assert prepare_kwargs["runtime_profile_override"] == runtime_profile
+    if runtime_profile == "trycycle-bounded":
+        assert prepare_kwargs["bounded_runtime_evidence_path_override"] == evidence_path
+    else:
+        assert prepare_kwargs["bounded_runtime_evidence_path_override"] is None
+
+
 def test_run_worker_once_skips_redundant_mark_in_progress_for_in_progress_changeset() -> None:
     agent = AgentHome(
         name="worker",

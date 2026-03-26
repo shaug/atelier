@@ -82,6 +82,18 @@ class _RecordedCodexSpec(_FakeAgentSpec):
         return [sys.executable, str(self._script_path), prompt], self._script_path.parent
 
 
+class _RecordedClaudeSpec(_FakeAgentSpec):
+    def __init__(self, script_path: Path) -> None:
+        super().__init__(name="claude", display_name="Claude")
+        self._script_path = script_path
+
+    def build_start_command(
+        self, _agent_home: Path, options: list[str], prompt: str
+    ) -> tuple[list[str], Path]:
+        del options
+        return [sys.executable, str(self._script_path), prompt], self._script_path.parent
+
+
 def _project_config() -> ProjectConfig:
     return ProjectConfig(
         project={"enlistment": "/repo"},
@@ -811,6 +823,74 @@ def test_start_agent_session_bounded_runtime_writes_evidence_from_real_launch_bo
     evidence_payload = json.loads(evidence_path.read_text(encoding="utf-8"))
     assert evidence_payload["status"] == "converged"
     assert evidence_payload["helper_session_id"] == "thread-bounded-123"
+
+
+def test_start_agent_session_bounded_runtime_writes_evidence_for_claude_boundary(
+    tmp_path: Path,
+) -> None:
+    script_path = tmp_path / "record_claude.py"
+    record_path = tmp_path / "launch-claude.json"
+    evidence_path = tmp_path / "bounded-runtime-evidence-claude.json"
+    script_path.write_text(
+        "\n".join(
+            [
+                "import json",
+                "import os",
+                "import sys",
+                "from pathlib import Path",
+                "",
+                "record_path = Path(os.environ['ATELIER_BOUNDARY_RECORD'])",
+                "record_path.write_text(",
+                "    json.dumps(",
+                "        {",
+                "            'argv': sys.argv,",
+                "            'cwd': os.getcwd(),",
+                "            'prompt': sys.argv[-1],",
+                "            'evidence_path': os.environ.get('ATELIER_BOUNDED_RUNTIME_EVIDENCE'),",
+                "        }",
+                "    ),",
+                "    encoding='utf-8',",
+                ")",
+                "print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'claude-session-456'}))",
+                "print(json.dumps({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'Implemented'}]}}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    agent = agent_home.AgentHome(
+        name="claude",
+        agent_id="atelier/worker/claude/p100",
+        role="worker",
+        path=tmp_path / "agent-home-claude",
+    )
+    agent.path.mkdir()
+    control = _TestControl()
+
+    result = session_agent.start_agent_session(
+        dry_run=False,
+        agent=agent,
+        agent_spec=_RecordedClaudeSpec(script_path),
+        agent_options=[],
+        opening_prompt="bounded claude prompt",
+        env={
+            "ATELIER_BOUNDED_RUNTIME_EVIDENCE": str(evidence_path),
+            "ATELIER_BOUNDARY_RECORD": str(record_path),
+        },
+        command_ops=_NoRewriteCommandOps(),
+        session_control=control,
+        blocked_handler=_TestBlockedHandler(),
+    )
+
+    assert result is not None
+    assert result.returncode == 0
+    launch_payload = json.loads(record_path.read_text(encoding="utf-8"))
+    assert launch_payload["argv"][-1] == "bounded claude prompt"
+    assert launch_payload["cwd"] == str(script_path.parent)
+    assert launch_payload["prompt"] == "bounded claude prompt"
+    assert launch_payload["evidence_path"] == str(evidence_path)
+    evidence_payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    assert evidence_payload["status"] == "converged"
+    assert evidence_payload["helper_session_id"] == "claude-session-456"
 
 
 def test_start_agent_session_codex_emits_live_progress_updates(monkeypatch) -> None:
