@@ -41,6 +41,22 @@ def _build_store(*, beads_root: Path, repo_root: Path) -> AtelierStore:
     return build_atelier_store(beads=client)
 
 
+def _resolve_repo_root() -> Path:
+    """Return the repo root selected by projected bootstrap, if available."""
+    return _BOOTSTRAP_REPO_ROOT if _BOOTSTRAP_REPO_ROOT is not None else Path.cwd()
+
+
+def _resolve_beads_root(beads_dir: str) -> Path:
+    """Resolve the Beads store root for this invocation."""
+    beads_root_arg = beads_dir.strip()
+    if beads_root_arg:
+        return Path(beads_root_arg).expanduser().resolve()
+    env_beads_dir = os.environ.get("BEADS_DIR", "").strip()
+    if env_beads_dir:
+        return Path(env_beads_dir).expanduser().resolve()
+    return (_resolve_repo_root() / ".beads").resolve()
+
+
 def _render_result(
     result: ExternalTicketMetadataRepairResult,
 ) -> str:
@@ -77,16 +93,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    beads_root_arg = str(args.beads_dir).strip()
-    if beads_root_arg:
-        beads_root = Path(beads_root_arg).resolve()
-    else:
-        beads_root = (
-            Path(os.environ.get("BEADS_DIR", "")).resolve()
-            if os.environ.get("BEADS_DIR")
-            else Path.cwd() / ".beads"
-        )
-    repo_root = _BOOTSTRAP_REPO_ROOT if _BOOTSTRAP_REPO_ROOT is not None else Path.cwd()
+    beads_root = _resolve_beads_root(str(args.beads_dir))
+    repo_root = _resolve_repo_root()
     store = _build_store(beads_root=beads_root, repo_root=repo_root)
     results = asyncio.run(
         store.repair_external_ticket_metadata(

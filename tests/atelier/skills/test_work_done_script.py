@@ -141,3 +141,42 @@ def test_main_uses_bootstrap_repo_root_for_execution(monkeypatch, tmp_path) -> N
         "repo_root": Path("/bootstrap/repo"),
         "direct_close": False,
     }
+
+
+def test_main_defaults_beads_root_from_bootstrap_repo_root(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    module = _load_script_module()
+    repo_root = tmp_path / "repo"
+    beads_root = repo_root / ".beads"
+    beads_root.mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(module, "_BOOTSTRAP_REPO_ROOT", repo_root)
+    monkeypatch.setattr(module, "close_epic", lambda **kwargs: captured.update(kwargs) or True)
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.delenv("BEADS_DIR", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "close_epic.py",
+            "--epic-id",
+            "at-epic",
+            "--agent-bead-id",
+            "at-agent",
+        ],
+    )
+
+    module.main()
+
+    assert captured == {
+        "epic_id": "at-epic",
+        "agent_bead_id": "at-agent",
+        "beads_root": beads_root.resolve(),
+        "repo_root": repo_root,
+        "direct_close": False,
+    }

@@ -23,6 +23,22 @@ _BOOTSTRAP_REPO_ROOT = bootstrap_projected_atelier_script(
 )
 
 
+def _resolve_repo_root() -> Path:
+    """Return the repo root selected by projected bootstrap, if available."""
+    return _BOOTSTRAP_REPO_ROOT if _BOOTSTRAP_REPO_ROOT is not None else Path.cwd()
+
+
+def _resolve_beads_root(beads_dir: str) -> Path:
+    """Resolve the Beads store root for this invocation."""
+    beads_dir_arg = beads_dir.strip()
+    if beads_dir_arg:
+        return Path(beads_dir_arg).expanduser().resolve()
+    env_beads_dir = os.environ.get("BEADS_DIR", "").strip()
+    if env_beads_dir:
+        return Path(env_beads_dir).expanduser().resolve()
+    return (_resolve_repo_root() / ".beads").resolve()
+
+
 def close_epic(
     *,
     epic_id: str,
@@ -89,17 +105,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    beads_dir = str(args.beads_dir).strip() or None
-    if beads_dir:
-        beads_root = Path(beads_dir).expanduser().resolve()
-    else:
-        beads_root = Path(os.environ.get("BEADS_DIR", str(Path.cwd() / ".beads"))).expanduser()
-        beads_root = beads_root.resolve()
+    beads_root = _resolve_beads_root(str(args.beads_dir))
     if not beads_root.exists():
         print(f"error: beads dir not found: {beads_root}", file=sys.stderr)
         raise SystemExit(1)
 
-    repo_root = _BOOTSTRAP_REPO_ROOT if _BOOTSTRAP_REPO_ROOT is not None else Path.cwd()
+    repo_root = _resolve_repo_root()
 
     closed = close_epic(
         epic_id=args.epic_id.strip(),
