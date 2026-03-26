@@ -6,21 +6,20 @@
 
 **Goal:** Add a first-class runtime profile option to `atelier plan` and
 `atelier work` so users can choose either the native Atelier contract or a
-trycycle-derived contract on top of the existing agent CLI, with native
-behavior preserved as the default.
+repo-owned `trycycle` contract layered on top of the existing agent CLI, with
+native behavior preserved as the default.
 
-**Architecture:** Introduce typed runtime-profile configuration and a shared
-runtime registry that is distinct from `agent.default`, then thread the
-selected profile into planner and worker launch preparation. Native remains the
-zero-behavior-change profile; the new `trycycle` profile adds role-specific
-prompt and `AGENTS.md` addenda derived from the local trycycle skill docs
-without changing Beads, worktree, claim, teardown, or publish semantics.
-Planner session resume also becomes runtime-aware so switching between
-`native` and `trycycle` never silently resumes a planner session that was
-started under a different contract.
+**Architecture:** Keep runtime profile selection separate from agent transport.
+Add a typed runtime-profile layer plus a shared registry, codify the shipped
+`trycycle` contract inside this repo, and thread the selected profile into
+planner and worker AGENTS/prompt generation. Use a shared AGENTS addendum
+helper so planner and worker do not hand-roll separate string-splicing logic.
+The selected profile may change guidance, prompt lines, and planner resume
+namespacing, but it must not change Beads, worktree, claim, teardown, or
+publish semantics.
 
 **Tech Stack:** Python 3.11+, Typer, Pydantic, pytest, existing Atelier
-planner/worker runtime modules, local trycycle skill markdown sources.
+planner/worker runtime modules, repo-owned runtime profile docs/helpers.
 
 ---
 
@@ -29,14 +28,15 @@ planner/worker runtime modules, local trycycle skill markdown sources.
 - Run `bash .githooks/worktree-bootstrap.sh` in this worktree before the first
   code change so repo-local hooks are bootstrapped here as required by
   `AGENTS.md`.
-- Treat these local skill docs as the authoritative trycycle references for the
-  shipped `trycycle` runtime text in this slice:
-  - `/Users/scott/.codex/skills/trycycle/subskills/trycycle-planning/SKILL.md`
-  - `/Users/scott/.codex/skills/trycycle/subskills/trycycle-executing/SKILL.md`
-  - `/Users/scott/.codex/skills/trycycle/subskills/trycycle-finishing/SKILL.md`
+- Treat this plan and the repo-owned
+  `docs/trycycle-runtime-contract.md` created in Task 1 as the authoritative
+  shipped contract for the new runtime profile.
+- Do not read `~/.codex/skills/trycycle/...` at runtime, in tests, or in the
+  final implementation. Local trycycle installs were analysis input only; the
+  shipped Atelier contract must live in this repo.
 - Do not invent a new `ATELIER_*` environment contract for runtime profiles in
-  this slice. Keep the runtime signal in config, CLI output, prompts, and
-  rendered `AGENTS.md` only.
+  this slice. Keep the runtime signal in config, CLI output, prompts, rendered
+  `AGENTS.md`, and planner session metadata only.
 
 ## User-visible behavior
 
@@ -60,10 +60,12 @@ planner/worker runtime modules, local trycycle skill markdown sources.
 
 ## Contracts and invariants
 
-- Runtime profiles may change agent guidance, prompt construction, and rendered
-  `AGENTS.md` content. They must not change:
+- Runtime profiles may change agent guidance, prompt construction, rendered
+  `AGENTS.md` content, and planner resume namespacing. They must not change:
   Beads schema, worktree ownership, claim rules, planner sync, teardown,
   publish/finalize, or runtime environment sanitization semantics.
+- The shipped `trycycle` obligations must be repo-owned. Future maintenance of
+  the profile must not depend on a developer-local skill installation.
 - Resume behavior remains agent-defined. The runtime profile must not change
   how saved Codex planner session IDs are discovered or persisted when the
   runtime profile is unchanged. A runtime-profile change must intentionally
@@ -78,11 +80,14 @@ planner/worker runtime modules, local trycycle skill markdown sources.
   not a new agent type.
 - No migration is required. Existing configs without `agent.runtime` continue
   to resolve to `native`.
+- Runtime addendum insertion must be centralized. Planner and worker should not
+  each hand-build their own AGENTS block markers or block replacement rules.
 
 ## Non-goals
 
 - Do not add an external `trycycle` binary dependency or installer flow.
 - Do not turn `trycycle` into a new `agents.AgentSpec`.
+- Do not read developer-local skill files at runtime.
 - Do not change Beads lifecycle semantics, worker publish rules, or planner
   promotion rules.
 - Do not make `trycycle` the default runtime.
@@ -94,23 +99,24 @@ planner/worker runtime modules, local trycycle skill markdown sources.
 - Create: `src/atelier/runtime_profiles/__init__.py`
   Responsibility: public runtime-profile exports and constants.
 - Create: `src/atelier/runtime_profiles/models.py`
-  Responsibility: typed runtime profile names, config models, and selection
-  payloads.
+  Responsibility: typed runtime profile names and shared profile payloads.
 - Create: `src/atelier/runtime_profiles/registry.py`
   Responsibility: resolve CLI/config/default precedence and return the selected
   role profile.
 - Create: `src/atelier/runtime_profiles/planner.py`
-  Responsibility: planner runtime text derived from the local trycycle planning
-  skill, plus planner session namespace helpers.
+  Responsibility: repo-owned planner addendum text, prompt-line helpers, and
+  planner session namespace helpers.
 - Create: `src/atelier/runtime_profiles/worker.py`
-  Responsibility: worker runtime text derived from the local trycycle
-  executing/finishing skills.
+  Responsibility: repo-owned worker addendum text and prompt-line helpers.
 - Create: `tests/atelier/test_runtime_profiles.py`
-  Responsibility: config parsing and runtime selection precedence coverage.
+  Responsibility: runtime content and runtime selection precedence coverage.
 - Create: `docs/trycycle-runtime-contract.md`
   Responsibility: durable contract for native vs `trycycle` runtime behavior
   and the specific trycycle-derived obligations shipped in this slice.
 
+- Modify: `src/atelier/agent_home.py`
+  Responsibility: add a shared helper that inserts or replaces a deterministic
+  runtime-profile addendum block in rendered `AGENTS.md`.
 - Modify: `src/atelier/models.py`
   Responsibility: add typed runtime config to `AgentConfig`.
 - Modify: `src/atelier/config.py`
@@ -118,9 +124,9 @@ planner/worker runtime modules, local trycycle skill markdown sources.
 - Modify: `src/atelier/cli.py`
   Responsibility: expose `--runtime` on `plan` and `work`.
 - Modify: `src/atelier/commands/plan.py`
-  Responsibility: resolve planner runtime, surface it to the user, append the
-  planner runtime addendum to rendered `AGENTS.md`, augment the opening
-  prompt, and keep planner resume scoped to the selected runtime profile.
+  Responsibility: resolve planner runtime, surface it to the user, apply the
+  shared AGENTS addendum helper, extend the opening prompt, and keep planner
+  resume scoped to the selected runtime profile.
 - Modify: `src/atelier/worker/ports.py`
   Responsibility: carry resolved worker runtime metadata and prompt additions
   through the worker runtime protocols.
@@ -133,8 +139,8 @@ planner/worker runtime modules, local trycycle skill markdown sources.
 - Modify: `src/atelier/worker/runtime.py`
   Responsibility: extend the worker command adapter to pass runtime additions.
 - Modify: `src/atelier/worker/session/agent.py`
-  Responsibility: resolve worker runtime, append the worker runtime addendum to
-  rendered `AGENTS.md`, and carry prompt additions forward to startup.
+  Responsibility: resolve worker runtime, apply the shared AGENTS addendum
+  helper, and carry prompt additions forward to startup.
 - Modify: `src/atelier/worker/session/runner.py`
   Responsibility: surface the selected worker runtime in startup output and use
   the runtime-specific prompt additions from session preparation.
@@ -144,6 +150,8 @@ planner/worker runtime modules, local trycycle skill markdown sources.
   Responsibility: document the new runtime option and example usage.
 
 - Modify tests:
+  `tests/atelier/test_agent_home.py`
+  `tests/atelier/test_agents.py`
   `tests/atelier/test_config.py`
   `tests/atelier/commands/test_plan_cli.py`
   `tests/atelier/commands/test_work_cli.py`
@@ -153,57 +161,196 @@ planner/worker runtime modules, local trycycle skill markdown sources.
   `tests/atelier/worker/test_session_agent.py`
   `tests/atelier/worker/test_session_runner.py`
   `tests/atelier/worker/test_session_runner_flow.py`
-  Responsibility: cover config defaults, CLI plumbing, planner/worker runtime
-  selection, native parity, and trycycle-specific prompt/addendum behavior.
+  `tests/atelier/worker/test_runtime.py`
+  Responsibility: cover runtime content, config defaults, CLI plumbing,
+  planner/worker runtime selection, native parity, and trycycle-specific
+  prompt/addendum behavior.
 
 ## Strategy gate
 
 The wrong architecture would be to add `trycycle` as another `AgentSpec` in
 `src/atelier/agents.py`. That would collapse two distinct concerns into one:
-transport and runtime contract. Users still need to pick `codex` vs `claude`
-independently of whether the session runs the native Atelier contract or the
-trycycle-style contract, and the repo already has a lot of agent-specific
-logic that should remain in one place.
+transport and runtime contract.
 
-The other wrong architecture would be to sprinkle `if runtime == "trycycle"`
-branches directly through `plan.py`, `worker/prompts.py`, and
-`worker/session/agent.py` without a shared runtime registry. That would make
-native parity hard to prove and would make future runtime profiles expensive to
-add.
+The second wrong architecture would be to read `~/.codex/skills/trycycle/...`
+from the implementation at runtime or in tests. That would make the feature
+machine-local instead of repo-owned and would make future maintenance depend on
+an external skill install.
 
-The third wrong architecture would be to ship a profile named `trycycle`
-without grounding its text in the local trycycle skill sources. That would
-turn the feature into arbitrary prompt tweaks rather than a deliberate
-trycycle-like runtime option.
+The third wrong architecture would be to append trycycle text directly in both
+`plan.py` and `worker/session/agent.py` with separate ad hoc block handling.
+That would create two divergent AGENTS mutation paths for the same feature.
+
+The fourth wrong architecture would be to ship a profile named `trycycle`
+without first codifying the exact shipped obligations in repo-owned docs and
+helper modules. That would turn the feature into arbitrary prompt tweaks rather
+than a deliberate runtime contract.
 
 The clean steady-state design is:
 
 - keep `agents.AgentSpec` as the CLI transport registry
 - add a separate runtime-profile layer with explicit per-role resolution
+- codify the shipped `trycycle` contract inside this repo first
+- use a shared AGENTS addendum helper for both planner and worker
 - keep native behavior encoded as the `native` profile
 - implement `trycycle` as an Atelier-managed guidance profile in this slice
-- derive the shipped trycycle planner and worker obligations from the local
-  trycycle skill docs and codify them in repo-owned helper modules and docs
-- do not add a new environment variable surface unless a concrete follow-on
-  requirement appears
+- keep Beads/worktree/finalize behavior unchanged
 
-That solves the user’s actual goal: explore and ship trycycle-like planner and
-worker hardening without destabilizing the worker and planner lifecycle
-machinery that already exists.
+That solves the user’s actual goal: ship a real trycycle-like runtime option
+for planner and worker phases without destabilizing the lifecycle machinery
+that already exists.
 
-### Task 1: Add typed runtime-profile config and selection
+### Task 1: Codify the shipped runtime contract inside the repo
 
 **Files:**
 - Create: `src/atelier/runtime_profiles/__init__.py`
 - Create: `src/atelier/runtime_profiles/models.py`
-- Create: `src/atelier/runtime_profiles/registry.py`
+- Create: `src/atelier/runtime_profiles/planner.py`
+- Create: `src/atelier/runtime_profiles/worker.py`
 - Create: `tests/atelier/test_runtime_profiles.py`
+- Create: `docs/trycycle-runtime-contract.md`
+- Modify: `src/atelier/agent_home.py`
+- Modify: `tests/atelier/test_agent_home.py`
+
+- [ ] **Step 1: Identify or write the failing test**
+
+Add focused tests for:
+
+```python
+def test_planner_trycycle_runtime_returns_repo_owned_addendum() -> None:
+    addendum = planner_runtime_addendum("trycycle")
+    assert "Diagnose the plan completely before deciding anything." in addendum
+
+
+def test_worker_trycycle_runtime_returns_repo_owned_prompt_lines() -> None:
+    lines = worker_runtime_prompt_lines("trycycle")
+    assert "Execute the work task-by-task." in lines
+
+
+def test_apply_runtime_profile_addendum_inserts_named_block() -> None:
+    updated = agent_home.apply_runtime_profile_addendum(
+        "# Base\n",
+        "extra guidance",
+        role="planner",
+        runtime_name="trycycle",
+    )
+    assert "## Runtime Profile Addendum" in updated
+    assert "Runtime: trycycle" in updated
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run:
+
+```bash
+uv run pytest \
+  tests/atelier/test_runtime_profiles.py \
+  tests/atelier/test_agent_home.py -k runtime -v
+```
+
+Expected: FAIL because the runtime profile helpers and shared AGENTS addendum
+helper do not exist.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Implement the repo-owned contract helpers first:
+
+```python
+RuntimeProfileName = Literal["native", "trycycle"]
+
+
+def planner_runtime_addendum(runtime_name: RuntimeProfileName) -> str:
+    if runtime_name == "native":
+        return ""
+    return "\n".join(
+        [
+            "## Runtime Profile: trycycle",
+            "- Diagnose the plan completely before deciding anything.",
+            "- Capture behavior, invariants, and failure modes before task breakdown.",
+            "- Make architecture decisions before decomposition.",
+        ]
+    )
+```
+
+```python
+def worker_runtime_prompt_lines(
+    runtime_name: RuntimeProfileName,
+) -> tuple[str, ...]:
+    if runtime_name == "native":
+        return ()
+    return (
+        "Restate the bead contract as a concrete checklist before coding.",
+        "Execute the work task-by-task.",
+        "Do not skip required repo gates, push, or publish steps.",
+    )
+```
+
+Add `agent_home.apply_runtime_profile_addendum(...)` so runtime addendum block
+insertion/replacement is shared and deterministic for both roles.
+
+Write `docs/trycycle-runtime-contract.md` as the authoritative shipped
+contract. It should capture the exact planner and worker obligations Atelier
+ships in this slice and state explicitly that runtime profiles change guidance
+only, not lifecycle semantics.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run:
+
+```bash
+uv run pytest \
+  tests/atelier/test_runtime_profiles.py \
+  tests/atelier/test_agent_home.py -k runtime -v
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Refactor, format, and verify**
+
+Tighten naming and docstrings, keep the profile content repo-owned, and verify
+the helper surface.
+
+Run:
+
+```bash
+just format
+uv run pytest \
+  tests/atelier/test_runtime_profiles.py \
+  tests/atelier/test_agent_home.py -v
+```
+
+Expected: all PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add \
+  src/atelier/runtime_profiles/__init__.py \
+  src/atelier/runtime_profiles/models.py \
+  src/atelier/runtime_profiles/planner.py \
+  src/atelier/runtime_profiles/worker.py \
+  src/atelier/agent_home.py \
+  docs/trycycle-runtime-contract.md \
+  tests/atelier/test_runtime_profiles.py \
+  tests/atelier/test_agent_home.py
+git commit -m "feat(runtime): codify repo-owned trycycle profile contract" \
+  -m "- add repo-owned planner and worker runtime profile helpers" \
+  -m "- centralize AGENTS runtime addendum insertion" \
+  -m "- document the shipped trycycle contract and cover it with tests"
+```
+
+### Task 2: Add typed runtime-profile selection to config and CLI
+
+**Files:**
+- Create: `src/atelier/runtime_profiles/registry.py`
 - Modify: `src/atelier/models.py`
 - Modify: `src/atelier/config.py`
 - Modify: `src/atelier/cli.py`
+- Modify: `tests/atelier/test_agents.py`
 - Modify: `tests/atelier/test_config.py`
 - Modify: `tests/atelier/commands/test_plan_cli.py`
 - Modify: `tests/atelier/commands/test_work_cli.py`
+- Modify: `tests/atelier/test_runtime_profiles.py`
 
 - [ ] **Step 1: Identify or write the failing test**
 
@@ -235,24 +382,21 @@ Run:
 
 ```bash
 uv run pytest \
+  tests/atelier/test_agents.py \
   tests/atelier/test_runtime_profiles.py \
   tests/atelier/test_config.py \
   tests/atelier/commands/test_plan_cli.py \
   tests/atelier/commands/test_work_cli.py -v
 ```
 
-Expected: FAIL because `AgentConfig` has no runtime field, the runtime registry
-does not exist, and the CLI does not pass `runtime`.
+Expected: FAIL because `AgentConfig` has no runtime field, the registry does
+not exist, and the CLI does not pass `runtime`.
 
 - [ ] **Step 3: Write minimal implementation**
 
 Add a typed runtime config that stays separate from the agent transport:
 
 ```python
-RUNTIME_PROFILE_VALUES = ("native", "trycycle")
-RuntimeProfileName = Literal["native", "trycycle"]
-
-
 class AgentRuntimeConfig(BaseModel):
     default: RuntimeProfileName = "native"
     planner: RuntimeProfileName | None = None
@@ -288,6 +432,7 @@ Run:
 
 ```bash
 uv run pytest \
+  tests/atelier/test_agents.py \
   tests/atelier/test_runtime_profiles.py \
   tests/atelier/test_config.py \
   tests/atelier/commands/test_plan_cli.py \
@@ -298,15 +443,15 @@ Expected: PASS.
 
 - [ ] **Step 5: Refactor, format, and verify**
 
-Tighten naming and docstrings, keep the new runtime helpers out of
-`src/atelier/agents.py`, run the repo formatter before committing, and verify
-the broader config/model surface.
+Tighten naming and docstrings, keep the runtime helpers out of
+`src/atelier/agents.py`, and verify the broader config/model surface.
 
 Run:
 
 ```bash
 just format
 uv run pytest \
+  tests/atelier/test_agents.py \
   tests/atelier/test_runtime_profiles.py \
   tests/atelier/test_config.py \
   tests/atelier/test_models.py \
@@ -320,12 +465,11 @@ Expected: all PASS.
 
 ```bash
 git add \
-  src/atelier/runtime_profiles/__init__.py \
-  src/atelier/runtime_profiles/models.py \
   src/atelier/runtime_profiles/registry.py \
   src/atelier/models.py \
   src/atelier/config.py \
   src/atelier/cli.py \
+  tests/atelier/test_agents.py \
   tests/atelier/test_runtime_profiles.py \
   tests/atelier/test_config.py \
   tests/atelier/commands/test_plan_cli.py \
@@ -336,11 +480,11 @@ git commit -m "feat(runtime): add typed runtime profile selection" \
   -m "- cover defaults and CLI plumbing with tests"
 ```
 
-### Task 2: Integrate planner runtime profiles without changing planner safety
+### Task 3: Integrate planner runtime profiles without changing planner safety
 
 **Files:**
-- Create: `src/atelier/runtime_profiles/planner.py`
 - Modify: `src/atelier/commands/plan.py`
+- Modify: `src/atelier/runtime_profiles/planner.py`
 - Modify: `tests/atelier/commands/test_plan.py`
 
 - [ ] **Step 1: Identify or write the failing test**
@@ -348,21 +492,18 @@ git commit -m "feat(runtime): add typed runtime profile selection" \
 Add planner tests for:
 
 ```python
-def test_plan_cli_runtime_override_beats_config_runtime(...)
 def test_plan_trycycle_runtime_appends_planner_contract_lines(...)
 def test_plan_native_runtime_preserves_existing_opening_prompt(...)
 def test_plan_runtime_change_starts_fresh_planner_session(...)
 def test_plan_runtime_scopes_codex_session_lookup(...)
 ```
 
-The trycycle planner contract must be derived from
-`/Users/scott/.codex/skills/trycycle/subskills/trycycle-planning/SKILL.md`
-and should require:
+The trycycle planner contract should require:
 
-- explicit user-visible behavior capture
-- explicit invariants and tricky-boundary analysis
-- architecture decisions before changeset decomposition
-- no weakening of planner read-only and teardown rules
+- explicit diagnosis of behavior, invariants, and failure modes before changeset
+  decomposition
+- architecture decisions before task breakdown
+- no weakening of planner read-only, sync, or teardown rules
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -372,51 +513,17 @@ Run:
 uv run pytest tests/atelier/commands/test_plan.py -k runtime -v
 ```
 
-Expected: FAIL because planner runtime resolution and trycycle addenda do not
-exist.
+Expected: FAIL because planner runtime resolution and runtime-scoped resume do
+not exist.
 
 - [ ] **Step 3: Write minimal implementation**
-
-Implement role-specific planner runtime content behind a small helper module.
-Base the `trycycle` text on the local trycycle planning skill instead of
-inventing new obligations. For example:
-
-```python
-def planner_runtime_addendum(runtime_name: RuntimeProfileName) -> str:
-    if runtime_name == "native":
-        return ""
-    return "\n".join(
-        [
-            "## Runtime Profile: trycycle",
-            "- Diagnose the plan completely before deciding anything.",
-            "- Capture user-visible behavior, invariants, and failure modes",
-            "  before changeset decomposition.",
-            "- Make architecture decisions now; do not defer core reasoning",
-            "  to later review rounds.",
-        ]
-    )
-```
-
-Add planner runtime-specific session metadata helpers, for example:
-
-```python
-_PLANNER_SESSION_RUNTIME_FIELD = "planner_session.runtime"
-
-
-def planner_workspace_uid(
-    *,
-    agent_home_name: str,
-    runtime_name: RuntimeProfileName,
-) -> str:
-    return f"planner-{agent_home_name}-{runtime_name}"
-```
 
 In `run_planner(...)`:
 
 - resolve the planner runtime via the registry
 - print `Planner runtime: <name>`
 - compute the planner workspace/session namespace from the selected runtime
-- append the runtime addendum to rendered planner `AGENTS.md`
+- apply the shared runtime addendum helper to rendered planner `AGENTS.md`
 - extend `_planner_opening_prompt(...)` to accept runtime-specific lines
 - persist both planner session id and planner runtime when Codex returns a
   session id
@@ -425,6 +532,12 @@ In `run_planner(...)`:
   under the selected runtime namespace
 - keep resume/session-id logic, sync monitor, guardrails, and teardown
   otherwise unchanged
+
+Use a dedicated planner session runtime field, for example:
+
+```python
+_PLANNER_SESSION_RUNTIME_FIELD = "planner_session.runtime"
+```
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -455,29 +568,30 @@ Expected: all PASS, including the existing planner session/resume coverage.
 
 ```bash
 git add \
-  src/atelier/runtime_profiles/planner.py \
   src/atelier/commands/plan.py \
+  src/atelier/runtime_profiles/planner.py \
   tests/atelier/commands/test_plan.py
 git commit -m "feat(plan): add planner runtime profiles" \
   -m "- resolve planner runtime separately from agent transport" \
-  -m "- append trycycle planner contract lines to prompts and AGENTS output" \
-  -m "- preserve planner resume and teardown behavior"
+  -m "- scope planner resume to the selected runtime profile" \
+  -m "- apply repo-owned planner runtime guidance to prompts and AGENTS output"
 ```
 
-### Task 3: Integrate worker runtime profiles
+### Task 4: Integrate worker runtime profiles without changing worker lifecycle
 
 **Files:**
-- Create: `src/atelier/runtime_profiles/worker.py`
 - Modify: `src/atelier/worker/ports.py`
 - Modify: `src/atelier/worker/prompts.py`
 - Modify: `src/atelier/worker/work_startup_runtime.py`
 - Modify: `src/atelier/worker/runtime.py`
 - Modify: `src/atelier/worker/session/agent.py`
 - Modify: `src/atelier/worker/session/runner.py`
+- Modify: `src/atelier/runtime_profiles/worker.py`
 - Modify: `tests/atelier/worker/test_prompts.py`
 - Modify: `tests/atelier/worker/test_session_agent.py`
 - Modify: `tests/atelier/worker/test_session_runner.py`
 - Modify: `tests/atelier/worker/test_session_runner_flow.py`
+- Modify: `tests/atelier/worker/test_runtime.py`
 - Modify: `tests/atelier/commands/test_work_runtime_wiring.py`
 
 - [ ] **Step 1: Identify or write the failing test**
@@ -486,11 +600,11 @@ Add worker-facing tests for:
 
 ```python
 def test_worker_opening_prompt_includes_trycycle_contract_lines() -> None:
-    prompt = worker_opening_prompt(..., runtime_lines=("Follow the plan task-by-task.",))
-    assert "Follow the plan task-by-task." in prompt
+    prompt = worker_opening_prompt(..., runtime_lines=("Execute the work task-by-task.",))
+    assert "Execute the work task-by-task." in prompt
 
 
-def test_prepare_agent_session_appends_trycycle_worker_addendum(...) -> None:
+def test_prepare_agent_session_applies_trycycle_worker_addendum(...) -> None:
     ...
 
 
@@ -502,17 +616,11 @@ def test_worker_session_runner_reports_selected_runtime(...) -> None:
     ...
 ```
 
-The trycycle worker contract must be derived from:
+The trycycle worker contract should require:
 
-- `/Users/scott/.codex/skills/trycycle/subskills/trycycle-executing/SKILL.md`
-- `/Users/scott/.codex/skills/trycycle/subskills/trycycle-finishing/SKILL.md`
-
-It should require:
-
-- execute only the seeded changeset
-- derive a checklist from the bead contract before coding
-- work task-by-task instead of broad free-form execution
-- keep all existing finalize, push, and publish semantics
+- derive a concrete checklist from the seeded bead before coding
+- execute the work task-by-task instead of broad free-form execution
+- keep all existing finalize, push, publish, and fail-closed semantics
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -524,31 +632,14 @@ uv run pytest \
   tests/atelier/worker/test_session_agent.py \
   tests/atelier/worker/test_session_runner.py \
   tests/atelier/worker/test_session_runner_flow.py \
+  tests/atelier/worker/test_runtime.py \
   tests/atelier/commands/test_work_runtime_wiring.py -k runtime -v
 ```
 
 Expected: FAIL because the worker prompt and session prep do not accept runtime
-additions.
+additions and the runner does not surface runtime selection.
 
 - [ ] **Step 3: Write minimal implementation**
-
-Add runtime-specific worker content behind one helper module. Base the
-`trycycle` lines on the local trycycle executing and finishing skills instead
-of ad hoc wording. For example:
-
-```python
-def worker_runtime_prompt_lines(
-    runtime_name: RuntimeProfileName,
-) -> tuple[str, ...]:
-    if runtime_name == "native":
-        return ()
-    return (
-        "Before coding, restate the bead contract as a concrete checklist.",
-        "Execute the work task-by-task and keep the plan synchronized with",
-        "the actual code and verification work.",
-        "Do not skip required repo gates, push, or publish steps.",
-    )
-```
 
 Then:
 
@@ -557,10 +648,10 @@ Then:
   `AgentSessionPreparation`
 - extend the worker command/service protocols so runner code can receive the
   runtime-specific prompt additions without ad hoc attribute access
-- append the worker addendum to rendered `AGENTS.md`
+- apply the shared runtime addendum helper to rendered worker `AGENTS.md`
 - extend `worker_opening_prompt(...)` to accept additive runtime lines
 - surface `Worker runtime: <name>` in startup output before the agent session
-  begins so the active contract is visible to the user
+  begins
 - keep startup selection, claim logic, worktree preparation, and finalize
   behavior unchanged
 
@@ -574,6 +665,7 @@ uv run pytest \
   tests/atelier/worker/test_session_agent.py \
   tests/atelier/worker/test_session_runner.py \
   tests/atelier/worker/test_session_runner_flow.py \
+  tests/atelier/worker/test_runtime.py \
   tests/atelier/commands/test_work_runtime_wiring.py -k runtime -v
 ```
 
@@ -605,28 +697,28 @@ Expected: all PASS.
 
 ```bash
 git add \
-  src/atelier/runtime_profiles/worker.py \
   src/atelier/worker/ports.py \
   src/atelier/worker/prompts.py \
   src/atelier/worker/work_startup_runtime.py \
   src/atelier/worker/runtime.py \
   src/atelier/worker/session/agent.py \
   src/atelier/worker/session/runner.py \
+  src/atelier/runtime_profiles/worker.py \
   tests/atelier/worker/test_prompts.py \
   tests/atelier/worker/test_session_agent.py \
   tests/atelier/worker/test_session_runner.py \
   tests/atelier/worker/test_session_runner_flow.py \
+  tests/atelier/worker/test_runtime.py \
   tests/atelier/commands/test_work_runtime_wiring.py
 git commit -m "feat(work): add worker runtime profiles" \
   -m "- thread runtime selection through worker session preparation" \
-  -m "- add trycycle worker contract lines without changing lifecycle logic" \
-  -m "- preserve worker prompt and session-runner compatibility"
+  -m "- add repo-owned trycycle worker guidance without changing lifecycle logic" \
+  -m "- surface the selected worker runtime in startup output"
 ```
 
-### Task 4: Document the contract, lock down regression coverage, and land it
+### Task 5: Document the public surface, lock down parity, and land it
 
 **Files:**
-- Create: `docs/trycycle-runtime-contract.md`
 - Modify: `docs/behavior.md`
 - Modify: `README.md`
 - Modify: `tests/atelier/test_config.py`
@@ -666,11 +758,6 @@ pass.
 
 Document the behavior explicitly:
 
-- `docs/trycycle-runtime-contract.md`
-  Record the specific planner obligations derived from the local trycycle
-  planning skill, the worker obligations derived from the local trycycle
-  executing/finishing skills, and the invariant that runtime profiles alter
-  only session guidance in this slice.
 - `docs/behavior.md`
   Add the new config shape and `--runtime` command behavior.
 - `README.md`
@@ -680,6 +767,10 @@ Document the behavior explicitly:
 atelier plan --runtime trycycle
 atelier work --runtime trycycle
 ```
+
+Keep `docs/trycycle-runtime-contract.md` as the deep contract and reference it
+from the high-level docs rather than duplicating the full guidance in multiple
+places.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -697,13 +788,15 @@ Expected: PASS.
 
 - [ ] **Step 5: Refactor, format, and verify**
 
-Run the repo-required gates for the completed slice.
+Run the repo-required gates for the completed slice on the final formatted
+state.
 
 Run:
 
 ```bash
 just test
 just format
+just test
 just lint
 ```
 
@@ -713,7 +806,6 @@ Expected: all PASS.
 
 ```bash
 git add \
-  docs/trycycle-runtime-contract.md \
   docs/behavior.md \
   README.md \
   tests/atelier/test_config.py \
@@ -722,8 +814,8 @@ git add \
   tests/atelier/worker/test_session_runner.py
 git commit -m "docs(runtime): document trycycle runtime profiles" \
   -m "- document config and command behavior for runtime profiles" \
-  -m "- codify the shipped trycycle-derived planner and worker contract text" \
-  -m "- lock down native-parity and role-scoped regression coverage"
+  -m "- lock down native-parity and role-scoped regression coverage" \
+  -m "- reference the repo-owned runtime contract from user-facing docs"
 ```
 
 ## Final verification and landing
@@ -755,8 +847,8 @@ Expected:
   shipped `trycycle` profile.
 - It avoids the main design mistake of conflating runtime behavior with agent
   transport.
-- It grounds the `trycycle` profile in actual local trycycle source material
-  instead of ad hoc prompt wording.
+- It removes the biggest execution risk in the prior draft: dependence on a
+  developer-local trycycle install as the source of truth for shipped behavior.
+- It centralizes AGENTS addendum handling instead of duplicating string
+  mutation logic across planner and worker.
 - It keeps native behavior stable and testable.
-- It avoids creating a new environment-variable surface before one is
-  justified.
