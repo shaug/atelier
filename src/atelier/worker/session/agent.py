@@ -26,6 +26,7 @@ from ... import (
     templates,
     workspace,
 )
+from .. import work_runtime_profile
 from . import output as session_output
 
 _STRUCTURED_LIVE_PREVIEW_CHARS = 140
@@ -296,6 +297,7 @@ def prepare_agent_session(
     dry_run: bool,
     session_control: AgentSessionControl,
     command_ops: AgentSessionCommandOps,
+    bounded_runtime_evidence_path_override: Path | None = None,
 ) -> AgentSessionPreparation:
     """Prepare agent home, AGENTS template, and runtime env."""
     agent_spec = agents.get_agent(project_config.agent.default)
@@ -447,6 +449,11 @@ def prepare_agent_session(
     env["BEADS_DIR"] = str(beads_root)
     env["BEADS_DB"] = str(beads_root / "beads.db")
     env["ATELIER_BEADS_PREFIX"] = config.resolve_beads_prefix(project_config)
+    evidence_path = (
+        bounded_runtime_evidence_path_override
+        or work_runtime_profile.bounded_runtime_evidence_path(agent.path)
+    )
+    env["ATELIER_BOUNDED_RUNTIME_EVIDENCE"] = str(evidence_path)
     return AgentSessionPreparation(
         agent_spec=agent_spec,
         agent_options=agent_options,
@@ -506,6 +513,7 @@ def start_agent_session(
     returncode = 0
     trace_agent_output = session_output.trace_output_requested(env)
     output_capture = session_output.AgentOutputCapture(agent_name=agent_spec.name)
+    bounded_evidence_path = env.get("ATELIER_BOUNDED_RUNTIME_EVIDENCE")
     if not trace_agent_output:
         live_progress = _StructuredLiveProgress(label=agent_spec.display_name)
 
@@ -561,6 +569,13 @@ def start_agent_session(
             blocked_handler.mark_changeset_blocked(f"command failed: {' '.join(start_cmd)}")
             session_control.die(f"command failed: {' '.join(start_cmd)}")
             return None
+    if bounded_evidence_path:
+        helper_session_id = output_capture.helper_session_id
+        if helper_session_id:
+            work_runtime_profile.write_bounded_runtime_evidence(
+                evidence_path=Path(bounded_evidence_path),
+                helper_session_id=helper_session_id,
+            )
 
     effective_start_cwd = start_cwd or agent.path
 

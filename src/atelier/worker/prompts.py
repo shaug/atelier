@@ -32,6 +32,14 @@ def worker_opening_prompt(
             "self-review against the assigned bead acceptance criteria."
         ),
         (
+            "Bounded correctness contract: keep helper-session orchestration "
+            "internal to this worker session and emit convergence evidence."
+        ),
+        (
+            "If helper-session evidence is missing, malformed, or does not "
+            "prove convergence, fail closed instead of finalizing."
+        ),
+        (
             "Append a `north_star_review.<timestamp>:` note to the changeset "
             "bead before first push with unmet_acceptance_criteria, "
             "required_code_changes_per_criterion, implementation_summary, "

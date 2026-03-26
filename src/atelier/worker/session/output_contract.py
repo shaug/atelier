@@ -36,6 +36,7 @@ class AdapterOutput:
     events: tuple[RenderEvent, ...] = ()
     preview: str | None = None
     diagnostic: str | None = None
+    session_id: str | None = None
 
 
 def normalize_render_text(text: str, *, max_chars: int = _MAX_RENDER_TEXT_CHARS) -> str:

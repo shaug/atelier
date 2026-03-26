@@ -14,7 +14,9 @@ from ... import beads as beads_runtime
 from ... import exec as exec_util
 from ... import root_branch as root_branch_runtime
 from .. import selection as worker_selection
+from .. import work_runtime_profile
 from ..context import ChangesetSelectionContext, WorkerRunContext
+from ..iteration_args import WorkerIterationArgs, build_worker_iteration_args
 from ..models import StartupContractResult, StartupFinalizePreflightResult, WorkerRunSummary
 from ..models_boundary import parse_issue_boundary
 from ..ports import (
@@ -750,7 +752,7 @@ class _ChangesetBlockHandler:
 
 
 def run_worker_once(
-    args: object,
+    args: WorkerIterationArgs | object,
     *,
     run_context: WorkerRunContext,
     deps: WorkerRuntimeDependencies,
@@ -763,6 +765,7 @@ def run_worker_once(
     mode = run_context.mode
     dry_run = run_context.dry_run
     session_key = run_context.session_key
+    iteration_args = build_worker_iteration_args(args)
     timings: list[tuple[str, float]] = []
     trace = control.trace_enabled()
     infra.prs.clear_runtime_cache()
@@ -789,7 +792,7 @@ def run_worker_once(
     with infra.agents.scoped_agent_env(agent.agent_id):
         control.say("Worker session")
         agent_bead_id: str | None = None
-        provided_agent_bead_id = str(getattr(args, "agent_bead_id", "") or "").strip()
+        provided_agent_bead_id = iteration_args.agent_bead_id or ""
         finishstep = control.step("Prime beads", timings=timings, trace=trace)
         if dry_run:
             control.dry_run_log("Would run: bd prime")
@@ -816,12 +819,12 @@ def run_worker_once(
             agent_bead_id = bead_id if isinstance(bead_id, str) and bead_id else None
         finishstep()
 
-        epic_id = getattr(args, "epic_id", None)
+        epic_id = iteration_args.epic_id
         explicit_resume_requested = isinstance(epic_id, str) and bool(epic_id.strip())
-        queue_only = bool(getattr(args, "queue", False))
-        assume_yes = bool(getattr(args, "yes", False))
-        should_reconcile = bool(getattr(args, "reconcile", False))
-        startup_select = str(getattr(args, "select", "oldest-feedback") or "oldest-feedback")
+        queue_only = iteration_args.queue
+        assume_yes = iteration_args.yes
+        should_reconcile = iteration_args.reconcile
+        startup_select = iteration_args.select
 
         if should_reconcile:
             finishstep = control.step("Reconcile blocked changesets", timings=timings, trace=trace)
@@ -857,7 +860,7 @@ def run_worker_once(
                 )
             agent_bead_id_required = agent_bead_id
         claim_conflict_excluded_epics: set[str] = set()
-        raw_excluded_epics = getattr(args, "implicit_excluded_epic_ids", ())
+        raw_excluded_epics = iteration_args.implicit_excluded_epic_ids
         if isinstance(raw_excluded_epics, (list, tuple, set)):
             claim_conflict_excluded_epics = {
                 str(epic_id).strip()
@@ -1571,6 +1574,17 @@ def run_worker_once(
         finishstep(extra=mark_step_extra)
 
         finishstep = control.step("Prepare agent session", timings=timings, trace=trace)
+        bounded_runtime_iteration_token = iteration_args.bounded_runtime_iteration_token
+        iteration_token = (
+            str(bounded_runtime_iteration_token)
+            if isinstance(bounded_runtime_iteration_token, str)
+            and bounded_runtime_iteration_token.strip()
+            else None
+        )
+        bounded_runtime_evidence_path_override = work_runtime_profile.bounded_runtime_evidence_path(
+            agent.path,
+            iteration_token=iteration_token,
+        )
         agent_prep = None
         try:
             agent_prep = infra.worker_session_agent.prepare_agent_session(
@@ -1584,9 +1598,10 @@ def run_worker_once(
                 changeset_id=str(changeset_id),
                 root_branch_value=root_branch_value or "",
                 enlistment_path=Path(_enlistment),
-                yes=bool(getattr(args, "yes", False)),
-                yolo=bool(getattr(args, "yolo", False)),
+                yes=iteration_args.yes,
+                yolo=iteration_args.yolo,
                 dry_run=dry_run,
+                bounded_runtime_evidence_path_override=bounded_runtime_evidence_path_override,
                 session_control=control,
                 command_ops=command_ports,
             )
@@ -1629,6 +1644,26 @@ def run_worker_once(
         project_enlistment = agent_prep.project_enlistment
         workspace_branch = agent_prep.workspace_branch
         env = agent_prep.env
+        if not dry_run:
+            cleanup_reason = work_runtime_profile.clear_bounded_runtime_evidence(
+                evidence_path=bounded_runtime_evidence_path_override
+            )
+            if cleanup_reason is not None:
+                lifecycle.mark_changeset_blocked(
+                    str(changeset_id),
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    reason=cleanup_reason,
+                )
+                finishstep(extra="fail-closed")
+                return finish(
+                    WorkerRunSummary(
+                        started=False,
+                        reason="bounded_runtime_convergence_unproven",
+                        epic_id=selected_epic,
+                        changeset_id=str(changeset_id),
+                    )
+                )
         finishstep()
         merge_conflict = startup_result.reason == "merge_conflict"
         review_feedback = startup_result.reason == "review_feedback"
@@ -1701,6 +1736,31 @@ def run_worker_once(
                     reason="dry_run",
                     epic_id=selected_epic,
                     changeset_id=str(changeset_id) if changeset_id else None,
+                )
+            )
+        evidence_value = env.get("ATELIER_BOUNDED_RUNTIME_EVIDENCE")
+        evidence_path = (
+            Path(evidence_value)
+            if evidence_value
+            else work_runtime_profile.bounded_runtime_evidence_path(agent.path)
+        )
+        bounded_reason = work_runtime_profile.verify_bounded_runtime_evidence(
+            evidence_path=evidence_path
+        )
+        if bounded_reason is not None:
+            lifecycle.mark_changeset_blocked(
+                str(changeset_id),
+                beads_root=beads_root,
+                repo_root=repo_root,
+                reason=bounded_reason,
+            )
+            finishstep(extra="fail-closed")
+            return finish(
+                WorkerRunSummary(
+                    started=False,
+                    reason="bounded_runtime_convergence_unproven",
+                    epic_id=selected_epic,
+                    changeset_id=str(changeset_id),
                 )
             )
         started_at = session_result.started_at

@@ -60,6 +60,7 @@ class AgentOutputCapture:
         default_factory=lambda: deque(maxlen=_MAX_RENDER_EVENTS)
     )
     _last_render_text_by_kind: dict[RenderEventKind, str] = field(default_factory=dict)
+    helper_session_id: str | None = None
 
     def feed_stdout_line(self, raw_line: str) -> None:
         """Consume one stdout line from the agent process."""
@@ -168,6 +169,8 @@ class AgentOutputCapture:
             self.structured_event_count += 1
         if adapted.tool_event:
             self.tool_event_count += 1
+        if adapted.session_id and self.helper_session_id is None:
+            self.helper_session_id = adapted.session_id
         if adapted.diagnostic:
             self._append_unique(self._diagnostics, adapted.diagnostic)
         if adapted.preview:

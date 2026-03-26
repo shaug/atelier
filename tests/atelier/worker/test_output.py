@@ -34,6 +34,15 @@ def test_parse_claude_event_preserves_extra_fields() -> None:
     assert event.subtype == "init"
 
 
+def test_adapt_claude_line_preserves_session_id_from_system_init() -> None:
+    adapted = output_claude.adapt_claude_line(
+        '{"type":"system","subtype":"init","session_id":"abc-123"}'
+    )
+
+    assert adapted is not None
+    assert adapted.session_id == "abc-123"
+
+
 def test_parse_claude_event_invalid_json_returns_none() -> None:
     """Non-JSON or missing type returns None."""
     assert output_claude.parse_claude_event("") is None

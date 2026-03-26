@@ -232,6 +232,7 @@ class WorkerSessionAgentService(Protocol):
         dry_run: bool,
         session_control: AgentSessionControl,
         command_ops: AgentSessionCommandOps,
+        bounded_runtime_evidence_path_override: Path | None = None,
     ) -> AgentSessionPreparation: ...
 
     def install_agent_hooks(

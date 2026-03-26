@@ -35,6 +35,7 @@ class ClaudeEvent(BaseModel):
     error: dict[str, Any] | None = None
     result: str | None = None
     output: str | None = None
+    session_id: str | None = None
 
 
 def parse_claude_event(line: str) -> ClaudeEvent | None:
@@ -205,6 +206,9 @@ def adapt_claude_line(line: str) -> AdapterOutput | None:
         events=tuple(events),
         preview=extract_preview_text(event),
         diagnostic=diagnostic,
+        session_id=event.session_id.strip()
+        if isinstance(event.session_id, str) and event.session_id.strip()
+        else None,
     )
 
 
