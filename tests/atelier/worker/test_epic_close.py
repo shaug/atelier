@@ -100,8 +100,8 @@ def test_close_epic_if_complete_reopens_active_pr_candidate(monkeypatch) -> None
         ),
     )
     monkeypatch.setattr(
-        epic_close.reopen_compat,
-        "reconcile_reopened_exported_github_tickets",
+        worker_store,
+        "reconcile_reopened_external_tickets",
         lambda issue_id, *, beads_root, repo_root: events.append(("reconcile", issue_id)),
     )
 

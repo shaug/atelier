@@ -6,7 +6,6 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .. import lifecycle
-from . import external_ticket_reopen_compat as reopen_compat
 from . import store_adapter as worker_store
 
 
@@ -65,7 +64,7 @@ def close_epic_if_complete(
                 beads_root=beads_root,
                 repo_root=repo_root,
             )
-            reopen_compat.reconcile_reopened_exported_github_tickets(
+            worker_store.reconcile_reopened_external_tickets(
                 candidate.id,
                 beads_root=beads_root,
                 repo_root=repo_root,
