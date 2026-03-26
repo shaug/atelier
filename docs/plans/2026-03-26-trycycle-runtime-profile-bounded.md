@@ -1,240 +1,321 @@
-# Trycycle-Bounded Runtime Profile Plan
+# Trycycle-Bounded Runtime Profile Implementation Plan
 
-## Summary
+> **For agentic workers:** REQUIRED SUB-SKILL: Use trycycle-executing to
+> implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for
+> tracking.
 
-Atelier will gain a first-class `runtime profile` layer that is selected per
-role and resolves before planner or worker orchestration begins. The initial
-shipped profile is `trycycle-bounded`, an Atelier-owned adaptation of the
-trycycle feedback-loop model that hardens planning and worker execution while
-preserving Atelier's durable Beads, worktree, PR, and operator-accountability
-semantics.
+**Goal:** Add a role-scoped `runtime profile` system so `atelier plan` and
+`atelier work` can opt into a bounded `trycycle-bounded` behavior without
+changing default Atelier semantics or requiring a local trycycle installation.
 
-Default behavior must remain unchanged. When no runtime profile override is
-present, planner and worker flows continue to behave exactly as they do today.
+**Architecture:** Keep the profile as an Atelier-owned selection layer. The
+selected profile is stored in project user config, resolved separately for the
+planner and worker roles, and threaded into the existing command/session
+boundaries. Durable state stays in Beads and workspace metadata; nested helper
+sessions are internal worker implementation details, not a new shared
+coordinator. If the bounded profile cannot satisfy the current worker
+semantics, it must fail closed with explicit evidence instead of silently
+broadening scope or mutating workspace identity.
 
-## Locked Decisions
+**Tech Stack:** Python 3.11, Pydantic models, Typer CLI, Beads/`bd`, existing
+Atelier templates and skills.
 
-- Canonical terminology is `runtime profile`.
-- Source of truth is repo-owned code, templates, and shipped skill assets, not
-  ambient local files.
-- Shared workspace identifiers stay stable across runtime profiles.
-- Multiple workers may process available Atelier work items concurrently, each
-  resolving its own worker runtime profile.
-- The bounded form is acceptable as a first-class outcome. If the profile
-  cannot converge, the worker must block with evidence instead of silently
-  falling back.
+---
 
-## Why This Is Feasible
+### Task 1: Add runtime profile config and CLI plumbing
 
-The trycycle model is feasible in Atelier only when it is treated as a
-worker-internal orchestration strategy and not as a replacement for Atelier's
-message/ticket system. The durable source of truth remains Beads plus the git
-workspace state. The profile can therefore harden the plan and execution loops
-without changing the fact that Atelier coordinates work through local beads,
-reviewable changesets, and PR/lifecycle state.
+**Files:**
+- Create: `src/atelier/runtime_profiles.py`
+- Modify: `src/atelier/models.py`
+- Modify: `src/atelier/config.py`
+- Modify: `src/atelier/commands/config.py`
+- Modify: `src/atelier/commands/plan.py`
+- Modify: `src/atelier/commands/work.py`
+- Modify: `src/atelier/cli.py`
+- Test: `tests/atelier/test_models.py`
+- Test: `tests/atelier/test_config.py`
+- Test: `tests/atelier/commands/test_config.py`
+- Test: `tests/atelier/commands/test_plan_cli.py`
+- Test: `tests/atelier/commands/test_work_cli.py`
+- Test: `tests/atelier/test_runtime_profiles.py`
 
-That means the implementation should resolve the mismatch, not hide it:
+- [ ] **Step 1: Identify or write the failing test**
 
-- Trycycle-style subagent communication becomes explicit nested agent sessions
-  owned by one worker runtime.
-- Ephemeral conversation output is never the source of truth.
-- Finalization still obeys current Atelier north-star, review, PR, and
-  integration gates.
-- Planning and worker selection stay role-scoped so profile choice does not
-  mutate shared workspace identity.
+  Add tests for:
+  - `runtime.planner.profile` and `runtime.worker.profile` parsing.
+  - default `standard` values for new projects.
+  - unknown profile rejection.
+  - `atelier plan --runtime-profile ...` and `atelier work --runtime-profile ...`
+    flag plumbing.
+  - `atelier config` round-tripping the new `runtime` section.
 
-## Mismatch Contract
+  Run:
 
-- Trycycle assumes a loop-centric execution model. Atelier must keep durable
-  work coordination in Beads, so the loop will persist its checkpoints and
-  evidence as bead fields and notes instead of chat history.
-- Trycycle assumes a relatively self-contained agent loop. Atelier may run
-  multiple workers at once, so profile resolution is per session and never a
-  global coordinator.
-- Trycycle biases toward task completion. Atelier biases toward operator
-  accountability, reviewability, and human-sized changesets, so the profile
-  must stop or split work when the bead contract is too large.
-- Trycycle can be treated as an internal strategy. Atelier must not depend on a
-  global trycycle installation or user-local state to preserve behavior.
+  ```bash
+  pytest tests/atelier/test_models.py tests/atelier/test_config.py \
+    tests/atelier/commands/test_config.py tests/atelier/commands/test_plan_cli.py \
+    tests/atelier/commands/test_work_cli.py tests/atelier/test_runtime_profiles.py -v
+  ```
 
-## User-Facing Behavior
+- [ ] **Step 2: Run test to verify it fails**
 
-`atelier plan` and `atelier work` gain role-local `--runtime-profile`
-selection. The selected value overrides the project default for that command's
-role only. A missing override resolves to the configured role default, and an
-unknown profile fails loudly.
+  Run the same command and confirm the failure is about missing runtime profile
+  model/config/flag handling.
 
-The `atelier config` surface must expose the chosen planner and worker profile
-values so users can inspect and edit them without editing JSON by hand. New
-projects should seed both roles to `standard`.
+- [ ] **Step 3: Write minimal implementation**
 
-The `trycycle-bounded` profile must be visible in emitted launch metadata so a
-user can tell which runtime strategy produced the current planner or worker
-session.
+  - Add `RuntimeConfig` and role-specific runtime profile models.
+  - Preserve runtime selections in `ProjectConfig` and `ProjectUserConfig`.
+  - Update config split/merge/default/prompt helpers to carry the new section.
+  - Add the shared runtime profile registry and validation helpers.
+  - Thread `--runtime-profile` through the `plan` and `work` CLI controllers.
+  - Default new typed runtime fields to `standard` so existing callers stay
+    valid until they opt into a profile explicitly.
 
-The config shape for the first release should be explicit and small:
+- [ ] **Step 4: Run test to verify it passes**
 
-- `runtime.planner.profile`
-- `runtime.worker.profile`
+  Run:
 
-Those values live in the user-editable project config. The profile definitions
-themselves stay repo-owned and versioned in code.
+  ```bash
+  pytest tests/atelier/test_models.py tests/atelier/test_config.py \
+    tests/atelier/commands/test_config.py tests/atelier/commands/test_plan_cli.py \
+    tests/atelier/commands/test_work_cli.py tests/atelier/test_runtime_profiles.py -v
+  ```
 
-## Architecture
+- [ ] **Step 5: Refactor and verify**
 
-The implementation should add a dedicated runtime-profile contract layer and
-keep `src/atelier/commands/*.py` thin. Command modules should resolve the
-profile and hand the result to profile-specific orchestration code instead of
-branching on runtime behavior themselves.
+  Tighten the config merge/split behavior, confirm the default `standard`
+  profile remains unchanged, and then run the broader config/CLI slice:
 
-Profile definitions should live in repo-owned code, with profile-scoped skill
-and template assets shipped alongside the tool and projected into the agent
-runtime in the same deterministic way as the existing Atelier skills. That
-keeps the behavior versioned with the release and avoids local user-state
-drift.
+  ```bash
+  pytest tests/atelier/test_models.py tests/atelier/test_config.py \
+    tests/atelier/commands/test_config.py tests/atelier/commands/test_plan_cli.py \
+    tests/atelier/commands/test_work_cli.py tests/atelier/test_runtime_profiles.py -v
+  ```
 
-The profile contract should be role-scoped:
+- [ ] **Step 6: Commit**
 
-- planner profile: shapes the bead contract and planner handoff semantics
-- worker profile: owns the execution loop, bounded subagent use, and evidence
-  capture
+  ```bash
+  git add src/atelier/runtime_profiles.py src/atelier/models.py src/atelier/config.py \
+    src/atelier/commands/config.py src/atelier/commands/plan.py \
+    src/atelier/commands/work.py src/atelier/cli.py \
+    tests/atelier/test_models.py tests/atelier/test_config.py \
+    tests/atelier/commands/test_config.py tests/atelier/commands/test_plan_cli.py \
+    tests/atelier/commands/test_work_cli.py tests/atelier/test_runtime_profiles.py
+  git commit -m "feat(runtime): add role-scoped runtime profiles"
+  ```
 
-A clean module split for the new logic should be:
+### Task 2: Add the planner runtime profile contract
 
-- `src/atelier/runtime_profiles.py` for registry and shared profile contracts
-- `src/atelier/planner/runtime_profile.py` for planner-specific contract
-  rendering
-- `src/atelier/worker/runtime_profile.py` for worker-specific loop orchestration
+**Files:**
+- Create: `src/atelier/planner_runtime_profile.py`
+- Modify: `src/atelier/commands/plan.py`
+- Modify: `src/atelier/templates/AGENTS.planner.md.tmpl`
+- Test: `tests/atelier/commands/test_plan.py`
+- Test: `tests/atelier/test_planner_agents_template.py`
 
-Those modules should stay small; if either role-specific module starts to grow
-substantially, split the orchestration helpers before the controller modules
-become policy-heavy.
+- [ ] **Step 1: Identify or write the failing test**
 
-The default `standard` profile should reuse current behavior with no functional
-changes.
+  Add tests that prove planner runs surface the selected runtime profile in the
+  planner opening prompt, template context, and bead/session metadata. The
+  `trycycle-bounded` profile should also produce a stricter bead contract with
+  explicit intent, non-goals, constraints, success criteria, and test
+  expectations.
 
-## Planner Profile Shape
+  Run:
 
-The planner side of `trycycle-bounded` should make bead plans more explicit and
-machine-consumable. It should produce a stricter contract that includes the
-intent, non-goals, constraints, success criteria, test expectations, and any
-worker hardening requirements before work begins.
+  ```bash
+  pytest tests/atelier/commands/test_plan.py tests/atelier/test_planner_agents_template.py -v
+  ```
 
-Planner output should also make the split decision earlier when the requested
-scope is too large for a reviewable changeset. The profile should not wait for a
-worker to discover that the work is oversized.
+- [ ] **Step 2: Run test to verify it fails**
 
-Planner runtime changes should:
+  Run the same command and confirm the planner profile fields are still missing
+  from the current implementation.
 
-- render the profile-specific bead contract from repo-owned templates or skill
-  assets
-- preserve the existing startup-check and planner teardown semantics
-- keep session identity and workspace selection unchanged
-- record the selected runtime profile in the planner session metadata
+- [ ] **Step 3: Write minimal implementation**
 
-## Worker Profile Shape
+  - Add a planner profile helper that renders the bounded bead contract.
+  - Keep workspace identity and startup-teardown behavior unchanged.
+  - Record the chosen planner runtime profile in planner launch metadata.
+  - Update `AGENTS.planner.md.tmpl` so the selected profile is visible to the
+    planner agent.
 
-The worker side of `trycycle-bounded` is the main behavior change. It should
-act as the orchestrator for one selected bead and may use nested subagent
-sessions as implementation helpers inside the worker runtime.
+- [ ] **Step 4: Run test to verify it passes**
 
-The worker loop should be bounded and explicit:
+  Run:
 
-- verify the bead contract before implementation starts
-- refine the plan when the contract is incomplete or ambiguous
-- execute implementation steps with optional nested subagent help
-- run local test/review loops until the contract is satisfied or the budget is
-  exhausted
-- record phase evidence durably in Beads
-- finalize only when current Atelier semantics allow it
+  ```bash
+  pytest tests/atelier/commands/test_plan.py tests/atelier/test_planner_agents_template.py -v
+  ```
 
-Subagent use must be contained inside the worker session. The worker may spawn
-subagent sessions for targeted tasks, but their outputs are only evidence until
-they are reduced into Beads notes or fields. No subagent transcript becomes the
-system of record.
+- [ ] **Step 5: Refactor and verify**
 
-The bounded profile must fail closed when:
+  Tighten the planner contract wording so it is explicit but still bounded, and
+  then rerun the planner slice above.
 
-- the bead contract is incomplete and cannot be repaired within budget
-- subagent output contradicts the bead contract or selected scope
-- the worker cannot prove convergence before the loop budget expires
-- the finalization gates still fail after the bounded loop completes
+- [ ] **Step 6: Commit**
 
-The terminal outcome in those cases should be an explicit blocked state with
-evidence and next-step guidance, not a silent success or hidden retry.
+  ```bash
+  git add src/atelier/planner_runtime_profile.py src/atelier/commands/plan.py \
+    src/atelier/templates/AGENTS.planner.md.tmpl \
+    tests/atelier/commands/test_plan.py tests/atelier/test_planner_agents_template.py
+  git commit -m "feat(plan): add planner runtime profile contract"
+  ```
 
-## Planned Code Changes
+### Task 3: Add the bounded worker runtime profile
 
-- Add a runtime-profile model to project config and config resolution.
-- Add CLI plumbing so `plan` and `work` can override the role default with an
-  explicit runtime profile.
-- Add a runtime-profile registry with a stable built-in `standard` profile and
-  a `trycycle-bounded` profile.
-- Add config defaults so new projects seed `runtime.planner.profile` and
-  `runtime.worker.profile` as `standard`.
-- Add planner-side contract rendering helpers for profile-specific bead
-  requirements.
-- Add worker-side orchestration helpers that select and run the profile's loop
-  strategy.
-- Extend Beads description-field helpers so profile evidence and handoff
-  metadata can be stored durably in existing bead records.
-- Update planner and worker templates so the shipped runtime assets describe the
-  selected profile clearly.
-- Keep the existing default plan/work paths intact for the `standard` profile.
+**Files:**
+- Create: `src/atelier/worker/work_runtime_profile.py`
+- Modify: `src/atelier/worker/context.py`
+- Modify: `src/atelier/worker/prompts.py`
+- Modify: `src/atelier/worker/session/startup.py`
+- Modify: `src/atelier/worker/session/agent.py`
+- Modify: `src/atelier/worker/session/runner.py`
+- Modify: `src/atelier/worker/work_startup_runtime.py`
+- Modify: `src/atelier/worker/runtime.py`
+- Modify: `src/atelier/templates/AGENTS.worker.md.tmpl`
+- Test: `tests/atelier/worker/test_context.py`
+- Test: `tests/atelier/worker/test_session_startup.py`
+- Test: `tests/atelier/worker/test_session_agent.py`
+- Test: `tests/atelier/worker/test_session_runner_flow.py`
+- Test: `tests/atelier/worker/test_runtime.py`
+- Test: `tests/atelier/test_worker_agents_template.py`
 
-## Acceptance Criteria
+- [ ] **Step 1: Identify or write the failing test**
 
-- Existing planner and worker behavior remains unchanged when the default
-  `standard` profile is in effect.
-- The project config can persist planner and worker runtime profile choices and
-  load old configs that do not yet have the new section.
-- `atelier plan --runtime-profile trycycle-bounded` resolves the profile and
-  emits the stricter bead contract.
-- `atelier work --runtime-profile trycycle-bounded` runs the bounded worker
-  orchestration path and records phase evidence durably.
-- The worker profile can use nested subagent sessions without changing shared
-  workspace identifiers or durable work selection.
-- Finalization still obeys current north-star, PR, and integration gates.
-- `atelier config` can round-trip the new runtime section without losing
-  existing user config fields.
-- A bounded loop that cannot converge ends in a blocked, evidence-rich state.
-- The new profile surface is documented for users and future maintainers.
+  Add tests for:
+  - worker runtime profile propagation through typed worker contexts.
+  - runtime metadata visible in the worker launch environment and template.
+  - bounded helper-session behavior.
+  - fail-closed outcomes when the contract cannot converge.
 
-## Verification
+  Run:
 
-The implementation should be protected by a hybrid floor:
+  ```bash
+  pytest tests/atelier/worker/test_context.py \
+    tests/atelier/worker/test_session_startup.py \
+    tests/atelier/worker/test_session_agent.py \
+    tests/atelier/worker/test_session_runner_flow.py \
+    tests/atelier/worker/test_runtime.py \
+    tests/atelier/test_worker_agents_template.py -v
+  ```
 
-- config and profile-resolution unit tests for defaults, overrides, and unknown
-  profile failures
-- planner and worker wiring tests that prove the commands resolve the selected
-  profile without disturbing existing defaults
-- scenario tests that exercise the bounded worker loop and assert durable
-  Beads evidence, not just internal helper calls
-- regression tests that prove shared workspace identifiers and current
-  finalization semantics do not change under profile selection
+- [ ] **Step 2: Run test to verify it fails**
 
-The default-path regression suite should remain the source of truth for
-unchanged Atelier behavior.
+  Run the same command and confirm the missing worker profile behavior is the
+  reason for failure.
 
-## Risks and Guardrails
+- [ ] **Step 3: Write minimal implementation**
 
-- Do not let runtime profile selection become a hidden global state knob.
-- Do not move durable state into subagent transcripts.
-- Do not weaken the current worker finalization gates in the name of profile
-  flexibility.
-- Do not require a local trycycle installation to make the profile work.
-- Do not expand the profile layer into a generic policy framework. It should
-  stay a small, explicit selection layer with a bounded set of built-in
-  profiles.
-- Keep any new modules small and focused. If orchestration logic starts to
-  crowd a module, split it rather than letting `commands/` or `worker/`
-  accrete policy.
+  - Thread the selected runtime profile through the worker contexts.
+  - Add bounded worker-loop helpers that can run nested helper sessions inside
+    one worker-owned bead session.
+  - Add defaulted runtime-profile fields to worker typed contexts so existing
+    call sites keep working while the new profile is threaded through.
+  - Persist phase evidence in Beads description fields instead of chat history.
+  - Keep shared workspace identifiers and durable work selection unchanged.
+  - Fail closed with explicit blocked evidence when the bounded loop cannot
+    prove convergence.
+  - Update `AGENTS.worker.md.tmpl` so the selected profile is visible to the
+    worker agent.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+  Run:
+
+  ```bash
+  pytest tests/atelier/worker/test_context.py \
+    tests/atelier/worker/test_session_startup.py \
+    tests/atelier/worker/test_session_agent.py \
+    tests/atelier/worker/test_session_runner_flow.py \
+    tests/atelier/worker/test_runtime.py \
+    tests/atelier/test_worker_agents_template.py -v
+  ```
+
+- [ ] **Step 5: Refactor and verify**
+
+  Tighten the bounded-loop budget, evidence capture, and helper-session
+  boundary so the implementation stays Atelier-owned rather than becoming a
+  generic coordinator. Then rerun the worker slice above.
+
+- [ ] **Step 6: Commit**
+
+  ```bash
+  git add src/atelier/worker/work_runtime_profile.py src/atelier/worker/context.py \
+    src/atelier/worker/prompts.py src/atelier/worker/session/startup.py \
+    src/atelier/worker/session/agent.py src/atelier/worker/session/runner.py \
+    src/atelier/worker/work_startup_runtime.py src/atelier/worker/runtime.py \
+    src/atelier/templates/AGENTS.worker.md.tmpl \
+    tests/atelier/worker/test_context.py tests/atelier/worker/test_session_startup.py \
+    tests/atelier/worker/test_session_agent.py \
+    tests/atelier/worker/test_session_runner_flow.py \
+    tests/atelier/worker/test_runtime.py tests/atelier/test_worker_agents_template.py
+  git commit -m "feat(worker): add bounded trycycle runtime profile"
+  ```
+
+### Task 4: Update docs and run the repo gates
+
+**Files:**
+- Modify: `docs/behavior.md`
+- Modify: `docs/SPEC.md`
+- Modify: `docs/worker-runtime-architecture.md`
+
+- [ ] **Step 1: Update the docs**
+
+  Document:
+  - the new `runtime` config section and its role-scoped defaults;
+  - the bounded `trycycle-bounded` profile and what it does not change;
+  - the worker/planner mismatch boundary and the fail-closed outcome when the
+    worker cannot converge.
+
+- [ ] **Step 2: Run the full test suite**
+
+  ```bash
+  just test
+  ```
+
+- [ ] **Step 3: Run formatting**
+
+  ```bash
+  just format
+  ```
+
+- [ ] **Step 4: Run lint**
+
+  ```bash
+  just lint
+  ```
+
+- [ ] **Step 5: Verify the worktree is clean enough to commit**
+
+  Confirm the final diff only contains the runtime profile plan follow-through
+  and the docs/tests needed to support it.
+
+- [ ] **Step 6: Commit**
+
+  ```bash
+  git add docs/behavior.md docs/SPEC.md docs/worker-runtime-architecture.md
+  git commit -m "docs(runtime): describe bounded trycycle profile"
+  ```
+
+## Risks and guardrails
+
+- Do not add a global `trycycle` dependency or a hidden runtime switch.
+- Do not change shared workspace identifiers, worktree mappings, or Beads
+  ownership semantics.
+- Do not move durable state into helper-session transcripts.
+- Do not weaken the current worker finalization gates.
+- Keep `standard` as the default profile so existing behavior stays intact.
+- If the bounded profile cannot be expressed without a new coordination model,
+  fail closed and document the mismatch instead of inventing a global
+  coordinator.
 
 ## References
 
 This plan is grounded in [Behavior and Design Notes],
-[Projected Skill Runtime Contract], [Service Tier Proposal],
-[Worker Runtime Architecture], and [Worker Worktree Startup Contract].
+[Projected Skill Runtime Contract], [Service Tier Proposal], and
+[Worker Runtime Architecture].
 
 <!-- inline reference link definitions. please keep alphabetized -->
 
@@ -242,4 +323,3 @@ This plan is grounded in [Behavior and Design Notes],
 [projected skill runtime contract]: ../projected-skill-runtime-contract.md
 [service tier proposal]: ../service-tier-proposal.md
 [worker runtime architecture]: ../worker-runtime-architecture.md
-[worker worktree startup contract]: ../worker-worktree-startup-contract.md
