@@ -6559,3 +6559,151 @@ def test_repair_external_ticket_metadata_from_history_recovers_and_updates() -> 
     tickets = captured["tickets"]
     assert isinstance(tickets, list)
     assert tickets[0].ticket_id == "174"
+
+
+def test_event_history_overflow_recovery_guidance_is_backend_specific() -> None:
+    dolt_guidance = beads.event_history_overflow_recovery_guidance(
+        issue_id="at-overflow",
+        backend="dolt",
+    )
+    sqlite_guidance = beads.event_history_overflow_recovery_guidance(
+        issue_id="at-overflow",
+        backend="sqlite",
+    )
+
+    assert "bd history at-overflow" in dolt_guidance
+    assert "bd restore at-overflow" in dolt_guidance
+    assert "does not support `bd history` or `bd restore`" in sqlite_guidance
+
+
+def test_repair_issue_event_history_overflow_compacts_notes_and_restores_mutability() -> None:
+    initial_notes = "old note line\n" * 5000
+    issue_state = {
+        "id": "at-overflow",
+        "title": "Overflowed issue",
+        "description": "scope: repair event overflow\n",
+        "acceptance_criteria": "restore issue mutability\n",
+        "notes": initial_notes,
+        "status": "in_progress",
+        "priority": 2,
+        "issue_type": "task",
+        "owner": "scott",
+        "created_at": "2026-03-26T00:00:00Z",
+        "created_by": "planner",
+        "updated_at": "2026-03-26T00:00:00Z",
+    }
+    sql_calls: list[str] = []
+    status_attempts = 0
+
+    def fake_run_bd_json(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        assert args[:2] == ["show", "at-overflow"]
+        return [dict(issue_state)]
+
+    def fake_run_bd_command(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+    ) -> CompletedProcess[str]:
+        del beads_root, cwd, allow_failure
+        nonlocal status_attempts
+        if args[:3] == ["update", "at-overflow", "--status"]:
+            status_attempts += 1
+            if status_attempts == 1:
+                return CompletedProcess(
+                    args=["bd", *args],
+                    returncode=1,
+                    stdout="",
+                    stderr=(
+                        "failed to record event: Error 1105 (HY000): string "
+                        "is too large for column 'old_value'"
+                    ),
+                )
+            return CompletedProcess(args=["bd", *args], returncode=0, stdout="", stderr="")
+        if args[0] == "sql":
+            sql_calls.append(args[1])
+            issue_state["notes"] = beads._render_overflow_repair_notes(
+                backend="dolt",
+                issue_id="at-overflow",
+                original_notes=initial_notes,
+                snapshot_bytes_before=beads._issue_snapshot_bytes(issue_state),
+                retained_notes_chars=beads._find_overflow_repair_notes(
+                    "at-overflow",
+                    issue_state,
+                    backend="dolt",
+                )[2],
+            )
+            issue_state["updated_at"] = "2026-03-26T00:01:00Z"
+            return CompletedProcess(args=["bd", *args], returncode=0, stdout="", stderr="")
+        raise AssertionError(f"unexpected bd command: {args}")
+
+    with (
+        patch("atelier.beads._configured_beads_backend", return_value="dolt"),
+        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command),
+    ):
+        result = beads.repair_issue_event_history_overflow(
+            "at-overflow",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert result.repaired is True
+    assert result.verified_mutable is True
+    assert result.snapshot_bytes_before > result.snapshot_bytes_after
+    assert result.retained_notes_chars > 0
+    assert status_attempts == 2
+    assert sql_calls
+    assert "UPDATE issues" in sql_calls[0]
+    repaired_notes = str(issue_state["notes"])
+    assert repaired_notes.startswith("overflow_repair:")
+    assert "bd history at-overflow" in repaired_notes
+    assert "bd restore at-overflow" in repaired_notes
+
+
+def test_repair_issue_event_history_overflow_is_rerunnable_when_issue_is_already_safe() -> None:
+    issue = {
+        "id": "at-safe",
+        "title": "Already mutable",
+        "description": "scope: repair event overflow\n",
+        "acceptance_criteria": "restore issue mutability\n",
+        "notes": "small notes\n",
+        "status": "open",
+        "priority": 2,
+        "issue_type": "task",
+        "owner": "scott",
+        "created_at": "2026-03-26T00:00:00Z",
+        "created_by": "planner",
+        "updated_at": "2026-03-26T00:00:00Z",
+    }
+
+    with (
+        patch("atelier.beads.run_bd_json", return_value=[issue]),
+        patch(
+            "atelier.beads.run_bd_command",
+            return_value=CompletedProcess(args=["bd"], returncode=0, stdout="", stderr=""),
+        ) as run_command,
+    ):
+        result = beads.repair_issue_event_history_overflow(
+            "at-safe",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert result.repaired is False
+    assert result.verified_mutable is True
+    assert result.snapshot_bytes_before == result.snapshot_bytes_after
+    assert result.retained_notes_chars == len(issue["notes"])
+    run_command.assert_called_once_with(
+        ["update", "at-safe", "--status", "open"],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+        allow_failure=True,
+    )
