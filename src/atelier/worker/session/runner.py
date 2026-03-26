@@ -1652,9 +1652,25 @@ def run_worker_once(
             and bounded_runtime_evidence_path_override is not None
             and not dry_run
         ):
-            work_runtime_profile.clear_bounded_runtime_evidence(
+            cleanup_reason = work_runtime_profile.clear_bounded_runtime_evidence(
                 evidence_path=bounded_runtime_evidence_path_override
             )
+            if cleanup_reason is not None:
+                lifecycle.mark_changeset_blocked(
+                    str(changeset_id),
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    reason=cleanup_reason,
+                )
+                finishstep(extra="fail-closed")
+                return finish(
+                    WorkerRunSummary(
+                        started=False,
+                        reason="bounded_runtime_convergence_unproven",
+                        epic_id=selected_epic,
+                        changeset_id=str(changeset_id),
+                    )
+                )
         finishstep()
         merge_conflict = startup_result.reason == "merge_conflict"
         review_feedback = startup_result.reason == "review_feedback"

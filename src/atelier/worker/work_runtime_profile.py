@@ -51,14 +51,21 @@ def bounded_runtime_evidence_path(
     return agent_home_path / f"{stem}-{normalized_token}{suffix}"
 
 
-def clear_bounded_runtime_evidence(*, evidence_path: Path) -> None:
+def clear_bounded_runtime_evidence(*, evidence_path: Path) -> str | None:
     """Remove any pre-existing bounded evidence file before a worker launch."""
     try:
         evidence_path.unlink()
     except FileNotFoundError:
-        return
+        return None
     except OSError:
-        return
+        return bounded_runtime_failure_reason(evidence_path=evidence_path)
+    try:
+        evidence_path.stat()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return bounded_runtime_failure_reason(evidence_path=evidence_path)
+    return bounded_runtime_failure_reason(evidence_path=evidence_path)
 
 
 def bounded_runtime_failure_reason(*, evidence_path: Path) -> str:

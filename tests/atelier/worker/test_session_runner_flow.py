@@ -1869,6 +1869,92 @@ def test_run_worker_once_allows_bounded_runtime_with_valid_evidence(tmp_path: Pa
     assert prepare_kwargs["bounded_runtime_evidence_path_override"] == evidence_path
 
 
+def test_run_worker_once_fails_closed_when_bounded_runtime_evidence_cleanup_fails(
+    tmp_path: Path,
+) -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p-bounded-cleanup",
+        role="worker",
+        path=tmp_path / "agent-home",
+        session_key="p-bounded-cleanup",
+    )
+    agent.path.mkdir()
+    evidence_path = agent.path / "bounded-runtime-evidence.json"
+    evidence_path.write_text(
+        '{"status":"converged","helper_session_id":"stale-sess"}',
+        encoding="utf-8",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-epic",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+        runtime_profile="trycycle-bounded",
+    )
+    deps.lifecycle.next_changeset = lambda **_kwargs: {"id": "at-epic.1", "title": "Changeset"}
+    deps.infra.beads.run_bd_json = Mock(
+        side_effect=lambda args, **_kwargs: (
+            [{"id": "at-epic.1", "title": "Changeset", "description": ""}]
+            if args[:2] == ["show", "at-epic.1"]
+            else []
+        )
+    )
+    deps.infra.worker_session_worktree.prepare_worktrees = Mock(
+        return_value=SimpleNamespace(
+            epic_worktree_path=Path("/tmp/epic"),
+            changeset_worktree_path=Path("/tmp/changeset"),
+            branch="feat/root-at-epic.1",
+        )
+    )
+    deps.infra.worker_session_agent.prepare_agent_session = Mock(
+        side_effect=lambda **kwargs: SimpleNamespace(
+            agent_spec=SimpleNamespace(name="codex", display_name="Codex"),
+            agent_options=[],
+            project_enlistment=Path("/repo"),
+            workspace_branch="feat/root-at-epic.1",
+            env={
+                "ATELIER_WORKER_RUNTIME_PROFILE": "trycycle-bounded",
+                "ATELIER_BOUNDED_RUNTIME_EVIDENCE": str(
+                    kwargs["bounded_runtime_evidence_path_override"]
+                ),
+            },
+        )
+    )
+    deps.infra.worker_session_agent.start_agent_session = Mock()
+    deps.lifecycle.finalize_changeset = Mock()
+    deps.lifecycle.mark_changeset_blocked = Mock()
+
+    with patch(
+        "atelier.worker.session.runner.work_runtime_profile.clear_bounded_runtime_evidence",
+        return_value="bounded runtime convergence unproven: failed to clear stale helper-session evidence",
+    ):
+        summary = runner.run_worker_once(
+            SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+            run_context=WorkerRunContext(
+                mode="auto",
+                dry_run=False,
+                session_key="p-bounded-cleanup",
+                runtime_profile="trycycle-bounded",
+            ),
+            deps=deps,
+        )
+
+    assert summary.started is False
+    assert summary.reason == "bounded_runtime_convergence_unproven"
+    deps.lifecycle.mark_changeset_blocked.assert_called_once_with(
+        "at-epic.1",
+        beads_root=Path("/project/.atelier/.beads"),
+        repo_root=Path("/repo"),
+        reason="bounded runtime convergence unproven: failed to clear stale helper-session evidence",
+    )
+    deps.infra.worker_session_agent.start_agent_session.assert_not_called()
+    deps.lifecycle.finalize_changeset.assert_not_called()
+
+
 def test_run_worker_once_skips_redundant_mark_in_progress_for_in_progress_changeset() -> None:
     agent = AgentHome(
         name="worker",
