@@ -46,6 +46,7 @@ from .models import (
     BRANCH_SQUASH_MESSAGE_VALUES,
     WORKER_SELECT_VALUES,
 )
+from .runtime_profiles import RUNTIME_PROFILE_VALUES
 
 _split_arg_string = cast(Callable[[str], list[str]], split_arg_string)
 
@@ -547,6 +548,14 @@ def plan_command(
             help="always start a fresh planner session instead of resuming",
         ),
     ] = False,
+    runtime_profile: Annotated[
+        str | None,
+        typer.Option(
+            "--runtime-profile",
+            help="planner runtime profile",
+            click_type=_choice(RUNTIME_PROFILE_VALUES),
+        ),
+    ] = None,
     trace: Annotated[
         bool,
         typer.Option(
@@ -569,6 +578,7 @@ def plan_command(
             reconcile=reconcile,
             yes=yes,
             new_session=new_session,
+            runtime_profile=runtime_profile,
             trace=trace,
             yolo=yolo,
         )
@@ -625,6 +635,14 @@ def work_command(
             "--run-mode",
             help="worker run mode: once, default, watch (default: default)",
             click_type=_choice(_RUN_MODE_CHOICES),
+        ),
+    ] = None,
+    runtime_profile: Annotated[
+        str | None,
+        typer.Option(
+            "--runtime-profile",
+            help="worker runtime profile",
+            click_type=_choice(RUNTIME_PROFILE_VALUES),
         ),
     ] = None,
     restart_on_update: Annotated[
@@ -699,6 +717,7 @@ def work_command(
             mode=mode,
             select=select,
             run_mode=run_mode,
+            runtime_profile=runtime_profile,
             restart_on_update=resolved_restart_on_update,
             watch_interval=watch_interval,
             queue=queue,

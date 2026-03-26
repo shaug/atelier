@@ -21,12 +21,14 @@ def test_worker_project_context_tracks_repo_and_beads_roots() -> None:
         git_path="git",
         project_config=config.ProjectConfig(),
         repo_slug="org/repo",
+        runtime_profile="trycycle-bounded",
     )
 
     assert payload.project_root == Path("/project")
     assert payload.repo_root == Path("/repo")
     assert payload.beads_root == Path("/project/.beads")
     assert payload.repo_slug == "org/repo"
+    assert payload.runtime_profile == "trycycle-bounded"
 
 
 def test_worker_run_context_is_frozen() -> None:
@@ -34,6 +36,12 @@ def test_worker_run_context_is_frozen() -> None:
 
     with pytest.raises(AttributeError):
         payload.mode = "prompt"  # type: ignore[misc]
+
+
+def test_worker_run_context_defaults_runtime_profile_to_standard() -> None:
+    payload = WorkerRunContext(mode="auto", dry_run=False, session_key="worker-1")
+
+    assert payload.runtime_profile == "standard"
 
 
 def test_changeset_selection_context_captures_startup_override() -> None:

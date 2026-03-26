@@ -26,6 +26,7 @@ from ... import (
     templates,
     workspace,
 )
+from .. import work_runtime_profile
 from . import output as session_output
 
 _STRUCTURED_LIVE_PREVIEW_CHARS = 140
@@ -315,6 +316,10 @@ def prepare_agent_session(
     project_enlistment_raw = project_config.project.enlistment or str(enlistment_path)
     project_enlistment = Path(project_enlistment_raw)
     workspace_branch = root_branch_value or ""
+    runtime_profile = work_runtime_profile.resolve_worker_runtime_profile(
+        project_config,
+        runtime_profile_override=None,
+    )
     if dry_run:
         worker_agents_path = (
             agent.path / "AGENTS.md" if changeset_worktree_path is not None else None
@@ -400,6 +405,10 @@ def prepare_agent_session(
                 "beads_dir": str(beads_root),
                 "beads_prefix": config.resolve_beads_prefix(project_config),
                 "worker_worktree": str(changeset_worktree_path),
+                "worker_runtime_profile": runtime_profile,
+                "worker_runtime_profile_contract": (
+                    work_runtime_profile.worker_runtime_profile_contract(runtime_profile)
+                ),
             },
         )
         if agent.path.exists():
@@ -447,6 +456,11 @@ def prepare_agent_session(
     env["BEADS_DIR"] = str(beads_root)
     env["BEADS_DB"] = str(beads_root / "beads.db")
     env["ATELIER_BEADS_PREFIX"] = config.resolve_beads_prefix(project_config)
+    env["ATELIER_WORKER_RUNTIME_PROFILE"] = runtime_profile
+    if runtime_profile == "trycycle-bounded":
+        env["ATELIER_BOUNDED_RUNTIME_EVIDENCE"] = str(
+            work_runtime_profile.bounded_runtime_evidence_path(agent.path)
+        )
     return AgentSessionPreparation(
         agent_spec=agent_spec,
         agent_options=agent_options,

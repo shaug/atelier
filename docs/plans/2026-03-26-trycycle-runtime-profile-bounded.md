@@ -13,40 +13,54 @@ selected profile is stored in project user config, resolved separately for the
 planner and worker roles, and threaded into the existing command/session
 boundaries. Durable state stays in Beads and workspace metadata; nested helper
 sessions are internal worker implementation details, not a new shared
-coordinator. If the bounded profile cannot satisfy the current worker
-semantics, it must fail closed with explicit evidence instead of silently
-broadening scope or mutating workspace identity.
+coordinator. If the bounded profile cannot satisfy the current worker semantics,
+it must fail closed with explicit evidence instead of silently broadening scope
+or mutating workspace identity.
 
 **Tech Stack:** Python 3.11, Pydantic models, Typer CLI, Beads/`bd`, existing
 Atelier templates and skills.
 
----
+______________________________________________________________________
 
 ### Task 1: Add runtime profile config and CLI plumbing
 
 **Files:**
+
 - Create: `src/atelier/runtime_profiles.py`
+
 - Modify: `src/atelier/models.py`
+
 - Modify: `src/atelier/config.py`
+
 - Modify: `src/atelier/commands/config.py`
+
 - Modify: `src/atelier/commands/plan.py`
+
 - Modify: `src/atelier/commands/work.py`
+
 - Modify: `src/atelier/cli.py`
+
 - Test: `tests/atelier/test_models.py`
+
 - Test: `tests/atelier/test_config.py`
+
 - Test: `tests/atelier/commands/test_config.py`
+
 - Test: `tests/atelier/commands/test_plan_cli.py`
+
 - Test: `tests/atelier/commands/test_work_cli.py`
+
 - Test: `tests/atelier/test_runtime_profiles.py`
 
 - [ ] **Step 1: Identify or write the failing test**
 
   Add tests for:
+
   - `runtime.planner.profile` and `runtime.worker.profile` parsing.
   - default `standard` values for new projects.
   - unknown profile rejection.
-  - `atelier plan --runtime-profile ...` and `atelier work --runtime-profile ...`
-    flag plumbing.
+  - `atelier plan --runtime-profile ...` and
+    `atelier work --runtime-profile ...` flag plumbing.
   - `atelier config` round-tripping the new `runtime` section.
 
   Run:
@@ -108,10 +122,15 @@ Atelier templates and skills.
 ### Task 2: Add the planner runtime profile contract
 
 **Files:**
+
 - Create: `src/atelier/planner_runtime_profile.py`
+
 - Modify: `src/atelier/commands/plan.py`
+
 - Modify: `src/atelier/templates/AGENTS.planner.md.tmpl`
+
 - Test: `tests/atelier/commands/test_plan.py`
+
 - Test: `tests/atelier/test_planner_agents_template.py`
 
 - [ ] **Step 1: Identify or write the failing test**
@@ -166,25 +185,41 @@ Atelier templates and skills.
 ### Task 3: Add the bounded worker runtime profile
 
 **Files:**
+
 - Create: `src/atelier/worker/work_runtime_profile.py`
+
 - Modify: `src/atelier/worker/context.py`
+
 - Modify: `src/atelier/worker/prompts.py`
+
 - Modify: `src/atelier/worker/session/startup.py`
+
 - Modify: `src/atelier/worker/session/agent.py`
+
 - Modify: `src/atelier/worker/session/runner.py`
+
 - Modify: `src/atelier/worker/work_startup_runtime.py`
+
 - Modify: `src/atelier/worker/runtime.py`
+
 - Modify: `src/atelier/templates/AGENTS.worker.md.tmpl`
+
 - Test: `tests/atelier/worker/test_context.py`
+
 - Test: `tests/atelier/worker/test_session_startup.py`
+
 - Test: `tests/atelier/worker/test_session_agent.py`
+
 - Test: `tests/atelier/worker/test_session_runner_flow.py`
+
 - Test: `tests/atelier/worker/test_runtime.py`
+
 - Test: `tests/atelier/test_worker_agents_template.py`
 
 - [ ] **Step 1: Identify or write the failing test**
 
   Add tests for:
+
   - worker runtime profile propagation through typed worker contexts.
   - runtime metadata visible in the worker launch environment and template.
   - bounded helper-session behavior.
@@ -235,9 +270,9 @@ Atelier templates and skills.
 
 - [ ] **Step 5: Refactor and verify**
 
-  Tighten the bounded-loop budget, evidence capture, and helper-session
-  boundary so the implementation stays Atelier-owned rather than becoming a
-  generic coordinator. Then rerun the worker slice above.
+  Tighten the bounded-loop budget, evidence capture, and helper-session boundary
+  so the implementation stays Atelier-owned rather than becoming a generic
+  coordinator. Then rerun the worker slice above.
 
 - [ ] **Step 6: Commit**
 
@@ -257,13 +292,17 @@ Atelier templates and skills.
 ### Task 4: Update docs and run the repo gates
 
 **Files:**
+
 - Modify: `docs/behavior.md`
+
 - Modify: `docs/SPEC.md`
+
 - Modify: `docs/worker-runtime-architecture.md`
 
 - [ ] **Step 1: Update the docs**
 
   Document:
+
   - the new `runtime` config section and its role-scoped defaults;
   - the bounded `trycycle-bounded` profile and what it does not change;
   - the worker/planner mismatch boundary and the fail-closed outcome when the

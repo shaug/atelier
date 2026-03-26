@@ -32,3 +32,5 @@ def test_worker_agents_template_contains_core_sections() -> None:
     assert "Update changeset metadata and labels." not in content
     assert "do not set `status=closed`" in content
     assert "Set `status=closed` only when terminal proof exists" in content
+    assert "Selected worker runtime profile: {{ worker_runtime_profile }}" in content
+    assert "{{ worker_runtime_profile_contract }}" in content

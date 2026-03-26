@@ -12,6 +12,7 @@ def worker_opening_prompt(
     epic_id: str,
     changeset_id: str,
     changeset_title: str,
+    runtime_profile: str = "standard",
     merge_conflict: bool = False,
     review_feedback: bool = False,
     review_pr_url: str | None = None,
@@ -27,6 +28,7 @@ def worker_opening_prompt(
         ("Execute only this assigned changeset and do not ask for task clarification."),
         f"Epic: {epic_id}",
         f"Changeset: {summary}",
+        f"Worker runtime profile: {runtime_profile}",
         (
             "Before any commit/push/publish attempt, run a north-star "
             "self-review against the assigned bead acceptance criteria."
@@ -73,6 +75,20 @@ def worker_opening_prompt(
             "details and exit."
         ),
     ]
+    if runtime_profile == "trycycle-bounded":
+        lines.extend(
+            [
+                (
+                    "Bounded runtime mode: keep helper-session orchestration "
+                    "internal to this worker run and emit convergence evidence "
+                    "before finalize."
+                ),
+                (
+                    "If helper-session evidence is missing, malformed, or does "
+                    "not prove convergence, fail closed instead of finalizing."
+                ),
+            ]
+        )
     if merge_conflict:
         lines.extend(
             [

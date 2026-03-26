@@ -10,6 +10,7 @@ from ..io import confirm, die, say
 from ..worker import models as worker_models
 from ..worker import restart_runtime as worker_restart_runtime
 from ..worker import runtime as worker_runtime
+from ..worker import work_runtime_profile
 from ..worker.context import WorkerRunContext
 from ..worker.session import runner as worker_session_runner
 from ..worker.work_command_helpers import (
@@ -41,6 +42,7 @@ def _run_worker_once(
     args: object, *, mode: str, dry_run: bool, session_key: str
 ) -> worker_models.WorkerRunSummary:
     """Start a single worker session by selecting an epic and changeset."""
+    runtime_profile = str(getattr(args, "runtime_profile", None) or "standard")
     runner_deps = worker_runtime.build_worker_runtime_dependencies(
         resolve_current_project_with_repo_root=resolve_current_project_with_repo_root,
         confirm_fn=confirm,
@@ -49,7 +51,12 @@ def _run_worker_once(
     )
     return worker_session_runner.run_worker_once(
         args,
-        run_context=WorkerRunContext(mode=mode, dry_run=dry_run, session_key=session_key),
+        run_context=WorkerRunContext(
+            mode=mode,
+            dry_run=dry_run,
+            session_key=session_key,
+            runtime_profile=runtime_profile,
+        ),
         deps=runner_deps,
     )
 
@@ -106,6 +113,14 @@ def start_worker(args: object) -> None:
         cleanup_agent_bead_id = bead_id if isinstance(bead_id, str) and bead_id else None
         if cleanup_agent_bead_id is not None:
             setattr(args, "agent_bead_id", cleanup_agent_bead_id)
+        setattr(
+            args,
+            "runtime_profile",
+            work_runtime_profile.resolve_worker_runtime_profile(
+                cleanup_project_config,
+                runtime_profile_override=getattr(args, "runtime_profile", None),
+            ),
+        )
     select = normalize_startup_select(
         getattr(args, "select", None),
         configured_default=configured_select_default,

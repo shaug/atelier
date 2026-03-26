@@ -32,6 +32,7 @@ def _apply_user_sections(
             "project": project_section,
             "git": updates.git,
             "branch": updates.branch,
+            "runtime": updates.runtime,
             "agent": updates.agent,
             "editor": updates.editor,
             "atelier": atelier_section,

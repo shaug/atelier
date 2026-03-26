@@ -14,6 +14,7 @@ from ... import beads as beads_runtime
 from ... import exec as exec_util
 from ... import root_branch as root_branch_runtime
 from .. import selection as worker_selection
+from .. import work_runtime_profile
 from ..context import ChangesetSelectionContext, WorkerRunContext
 from ..models import StartupContractResult, StartupFinalizePreflightResult, WorkerRunSummary
 from ..models_boundary import parse_issue_boundary
@@ -1649,6 +1650,7 @@ def run_worker_once(
             epic_id=selected_epic,
             changeset_id=str(changeset_id),
             changeset_title=str(changeset_title),
+            runtime_profile=run_context.runtime_profile,
             merge_conflict=merge_conflict,
             review_feedback=review_feedback,
             review_pr_url=review_pr_url,
@@ -1703,6 +1705,32 @@ def run_worker_once(
                     changeset_id=str(changeset_id) if changeset_id else None,
                 )
             )
+        if run_context.runtime_profile == "trycycle-bounded":
+            evidence_value = env.get("ATELIER_BOUNDED_RUNTIME_EVIDENCE")
+            evidence_path = (
+                Path(evidence_value)
+                if evidence_value
+                else work_runtime_profile.bounded_runtime_evidence_path(agent.path)
+            )
+            bounded_reason = work_runtime_profile.verify_bounded_runtime_evidence(
+                evidence_path=evidence_path
+            )
+            if bounded_reason is not None:
+                lifecycle.mark_changeset_blocked(
+                    str(changeset_id),
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    reason=bounded_reason,
+                )
+                finishstep(extra="fail-closed")
+                return finish(
+                    WorkerRunSummary(
+                        started=False,
+                        reason="bounded_runtime_convergence_unproven",
+                        epic_id=selected_epic,
+                        changeset_id=str(changeset_id),
+                    )
+                )
         started_at = session_result.started_at
         finishstep(extra=f"exit={session_result.returncode}")
         finishstep = control.step("Finalize changeset", timings=timings, trace=trace)

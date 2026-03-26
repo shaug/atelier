@@ -14,6 +14,7 @@ def test_plan_passes_new_session_flag_to_command() -> None:
         captured["reconcile"] = args.reconcile
         captured["yes"] = args.yes
         captured["new_session"] = args.new_session
+        captured["runtime_profile"] = args.runtime_profile
         captured["trace"] = args.trace
         captured["yolo"] = args.yolo
 
@@ -28,6 +29,8 @@ def test_plan_passes_new_session_flag_to_command() -> None:
                 "--reconcile",
                 "--yes",
                 "--new-session",
+                "--runtime-profile",
+                "trycycle-bounded",
                 "--trace",
                 "--yolo",
             ],
@@ -39,6 +42,15 @@ def test_plan_passes_new_session_flag_to_command() -> None:
         "reconcile": True,
         "yes": True,
         "new_session": True,
+        "runtime_profile": "trycycle-bounded",
         "trace": True,
         "yolo": True,
     }
+
+
+def test_plan_rejects_unknown_runtime_profile() -> None:
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["plan", "--runtime-profile", "bogus"])
+
+    assert result.exit_code != 0
+    assert "bogus" in result.output
