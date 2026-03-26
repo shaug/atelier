@@ -295,6 +295,7 @@ def prepare_agent_session(
     yes: bool,
     yolo: bool,
     dry_run: bool,
+    runtime_profile_override: str | None = None,
     session_control: AgentSessionControl,
     command_ops: AgentSessionCommandOps,
 ) -> AgentSessionPreparation:
@@ -318,7 +319,7 @@ def prepare_agent_session(
     workspace_branch = root_branch_value or ""
     runtime_profile = work_runtime_profile.resolve_worker_runtime_profile(
         project_config,
-        runtime_profile_override=None,
+        runtime_profile_override=runtime_profile_override,
     )
     if dry_run:
         worker_agents_path = (

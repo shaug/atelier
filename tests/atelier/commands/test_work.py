@@ -19,9 +19,18 @@ def _project_config(*, worker_select: str = "oldest-feedback") -> config.Project
     return project_cfg
 
 
-def test_start_worker_dry_run_skips_project_resolution() -> None:
+def test_start_worker_dry_run_skips_agent_preview_and_cleanup(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    repo_root = tmp_path / "repo"
+    project_root.mkdir()
+    repo_root.mkdir()
+    project_cfg = _project_config()
+
     with (
-        patch("atelier.commands.work.resolve_current_project_with_repo_root") as resolve_project,
+        patch(
+            "atelier.commands.work.resolve_current_project_with_repo_root",
+            return_value=(project_root, project_cfg, str(repo_root), repo_root),
+        ) as resolve_project,
         patch("atelier.commands.work.agent_home.preview_agent_home") as preview_agent_home,
         patch("atelier.commands.work.agent_home.cleanup_agent_home") as cleanup_agent_home,
         patch("atelier.commands.work.worker_runtime.run_worker_sessions"),
@@ -30,9 +39,47 @@ def test_start_worker_dry_run_skips_project_resolution() -> None:
             SimpleNamespace(epic_id=None, mode="auto", run_mode="once", dry_run=True)
         )
 
-    resolve_project.assert_not_called()
+    resolve_project.assert_called_once()
     preview_agent_home.assert_not_called()
     cleanup_agent_home.assert_not_called()
+
+
+def test_start_worker_dry_run_resolves_runtime_profile_from_project_config(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    repo_root = tmp_path / "repo"
+    project_root.mkdir()
+    repo_root.mkdir()
+    project_cfg = _project_config().model_copy(
+        update={
+            "runtime": _project_config().runtime.model_copy(
+                update={
+                    "worker": _project_config().runtime.worker.model_copy(
+                        update={"profile": "trycycle-bounded"}
+                    )
+                }
+            )
+        }
+    )
+    args = SimpleNamespace(
+        epic_id=None,
+        mode="auto",
+        run_mode="once",
+        dry_run=True,
+        yes=False,
+        runtime_profile=None,
+    )
+
+    with (
+        patch(
+            "atelier.commands.work.resolve_current_project_with_repo_root",
+            return_value=(project_root, project_cfg, str(repo_root), repo_root),
+        ),
+        patch("atelier.commands.work.worker_runtime.run_worker_sessions") as run_sessions,
+    ):
+        work_cmd.start_worker(args)
+
+    run_args = run_sessions.call_args.kwargs["args"]
+    assert run_args.runtime_profile == "trycycle-bounded"
 
 
 def test_start_worker_non_dry_run_previews_and_cleans_agent_home(

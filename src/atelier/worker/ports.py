@@ -230,6 +230,7 @@ class WorkerSessionAgentService(Protocol):
         yes: bool,
         yolo: bool,
         dry_run: bool,
+        runtime_profile_override: str | None = None,
         session_control: AgentSessionControl,
         command_ops: AgentSessionCommandOps,
     ) -> AgentSessionPreparation: ...

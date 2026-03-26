@@ -1588,6 +1588,7 @@ def run_worker_once(
                 yes=bool(getattr(args, "yes", False)),
                 yolo=bool(getattr(args, "yolo", False)),
                 dry_run=dry_run,
+                runtime_profile_override=run_context.runtime_profile,
                 session_control=control,
                 command_ops=command_ports,
             )

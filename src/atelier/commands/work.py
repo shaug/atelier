@@ -85,13 +85,22 @@ def start_worker(args: object) -> None:
     cleanup_repo_root: Path | None = None
     cleanup_agent_bead_id: str | None = None
     configured_select_default: str | None = None
-    if not dry_run:
-        (
-            cleanup_project_root,
+    (
+        cleanup_project_root,
+        cleanup_project_config,
+        _cleanup_enlistment,
+        resolved_repo_root,
+    ) = resolve_current_project_with_repo_root()
+    setattr(
+        args,
+        "runtime_profile",
+        work_runtime_profile.resolve_worker_runtime_profile(
             cleanup_project_config,
-            _cleanup_enlistment,
-            cleanup_repo_root,
-        ) = resolve_current_project_with_repo_root()
+            runtime_profile_override=getattr(args, "runtime_profile", None),
+        ),
+    )
+    if not dry_run:
+        cleanup_repo_root = resolved_repo_root
         configured_select_default = cleanup_project_config.worker.select
         cleanup_project_dir = config.resolve_project_data_dir(
             cleanup_project_root, cleanup_project_config
