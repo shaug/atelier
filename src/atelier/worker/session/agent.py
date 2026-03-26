@@ -524,6 +524,7 @@ def start_agent_session(
     returncode = 0
     trace_agent_output = session_output.trace_output_requested(env)
     output_capture = session_output.AgentOutputCapture(agent_name=agent_spec.name)
+    bounded_evidence_path = env.get("ATELIER_BOUNDED_RUNTIME_EVIDENCE")
     if not trace_agent_output:
         live_progress = _StructuredLiveProgress(label=agent_spec.display_name)
 
@@ -579,6 +580,13 @@ def start_agent_session(
             blocked_handler.mark_changeset_blocked(f"command failed: {' '.join(start_cmd)}")
             session_control.die(f"command failed: {' '.join(start_cmd)}")
             return None
+    if bounded_evidence_path:
+        helper_session_id = output_capture.helper_session_id
+        if helper_session_id:
+            work_runtime_profile.write_bounded_runtime_evidence(
+                evidence_path=Path(bounded_evidence_path),
+                helper_session_id=helper_session_id,
+            )
 
     effective_start_cwd = start_cwd or agent.path
 

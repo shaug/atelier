@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import tempfile
 from pathlib import Path
 
 from ..config import ProjectConfig
@@ -91,5 +92,42 @@ def verify_bounded_runtime_evidence(*, evidence_path: Path) -> str | None:
     if status != "converged":
         return bounded_runtime_failure_reason(evidence_path=evidence_path)
     if not isinstance(helper_session_id, str) or not helper_session_id.strip():
+        return bounded_runtime_failure_reason(evidence_path=evidence_path)
+    return None
+
+
+def write_bounded_runtime_evidence(*, evidence_path: Path, helper_session_id: str) -> str | None:
+    """Persist bounded helper-session evidence and verify it round-trips."""
+    normalized_session_id = helper_session_id.strip()
+    if not normalized_session_id:
+        return bounded_runtime_failure_reason(evidence_path=evidence_path)
+    evidence_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "status": "converged",
+        "helper_session_id": normalized_session_id,
+    }
+    serialized = json.dumps(payload, sort_keys=True)
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=evidence_path.parent,
+            prefix=f".{evidence_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            handle.write(serialized)
+            handle.flush()
+            tmp_path = Path(handle.name)
+        tmp_path.replace(evidence_path)
+    except OSError:
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+        return bounded_runtime_failure_reason(evidence_path=evidence_path)
+    if verify_bounded_runtime_evidence(evidence_path=evidence_path) is not None:
         return bounded_runtime_failure_reason(evidence_path=evidence_path)
     return None

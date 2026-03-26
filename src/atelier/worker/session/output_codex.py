@@ -169,6 +169,9 @@ def adapt_codex_line(line: str) -> AdapterOutput | None:
         events=tuple(events),
         preview=extract_preview_text(event),
         diagnostic=diagnostic,
+        session_id=event.thread_id.strip()
+        if isinstance(event.thread_id, str) and event.thread_id.strip()
+        else None,
     )
 
 

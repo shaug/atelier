@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -61,6 +62,24 @@ class _TestCommandOps:
 class _TestBlockedHandler:
     def mark_changeset_blocked(self, _reason: str) -> None:
         return None
+
+
+class _NoRewriteCommandOps(_TestCommandOps):
+    def with_codex_exec(self, cmd: list[str], prompt: str) -> list[str]:
+        del prompt
+        return cmd
+
+
+class _RecordedCodexSpec(_FakeAgentSpec):
+    def __init__(self, script_path: Path) -> None:
+        super().__init__(name="codex")
+        self._script_path = script_path
+
+    def build_start_command(
+        self, _agent_home: Path, options: list[str], prompt: str
+    ) -> tuple[list[str], Path]:
+        del options
+        return [sys.executable, str(self._script_path), prompt], self._script_path.parent
 
 
 def _project_config() -> ProjectConfig:
@@ -724,6 +743,74 @@ def test_start_agent_session_runs_codex_success(monkeypatch) -> None:
     assert result.returncode == 0
     assert "exec" in seen["cmd"]
     assert any("Agent output (codex): completed" in line for line in control.say_messages)
+
+
+def test_start_agent_session_bounded_runtime_writes_evidence_from_real_launch_boundary(
+    tmp_path: Path,
+) -> None:
+    script_path = tmp_path / "record_codex.py"
+    record_path = tmp_path / "launch.json"
+    evidence_path = tmp_path / "bounded-runtime-evidence.json"
+    script_path.write_text(
+        "\n".join(
+            [
+                "import json",
+                "import os",
+                "import sys",
+                "from pathlib import Path",
+                "",
+                "record_path = Path(os.environ['ATELIER_BOUNDARY_RECORD'])",
+                "record_path.write_text(",
+                "    json.dumps(",
+                "        {",
+                "            'argv': sys.argv,",
+                "            'cwd': os.getcwd(),",
+                "            'prompt': sys.argv[-1],",
+                "            'evidence_path': os.environ.get('ATELIER_BOUNDED_RUNTIME_EVIDENCE'),",
+                "        }",
+                "    ),",
+                "    encoding='utf-8',",
+                ")",
+                "print(json.dumps({'type': 'thread.started', 'thread_id': 'thread-bounded-123'}))",
+                "print(json.dumps({'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'Implemented'}}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    agent = agent_home.AgentHome(
+        name="codex",
+        agent_id="atelier/worker/codex/p100",
+        role="worker",
+        path=tmp_path / "agent-home",
+    )
+    agent.path.mkdir()
+    control = _TestControl()
+
+    result = session_agent.start_agent_session(
+        dry_run=False,
+        agent=agent,
+        agent_spec=_RecordedCodexSpec(script_path),
+        agent_options=[],
+        opening_prompt="bounded prompt",
+        env={
+            "ATELIER_BOUNDED_RUNTIME_EVIDENCE": str(evidence_path),
+            "ATELIER_BOUNDARY_RECORD": str(record_path),
+        },
+        command_ops=_NoRewriteCommandOps(),
+        session_control=control,
+        blocked_handler=_TestBlockedHandler(),
+    )
+
+    assert result is not None
+    assert result.returncode == 0
+    launch_payload = json.loads(record_path.read_text(encoding="utf-8"))
+    assert launch_payload["argv"][-1] == "bounded prompt"
+    assert launch_payload["cwd"] == str(agent.path)
+    assert launch_payload["prompt"] == "bounded prompt"
+    assert launch_payload["evidence_path"] == str(evidence_path)
+    evidence_payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    assert evidence_payload["status"] == "converged"
+    assert evidence_payload["helper_session_id"] == "thread-bounded-123"
 
 
 def test_start_agent_session_codex_emits_live_progress_updates(monkeypatch) -> None:
