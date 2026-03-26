@@ -111,6 +111,16 @@ _ISSUE_WRITE_LOCK_DIR = ".atelier-issue-locks"
 _ISSUE_WRITE_LOCK_STATE: dict[tuple[Path, str], tuple[int, TextIO | None, int]] = {}
 _ISSUE_WRITE_LOCAL_LOCKS: dict[tuple[Path, str], threading.RLock] = {}
 _ISSUE_WRITE_LOCK_STATE_GUARD = threading.Lock()
+_EVENT_HISTORY_OVERFLOW_MARKERS = (
+    "failed to record event",
+    "too large for column 'old_value'",
+)
+_EVENT_HISTORY_VALUE_TEXT_LIMIT_BYTES = 65_535
+_EVENT_HISTORY_REPAIR_HEADROOM_BYTES = 16_384
+_EVENT_HISTORY_REPAIR_TARGET_BYTES = (
+    _EVENT_HISTORY_VALUE_TEXT_LIMIT_BYTES - _EVENT_HISTORY_REPAIR_HEADROOM_BYTES
+)
+_EVENT_HISTORY_REPAIR_MARKER = "overflow_repair:"
 _DOLT_SERVER_PRECHECK_BYPASS_COMMANDS = {
     "completion",
     "doctor",
@@ -428,6 +438,16 @@ class ExternalTicketMetadataRepairResult:
     recovered: bool
     repaired: bool
     ticket_count: int
+
+
+@dataclass(frozen=True)
+class EventHistoryOverflowRepairResult:
+    issue_id: str
+    repaired: bool
+    verified_mutable: bool
+    snapshot_bytes_before: int
+    snapshot_bytes_after: int
+    retained_notes_chars: int
 
 
 @dataclass(frozen=True)
@@ -4716,6 +4736,292 @@ def repair_external_ticket_metadata_from_history(
             )
         )
     return results
+
+
+def _is_event_history_overflow_detail(detail: str | None) -> bool:
+    if not detail:
+        return False
+    normalized = detail.lower()
+    return all(marker in normalized for marker in _EVENT_HISTORY_OVERFLOW_MARKERS)
+
+
+def _issue_snapshot_bytes(issue: dict[str, object]) -> int:
+    payload = json.dumps(issue, separators=(",", ":"), ensure_ascii=False)
+    return len(payload.encode("utf-8"))
+
+
+def _render_overflow_repair_notes(
+    *,
+    issue_id: str,
+    original_notes: str,
+    snapshot_bytes_before: int,
+    retained_notes_chars: int,
+) -> str:
+    retained_tail = original_notes[-retained_notes_chars:] if retained_notes_chars else ""
+    header = (
+        f"{_EVENT_HISTORY_REPAIR_MARKER}\n"
+        "- reason: compacted historical notes after event old_value overflow "
+        "blocked issue mutation.\n"
+        f"- original_issue_snapshot_bytes: {snapshot_bytes_before}\n"
+        f"- original_notes_chars: {len(original_notes)}\n"
+        f"- retained_recent_notes_chars: {retained_notes_chars}\n"
+        f"- recovery: use `bd history {issue_id}` or `bd restore {issue_id}` "
+        "to inspect the pre-repair content.\n"
+        "\n"
+        "[older notes compacted to restore issue mutability]\n"
+    )
+    tail = retained_tail.lstrip("\n")
+    if not tail:
+        return header
+    return f"{header}\n{tail}"
+
+
+def _find_overflow_repair_notes(
+    issue_id: str,
+    issue: dict[str, object],
+) -> tuple[str, int, int] | None:
+    original_notes = issue.get("notes")
+    if not isinstance(original_notes, str) or not original_notes:
+        return None
+    snapshot_bytes_before = _issue_snapshot_bytes(issue)
+    low = 0
+    high = len(original_notes)
+    best: tuple[str, int, int] | None = None
+    while low <= high:
+        retained_notes_chars = (low + high) // 2
+        candidate_notes = _render_overflow_repair_notes(
+            issue_id=issue_id,
+            original_notes=original_notes,
+            snapshot_bytes_before=snapshot_bytes_before,
+            retained_notes_chars=retained_notes_chars,
+        )
+        candidate_issue = dict(issue)
+        candidate_issue["notes"] = candidate_notes
+        snapshot_bytes_after = _issue_snapshot_bytes(candidate_issue)
+        if snapshot_bytes_after <= _EVENT_HISTORY_REPAIR_TARGET_BYTES:
+            best = (candidate_notes, snapshot_bytes_after, retained_notes_chars)
+            low = retained_notes_chars + 1
+            continue
+        high = retained_notes_chars - 1
+    return best
+
+
+def _sql_issue_id_literal(issue_id: str) -> str:
+    cleaned = issue_id.strip()
+    if not cleaned or not re.fullmatch(r"[A-Za-z0-9._-]+", cleaned):
+        raise ValueError(f"unsupported issue id for direct SQL repair: {issue_id!r}")
+    return f"'{cleaned}'"
+
+
+def _mysql_utf8mb4_literal(value: str) -> str:
+    encoded = value.encode("utf-8").hex()
+    return f"CONVERT(0x{encoded} USING utf8mb4)"
+
+
+def _repair_overflowed_issue_notes_sql(
+    *,
+    issue_id: str,
+    repaired_notes: str,
+    snapshot_bytes_before: int,
+    beads_root: Path,
+    cwd: Path,
+) -> None:
+    issue_literal = _sql_issue_id_literal(issue_id)
+    backend = _configured_beads_backend(beads_root)
+    if backend == "dolt":
+        sql = (
+            "UPDATE issues "
+            f"SET notes = {_mysql_utf8mb4_literal(repaired_notes)}, "
+            "compaction_level = CASE WHEN compaction_level < 1 THEN 1 "
+            "ELSE compaction_level END, "
+            "compacted_at = CURRENT_TIMESTAMP, "
+            f"original_size = CASE WHEN original_size IS NULL OR original_size < "
+            f"{snapshot_bytes_before} THEN {snapshot_bytes_before} ELSE original_size END "
+            f"WHERE id = {issue_literal}"
+        )
+        result = run_bd_command(
+            ["sql", sql],
+            beads_root=beads_root,
+            cwd=cwd,
+            allow_failure=True,
+        )
+        if result.returncode == 0:
+            return
+        detail = _command_output_detail(
+            exec.CommandResult(
+                argv=tuple(result.args),
+                returncode=result.returncode,
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
+        )
+        raise RuntimeError(detail or f"direct SQL repair failed for {issue_id}")
+
+    db_path = beads_root / "beads.db"
+    if not db_path.exists():
+        raise RuntimeError(f"beads database not found for repair: {db_path}")
+    try:
+        with sqlite3.connect(db_path) as connection:
+            connection.execute(
+                """
+                UPDATE issues
+                SET notes = ?,
+                    compaction_level = CASE
+                        WHEN compaction_level < 1 THEN 1
+                        ELSE compaction_level
+                    END,
+                    compacted_at = CURRENT_TIMESTAMP,
+                    original_size = CASE
+                        WHEN original_size IS NULL OR original_size < ? THEN ?
+                        ELSE original_size
+                    END
+                WHERE id = ?
+                """,
+                (
+                    repaired_notes,
+                    snapshot_bytes_before,
+                    snapshot_bytes_before,
+                    issue_id,
+                ),
+            )
+            connection.commit()
+    except sqlite3.Error as exc:
+        raise RuntimeError(f"direct SQLite repair failed for {issue_id}: {exc}") from exc
+
+
+def repair_issue_event_history_overflow(
+    issue_id: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> EventHistoryOverflowRepairResult:
+    """Repair issue notes when Beads event-history overflow blocks mutation.
+
+    The repair path is explicit and rerunnable:
+    1. Reproduce the failure with a no-op lifecycle write.
+    2. Compact only historical notes through a direct database update that
+       bypasses event recording.
+    3. Re-run the same no-op lifecycle write to verify the issue is mutable
+       again before reporting success.
+
+    Args:
+        issue_id: Bead identifier to repair.
+        beads_root: Path to the Beads store.
+        cwd: Repository working directory for `bd`.
+
+    Returns:
+        A structured result describing whether a repair was applied and whether
+        the repaired issue passed the verification write.
+
+    Raises:
+        RuntimeError: If mutation fails for a reason other than event-history
+            overflow, if the issue cannot be compacted safely, or if the
+            verification write still fails after repair.
+        ValueError: If ``issue_id`` is empty after trimming whitespace.
+    """
+    cleaned_issue_id = issue_id.strip()
+    if not cleaned_issue_id:
+        raise ValueError("issue_id must not be empty")
+
+    with _issue_write_lock(cleaned_issue_id, beads_root=beads_root):
+        issues = run_bd_json(["show", cleaned_issue_id], beads_root=beads_root, cwd=cwd)
+        if not issues:
+            raise RuntimeError(f"issue not found for overflow repair: {cleaned_issue_id}")
+        issue = issues[0]
+        status = _clean_text(issue.get("status")) or "open"
+        snapshot_bytes_before = _issue_snapshot_bytes(issue)
+
+        noop_result = run_bd_command(
+            ["update", cleaned_issue_id, "--status", status],
+            beads_root=beads_root,
+            cwd=cwd,
+            allow_failure=True,
+        )
+        if noop_result.returncode == 0:
+            return EventHistoryOverflowRepairResult(
+                issue_id=cleaned_issue_id,
+                repaired=False,
+                verified_mutable=True,
+                snapshot_bytes_before=snapshot_bytes_before,
+                snapshot_bytes_after=snapshot_bytes_before,
+                retained_notes_chars=len(str(issue.get("notes") or "")),
+            )
+
+        noop_detail = _command_output_detail(
+            exec.CommandResult(
+                argv=tuple(noop_result.args),
+                returncode=noop_result.returncode,
+                stdout=noop_result.stdout,
+                stderr=noop_result.stderr,
+            )
+        )
+        if not _is_event_history_overflow_detail(noop_detail):
+            raise RuntimeError(
+                "issue mutation failed, but the error did not match event-history "
+                f"overflow for {cleaned_issue_id}: {noop_detail or 'unknown failure'}"
+            )
+
+        repair_notes = _find_overflow_repair_notes(cleaned_issue_id, issue)
+        if repair_notes is None:
+            raise RuntimeError(
+                "event-history overflow repair requires notes compaction, but the "
+                f"issue has no repairable notes payload: {cleaned_issue_id}"
+            )
+        repaired_notes, estimated_snapshot_bytes_after, retained_notes_chars = repair_notes
+        _repair_overflowed_issue_notes_sql(
+            issue_id=cleaned_issue_id,
+            repaired_notes=repaired_notes,
+            snapshot_bytes_before=snapshot_bytes_before,
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+        refreshed = run_bd_json(["show", cleaned_issue_id], beads_root=beads_root, cwd=cwd)
+        if not refreshed:
+            raise RuntimeError(
+                f"overflow repair updated {cleaned_issue_id}, but verification reload failed"
+            )
+        repaired_issue = refreshed[0]
+        repaired_notes_value = repaired_issue.get("notes")
+        if not isinstance(repaired_notes_value, str) or not repaired_notes_value.startswith(
+            _EVENT_HISTORY_REPAIR_MARKER
+        ):
+            raise RuntimeError(
+                f"overflow repair could not be verified for {cleaned_issue_id}: notes mismatch"
+            )
+        snapshot_bytes_after = _issue_snapshot_bytes(repaired_issue)
+        if snapshot_bytes_after > _EVENT_HISTORY_REPAIR_TARGET_BYTES:
+            raise RuntimeError(
+                f"overflow repair for {cleaned_issue_id} remained above the safe snapshot "
+                f"size ({snapshot_bytes_after} > {_EVENT_HISTORY_REPAIR_TARGET_BYTES})"
+            )
+
+        verify_result = run_bd_command(
+            ["update", cleaned_issue_id, "--status", status],
+            beads_root=beads_root,
+            cwd=cwd,
+            allow_failure=True,
+        )
+        if verify_result.returncode != 0:
+            verify_detail = _command_output_detail(
+                exec.CommandResult(
+                    argv=tuple(verify_result.args),
+                    returncode=verify_result.returncode,
+                    stdout=verify_result.stdout,
+                    stderr=verify_result.stderr,
+                )
+            )
+            raise RuntimeError(
+                f"overflow repair did not restore mutability for {cleaned_issue_id}: "
+                f"{verify_detail or 'verification write failed'}"
+            )
+        return EventHistoryOverflowRepairResult(
+            issue_id=cleaned_issue_id,
+            repaired=True,
+            verified_mutable=True,
+            snapshot_bytes_before=snapshot_bytes_before,
+            snapshot_bytes_after=min(snapshot_bytes_after, estimated_snapshot_bytes_after),
+            retained_notes_chars=retained_notes_chars,
+        )
 
 
 def list_epics_by_workspace_label(
