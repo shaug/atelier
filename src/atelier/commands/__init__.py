@@ -8,6 +8,7 @@ from .new import new_project
 from .open import open_worktree
 from .plan import run_planner
 from .policy import edit_policy
+from .repair_event_history import repair_event_history_overflow
 from .status import status
 from .work import start_worker
 
@@ -19,6 +20,7 @@ __all__ = [
     "list_workspaces",
     "new_project",
     "open_worktree",
+    "repair_event_history_overflow",
     "run_planner",
     "show_config",
     "start_worker",

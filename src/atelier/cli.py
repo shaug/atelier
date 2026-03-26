@@ -36,6 +36,7 @@ from .commands import open as open_cmd
 from .commands import plan as plan_cmd
 from .commands import policy as policy_cmd
 from .commands import remove as remove_cmd
+from .commands import repair_event_history as repair_event_history_cmd
 from .commands import status as status_cmd
 from .commands import work as work_cmd
 from .exec import try_run_command
@@ -813,6 +814,30 @@ def gc_command(
             reconcile=reconcile,
             yes=yes,
         )
+    )
+
+
+@app.command(
+    "repair-event-history-overflow",
+    help="Repair a Beads issue whose event history overflowed and blocked mutation.",
+)
+def repair_event_history_overflow_command(
+    issue_id: Annotated[
+        str,
+        typer.Argument(help="Beads issue id to repair"),
+    ],
+    format: Annotated[
+        str,
+        typer.Option(
+            "--format",
+            help="output format (table|json)",
+            click_type=_choice(_FORMAT_CHOICES),
+        ),
+    ] = "table",
+) -> None:
+    """Repair a Beads issue whose event history overflowed."""
+    repair_event_history_cmd.repair_event_history_overflow(
+        SimpleNamespace(issue_id=issue_id, format=format)
     )
 
 

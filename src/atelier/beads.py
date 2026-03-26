@@ -954,6 +954,19 @@ def _configured_beads_backend(beads_root: Path) -> str | None:
     return backend or None
 
 
+def configured_beads_backend(beads_root: Path) -> str | None:
+    """Return the configured Beads backend name from runtime metadata.
+
+    Args:
+        beads_root: Path to the project-scoped Beads store.
+
+    Returns:
+        The normalized backend name from ``metadata.json`` when available, or
+        ``None`` when the runtime metadata is missing or unreadable.
+    """
+    return _configured_beads_backend(beads_root)
+
+
 def _configured_dolt_mode(beads_root: Path) -> str | None:
     metadata_path = beads_root / "metadata.json"
     try:
@@ -4750,8 +4763,31 @@ def _issue_snapshot_bytes(issue: dict[str, object]) -> int:
     return len(payload.encode("utf-8"))
 
 
+def event_history_overflow_recovery_guidance(*, issue_id: str, backend: str | None) -> str:
+    """Describe how operators can inspect repaired note history by backend.
+
+    Args:
+        issue_id: Issue identifier being repaired.
+        backend: Configured Beads backend name.
+
+    Returns:
+        A backend-specific recovery guidance string suitable for diagnostics and
+        repair markers.
+    """
+    if backend == "dolt":
+        return (
+            f"use `bd history {issue_id}` or `bd restore {issue_id}` to inspect "
+            "the pre-repair content."
+        )
+    return (
+        "this backend does not support `bd history` or `bd restore`; inspect "
+        "a pre-repair Beads backup if full original notes are required."
+    )
+
+
 def _render_overflow_repair_notes(
     *,
+    backend: str | None,
     issue_id: str,
     original_notes: str,
     snapshot_bytes_before: int,
@@ -4765,8 +4801,7 @@ def _render_overflow_repair_notes(
         f"- original_issue_snapshot_bytes: {snapshot_bytes_before}\n"
         f"- original_notes_chars: {len(original_notes)}\n"
         f"- retained_recent_notes_chars: {retained_notes_chars}\n"
-        f"- recovery: use `bd history {issue_id}` or `bd restore {issue_id}` "
-        "to inspect the pre-repair content.\n"
+        f"- recovery: {event_history_overflow_recovery_guidance(issue_id=issue_id, backend=backend)}\n"
         "\n"
         "[older notes compacted to restore issue mutability]\n"
     )
@@ -4779,6 +4814,8 @@ def _render_overflow_repair_notes(
 def _find_overflow_repair_notes(
     issue_id: str,
     issue: dict[str, object],
+    *,
+    backend: str | None,
 ) -> tuple[str, int, int] | None:
     original_notes = issue.get("notes")
     if not isinstance(original_notes, str) or not original_notes:
@@ -4790,6 +4827,7 @@ def _find_overflow_repair_notes(
     while low <= high:
         retained_notes_chars = (low + high) // 2
         candidate_notes = _render_overflow_repair_notes(
+            backend=backend,
             issue_id=issue_id,
             original_notes=original_notes,
             snapshot_bytes_before=snapshot_bytes_before,
@@ -4922,6 +4960,7 @@ def repair_issue_event_history_overflow(
     cleaned_issue_id = issue_id.strip()
     if not cleaned_issue_id:
         raise ValueError("issue_id must not be empty")
+    backend = _configured_beads_backend(beads_root)
 
     with _issue_write_lock(cleaned_issue_id, beads_root=beads_root):
         issues = run_bd_json(["show", cleaned_issue_id], beads_root=beads_root, cwd=cwd)
@@ -4961,7 +5000,11 @@ def repair_issue_event_history_overflow(
                 f"overflow for {cleaned_issue_id}: {noop_detail or 'unknown failure'}"
             )
 
-        repair_notes = _find_overflow_repair_notes(cleaned_issue_id, issue)
+        repair_notes = _find_overflow_repair_notes(
+            cleaned_issue_id,
+            issue,
+            backend=backend,
+        )
         if repair_notes is None:
             raise RuntimeError(
                 "event-history overflow repair requires notes compaction, but the "

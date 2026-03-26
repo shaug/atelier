@@ -6561,6 +6561,21 @@ def test_repair_external_ticket_metadata_from_history_recovers_and_updates() -> 
     assert tickets[0].ticket_id == "174"
 
 
+def test_event_history_overflow_recovery_guidance_is_backend_specific() -> None:
+    dolt_guidance = beads.event_history_overflow_recovery_guidance(
+        issue_id="at-overflow",
+        backend="dolt",
+    )
+    sqlite_guidance = beads.event_history_overflow_recovery_guidance(
+        issue_id="at-overflow",
+        backend="sqlite",
+    )
+
+    assert "bd history at-overflow" in dolt_guidance
+    assert "bd restore at-overflow" in dolt_guidance
+    assert "does not support `bd history` or `bd restore`" in sqlite_guidance
+
+
 def test_repair_issue_event_history_overflow_compacts_notes_and_restores_mutability() -> None:
     initial_notes = "old note line\n" * 5000
     issue_state = {
@@ -6615,12 +6630,14 @@ def test_repair_issue_event_history_overflow_compacts_notes_and_restores_mutabil
         if args[0] == "sql":
             sql_calls.append(args[1])
             issue_state["notes"] = beads._render_overflow_repair_notes(
+                backend="dolt",
                 issue_id="at-overflow",
                 original_notes=initial_notes,
                 snapshot_bytes_before=beads._issue_snapshot_bytes(issue_state),
                 retained_notes_chars=beads._find_overflow_repair_notes(
                     "at-overflow",
                     issue_state,
+                    backend="dolt",
                 )[2],
             )
             issue_state["updated_at"] = "2026-03-26T00:01:00Z"
@@ -6648,6 +6665,7 @@ def test_repair_issue_event_history_overflow_compacts_notes_and_restores_mutabil
     repaired_notes = str(issue_state["notes"])
     assert repaired_notes.startswith("overflow_repair:")
     assert "bd history at-overflow" in repaired_notes
+    assert "bd restore at-overflow" in repaired_notes
 
 
 def test_repair_issue_event_history_overflow_is_rerunnable_when_issue_is_already_safe() -> None:
