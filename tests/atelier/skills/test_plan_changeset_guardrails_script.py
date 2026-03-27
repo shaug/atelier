@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -33,6 +34,123 @@ def _planner_contract_text() -> str:
         "edge_cases: Imported tickets may omit key worker-facing context.\n"
         "related_context: at-surch, at-ohj2."
     )
+
+
+def _valid_trycycle_contract_json() -> str:
+    return json.dumps(
+        {
+            "objective": "Ship fail-closed trycycle contract enforcement",
+            "non_goals": ["Do not modify non-trycycle startup semantics"],
+            "acceptance_criteria": [
+                {"statement": "Reject missing contracts", "evidence": ["guardrails tests"]}
+            ],
+            "scope": {
+                "includes": ["planner guardrails"],
+                "excludes": ["worker PR flow redesign"],
+            },
+            "verification_plan": ["uv run pytest tests/atelier/skills -k trycycle -v"],
+            "risks": [{"risk": "over-blocking", "mitigation": "targeted-only gating"}],
+            "escalation_conditions": ["validator disagreement"],
+            "completion_definition": {
+                "requires_terminal_pr_state": True,
+                "allowed_terminal_pr_states": ["merged", "closed"],
+                "allows_integrated_sha_proof": True,
+                "allow_close_without_terminal_or_integrated_sha": False,
+            },
+        },
+        separators=(",", ":"),
+    )
+
+
+def _targeted_description(*, stage: str, contract_json: str) -> str:
+    return (
+        f"{_planner_contract_text()}\n"
+        "LOC estimate: 220\n"
+        "done_definition: Done when guardrails and worker startup reject invalid targeted work.\n"
+        "trycycle.targeted: true\n"
+        f"trycycle.plan_stage: {stage}\n"
+        f"trycycle.contract_json: {contract_json}\n"
+    )
+
+
+def test_guardrails_flags_trycycle_target_missing_contract() -> None:
+    module = _load_script_module()
+    child = {"id": "at-epic.1", "description": "trycycle.targeted: true"}
+
+    report = module._evaluate_guardrails(
+        epic_issue=None,
+        child_changesets=[],
+        target_changesets=[child],
+    )
+
+    assert any("trycycle.contract_json" in item for item in report.violations)
+
+
+def test_guardrails_accepts_valid_targeted_trycycle_payload() -> None:
+    module = _load_script_module()
+    child = {
+        "id": "at-epic.1",
+        "description": _targeted_description(
+            stage="planning_in_review",
+            contract_json=_valid_trycycle_contract_json(),
+        ),
+        "acceptance_criteria": "Done when validation fails closed before promotion.",
+    }
+
+    report = module._evaluate_guardrails(
+        epic_issue=None,
+        child_changesets=[],
+        target_changesets=[child],
+    )
+
+    assert not any("trycycle." in item for item in report.violations)
+
+
+def test_guardrails_flags_targeted_completion_definition_conflict() -> None:
+    module = _load_script_module()
+    contract_payload = json.loads(_valid_trycycle_contract_json())
+    contract_payload["completion_definition"]["allow_close_without_terminal_or_integrated_sha"] = (
+        True
+    )
+    child = {
+        "id": "at-epic.1",
+        "description": _targeted_description(
+            stage="planning_in_review",
+            contract_json=json.dumps(contract_payload, separators=(",", ":")),
+        ),
+        "acceptance_criteria": "Done when conflicts are rejected deterministically.",
+    }
+
+    report = module._evaluate_guardrails(
+        epic_issue=None,
+        child_changesets=[],
+        target_changesets=[child],
+    )
+
+    assert any("completion_definition conflicts" in item for item in report.violations)
+
+
+def test_guardrails_require_planning_in_review_for_targeted_payloads() -> None:
+    module = _load_script_module()
+    child = {
+        "id": "at-epic.1",
+        "description": _targeted_description(
+            stage="approved",
+            contract_json=_valid_trycycle_contract_json(),
+        )
+        + "trycycle.approved_by: operator\n"
+        + "trycycle.approved_at: 2026-03-26T12:00:00Z\n"
+        + "trycycle.approval_message_id: at-msg.1\n",
+        "acceptance_criteria": "Done when approval metadata is persisted.",
+    }
+
+    report = module._evaluate_guardrails(
+        epic_issue=None,
+        child_changesets=[],
+        target_changesets=[child],
+    )
+
+    assert any("planning_in_review" in item for item in report.violations)
 
 
 def test_evaluate_guardrails_accepts_single_unit_epic_path() -> None:
