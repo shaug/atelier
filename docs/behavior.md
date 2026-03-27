@@ -133,6 +133,24 @@ documented in `docs/beads-prefix-migration.md`.
 Repository-local Beads stores (for example `<repo>/.beads`) are not used for
 Atelier planning state. They are treated as external ticket sources.
 
+## Trycycle-targeted readiness contract
+
+- A changeset is trycycle-targeted only when metadata includes
+  `trycycle.targeted: true`.
+- Targeted changesets must include a typed `trycycle.contract_json` payload.
+- Planner guardrails fail closed when targeted contract data is missing,
+  malformed, or conflicts with finalize semantics.
+- Targeted planning remains in review with
+  `trycycle.plan_stage: planning_in_review` until operator approval.
+- Promotion approval persists auditable metadata:
+  `trycycle.plan_stage=approved`, `trycycle.approved_by`,
+  `trycycle.approved_at`, and `trycycle.approval_message_id`.
+- Worker startup applies the same shared validator across next-changeset,
+  explicit review-feedback, merge-conflict, and global selector paths.
+- Startup claim selection fails closed for targeted changesets that are not
+  approved or have invalid contract evidence.
+- Non-targeted changesets keep existing startup/promotion behavior.
+
 ## Command behavior (high level)
 
 - `atelier init`

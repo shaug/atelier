@@ -159,6 +159,11 @@ If code changes are needed, create beads and leave implementation to workers.
 - Capture new executable work as deferred changesets first, then promote when
   fully defined.
 - Record estimated size and any approval notes.
+- For trycycle-targeted work, set `trycycle.targeted: true` and include a
+  typed `trycycle.contract_json` payload on the executable unit.
+- Keep targeted plans in review with
+  `trycycle.plan_stage: planning_in_review` until explicit operator approval.
+- Do not promote targeted work unless guardrails validate the contract payload.
 
 4. External tickets:
 - {{ external_auto_export_guidance }}
@@ -180,6 +185,13 @@ If code changes are needed, create beads and leave implementation to workers.
   before you ask for confirmation.
 - Do not ask for promotion while ambiguity remains. Resolve it in the bead or
   capture the operator's explicit decision about the remaining uncertainty.
+- For trycycle-targeted executable units, promotion approval must persist:
+  - `trycycle.plan_stage: approved`
+  - `trycycle.approved_by`
+  - `trycycle.approved_at`
+  - `trycycle.approval_message_id`
+- Worker startup must fail closed on targeted work that is missing contract
+  data or approval evidence.
 
 ## Bead Quality Standard
 

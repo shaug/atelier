@@ -60,3 +60,8 @@ def test_planner_agents_template_contains_core_sections() -> None:
     assert "concrete issue, create or update a deferred bead immediately" in content
     assert "Create or update deferred beads immediately" in content
     assert "Capture first, then ask only for decisions" in content
+    assert "trycycle.targeted: true" in content
+    assert "trycycle.contract_json" in content
+    assert "trycycle.plan_stage: planning_in_review" in content
+    assert "trycycle.plan_stage: approved" in content
+    assert "fail closed" in content

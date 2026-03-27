@@ -583,6 +583,17 @@ def test_projected_check_guardrails_reorders_repo_src_ahead_of_installed_package
             "planner_contract.py": (
                 "def validate_authoring_contract(*_args, **_kwargs):\n    return []\n"
             ),
+            "trycycle_contract.py": (
+                "class _Readiness:\n"
+                "    def __init__(self):\n"
+                "        self.targeted = False\n"
+                "        self.contract_present = False\n"
+                "        self.stage = None\n"
+                "        self.errors = ()\n"
+                "\n"
+                "def evaluate_issue_trycycle_readiness(_issue):\n"
+                "    return _Readiness()\n"
+            ),
         },
     )
     installed_root = _fake_installed_package(
@@ -609,6 +620,17 @@ def test_projected_check_guardrails_reorders_repo_src_ahead_of_installed_package
             ),
             "planner_contract.py": (
                 "def validate_authoring_contract(*_args, **_kwargs):\n    return []\n"
+            ),
+            "trycycle_contract.py": (
+                "class _Readiness:\n"
+                "    def __init__(self):\n"
+                "        self.targeted = False\n"
+                "        self.contract_present = False\n"
+                "        self.stage = None\n"
+                "        self.errors = ()\n"
+                "\n"
+                "def evaluate_issue_trycycle_readiness(_issue):\n"
+                "    return _Readiness()\n"
             ),
         },
     )
@@ -662,6 +684,17 @@ def test_projected_check_guardrails_ignores_inherited_pythonpath_when_repo_runti
             "planner_contract.py": (
                 "def validate_authoring_contract(*_args, **_kwargs):\n    return []\n"
             ),
+            "trycycle_contract.py": (
+                "class _Readiness:\n"
+                "    def __init__(self):\n"
+                "        self.targeted = False\n"
+                "        self.contract_present = False\n"
+                "        self.stage = None\n"
+                "        self.errors = ()\n"
+                "\n"
+                "def evaluate_issue_trycycle_readiness(_issue):\n"
+                "    return _Readiness()\n"
+            ),
         },
     )
     _link_repo_python(repo_root)
@@ -679,6 +712,17 @@ def test_projected_check_guardrails_ignores_inherited_pythonpath_when_repo_runti
             ),
             "planner_contract.py": (
                 "def validate_authoring_contract(*_args, **_kwargs):\n    return []\n"
+            ),
+            "trycycle_contract.py": (
+                "class _Readiness:\n"
+                "    def __init__(self):\n"
+                "        self.targeted = False\n"
+                "        self.contract_present = False\n"
+                "        self.stage = None\n"
+                "        self.errors = ()\n"
+                "\n"
+                "def evaluate_issue_trycycle_readiness(_issue):\n"
+                "    return _Readiness()\n"
             ),
         },
     )

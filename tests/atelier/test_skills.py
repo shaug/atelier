@@ -194,6 +194,14 @@ def test_github_issues_skill_mentions_list_script() -> None:
     assert "list_issues.py" in text
 
 
+def test_plan_promote_epic_skill_mentions_trycycle_approval_gate() -> None:
+    skill = skills.load_packaged_skills()["plan-promote-epic"]
+    text = skill.files["SKILL.md"].decode("utf-8")
+    assert "trycycle.plan_stage" in text
+    assert "trycycle.approved_by" in text
+    assert "trycycle.approval_message_id" in text
+
+
 def test_ensure_project_skills_installs_if_missing() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp)
