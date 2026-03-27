@@ -40,9 +40,9 @@ def test_packaged_skills_include_core_set() -> None:
         "plan-create-epic",
         "plan-split-tasks",
         "plan-changesets",
+        "plan-refined-deliberation",
         "plan-changeset-guardrails",
         "plan-promote-epic",
-        "plan-refined-deliberation",
         "planner-startup-check",
     }.issubset(names)
     assert all("_" not in name for name in names)
@@ -93,9 +93,9 @@ def test_install_workspace_skills_writes_skill_docs() -> None:
             "plan-create-epic",
             "plan-split-tasks",
             "plan-changesets",
+            "plan-refined-deliberation",
             "plan-changeset-guardrails",
             "plan-promote-epic",
-            "plan-refined-deliberation",
             "planner-startup-check",
         ):
             assert (workspace_dir / "skills" / name / "SKILL.md").exists()
@@ -166,6 +166,29 @@ def test_packaged_planning_skills_include_scripts() -> None:
     assert "scripts/claim_message.py" in definitions["mail-queue-claim"].files
 
 
+def test_refined_deliberation_skill_is_packaged_and_shared() -> None:
+    definitions = skills.load_packaged_skills()
+    skill = definitions["plan-refined-deliberation"]
+    text = skill.files["SKILL.md"].decode("utf-8")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        workspace_dir = Path(tmp)
+        metadata = skills.install_workspace_skills(workspace_dir)
+
+        assert "plan-refined-deliberation" in metadata
+        assert (workspace_dir / "skills" / "plan-refined-deliberation" / "SKILL.md").is_file()
+
+    assert "strategy gate before task breakdown" in text
+    assert "low bar to reframe when a better path exists" in text
+    assert "high bar to ask the user" in text
+    assert "fresh, stateless pass" in text
+    assert "stop at sign-off or loop limit" in text
+    assert "epic and changeset beads" in text
+    assert "applies to all planning, not just refinement rounds" in text
+    assert "epic and changeset beads, not markdown checklists" in text
+    assert "trycycle" not in text.lower()
+
+
 def test_work_done_skill_references_close_epic_script() -> None:
     skill = skills.load_packaged_skills()["work-done"]
     text = skill.files["SKILL.md"].decode("utf-8")
@@ -194,25 +217,6 @@ def test_github_issues_skill_mentions_list_script() -> None:
     skill = skills.load_packaged_skills()["github-issues"]
     text = skill.files["SKILL.md"].decode("utf-8")
     assert "list_issues.py" in text
-
-
-def test_plan_promote_epic_skill_mentions_refined_approval_gate() -> None:
-    skill = skills.load_packaged_skills()["plan-promote-epic"]
-    text = skill.files["SKILL.md"].decode("utf-8")
-    assert "planning.stage" in text
-    assert "planning.approved_by" in text
-    assert "planning.approval_message_id" in text
-
-
-def test_plan_refined_deliberation_skill_mentions_strategy_challenge() -> None:
-    skill = skills.load_packaged_skills()["plan-refined-deliberation"]
-    text = skill.files["SKILL.md"].decode("utf-8")
-    assert "Strategy Challenge" in text
-    assert "low bar for changing direction" in text
-    assert "high bar for stopping to ask the user" in text
-    assert "fundamental conflict between requirements and reality" in text
-    assert "execution.strategy: refined" in text
-    assert "planning.contract_json" in text
 
 
 def test_ensure_project_skills_installs_if_missing() -> None:
@@ -344,6 +348,15 @@ def test_plan_create_epic_skill_captures_drafts_without_approval() -> None:
     assert "not request approval to create or edit deferred beads." in text
     assert "edge_cases" in text
     assert "done_definition" in text
+
+
+def test_planning_skills_reference_shared_discipline() -> None:
+    for name in ("plan-create-epic", "plan-changesets", "plan-split-tasks"):
+        text = skills.load_packaged_skills()[name].files["SKILL.md"].decode("utf-8")
+        assert "plan-refined-deliberation" in text
+        assert "shared planning discipline" in text
+        assert "same drafting strategy" in text
+        assert "trycycle" not in text.lower()
 
 
 def test_beads_conventions_reference_includes_concrete_authoring_examples() -> None:

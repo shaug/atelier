@@ -10,6 +10,9 @@ description: >-
 Use this only when the epic should be decomposed. If the epic itself is a single
 review-sized unit, keep it as the executable changeset.
 
+Use the shared planning discipline from `plan-refined-deliberation`. Use the
+same drafting strategy for all planning passes.
+
 ## Inputs
 
 - epic_id: Parent epic bead id.

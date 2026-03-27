@@ -10,6 +10,9 @@ Only use this when an epic should be decomposed. If the epic itself is already
 within guardrails, keep the epic as the executable changeset instead of creating
 children.
 
+Use the shared planning discipline from `plan-refined-deliberation`. Use the
+same drafting strategy for all planning passes.
+
 Capture new executable work immediately as deferred changesets
 (`status=deferred`) when issues are actionable. Do not wait for approval to
 create/edit deferred work.
@@ -31,12 +34,6 @@ create/edit deferred work.
 - Ensure the executable path for each changeset (the child plus inherited epic
   context) explicitly records `intent`, `rationale`, `non_goals`, `constraints`,
   `edge_cases`, `related_context`, and a done definition.
-- When a changeset is refined, record:
-  - `execution.strategy: refined`
-  - `planning.contract_json: <typed-json-payload>`
-  - `planning.stage: planning_in_review`
-- Do not mark a refined changeset runnable until explicit promotion approval
-  records `planning.stage: approved` and approval metadata.
 - Shared context can live on the epic; child changesets should add only the
   delta needed for worker execution.
 - For lifecycle/contract invariant bugs, record an upfront invariant impact map

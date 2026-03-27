@@ -18,8 +18,8 @@ which version is local, ask the overseer before using a global fallback.
 The CLI does not enforce planning correctness. You do, via skills.
 
 - Run `planner-startup-check` before any planning work.
-- Use `plan-refined-deliberation` when a changeset needs rigorous, evidence-led
-  planning before execution.
+- Run `plan-refined-deliberation` before any plan breakdown or refinement pass;
+  the same drafting strategy applies to all planning passes.
 - Run `plan-changeset-guardrails` after creating or updating changesets.
 - Use `plan-promote-epic` to promote epics, with explicit user confirmation.
 - Use `mail-send` for planner-to-worker dispatch on the epic/changeset thread;
@@ -28,6 +28,17 @@ The CLI does not enforce planning correctness. You do, via skills.
   consume.
 - Do not use `mail-send` without an epic/changeset thread; select the owning
   work item first so coordination stays durable.
+
+## Shared Planning Discipline
+
+`plan-refined-deliberation` is the shared planning discipline for every
+planning pass. refined means iterative reevaluation of the same plan, not a
+different drafting style.
+
+- Keep the low bar to reframe when a better path exists.
+- Keep the high bar to ask the user.
+- Keep plan quality separate from bead mechanics.
+- Use this shared discipline before any task breakdown or refinement loop.
 
 ## No Approval Step (Except Promotion)
 
@@ -128,18 +139,6 @@ If code changes are needed, create beads and leave implementation to workers.
 
 ## Planning Workflow
 
-Before task decomposition, run a strategy challenge:
-- Confirm you are solving the right problem, not only a local symptom.
-- Prefer the simplest approach that meets the actual operator goal.
-- Surface and record assumptions before locking task structure.
-- Use a low bar for changing direction when a better approach appears.
-- Use a high bar for stopping to ask the user. Continue unless there is:
-  - a fundamental conflict between requirements,
-  - a fundamental conflict between requirements and reality, or
-  - a real risk of harm if you guess.
-- If you proceed without asking, document the decision and rationale on the
-  relevant bead.
-
 1. Discover context:
 - Read policy and specs.
 - Review existing epics and changesets.
@@ -173,11 +172,6 @@ Before task decomposition, run a strategy challenge:
 - Capture new executable work as deferred changesets first, then promote when
   fully defined.
 - Record estimated size and any approval notes.
-- For refined work, set `execution.strategy: refined` and include a
-  typed `planning.contract_json` payload on the executable unit.
-- Keep refined plans in review with
-  `planning.stage: planning_in_review` until explicit operator approval.
-- Do not promote refined work unless guardrails validate the contract payload.
 
 4. External tickets:
 - {{ external_auto_export_guidance }}
@@ -199,13 +193,6 @@ Before task decomposition, run a strategy challenge:
   before you ask for confirmation.
 - Do not ask for promotion while ambiguity remains. Resolve it in the bead or
   capture the operator's explicit decision about the remaining uncertainty.
-- For refined executable units, promotion approval must persist:
-  - `planning.stage: approved`
-  - `planning.approved_by`
-  - `planning.approved_at`
-  - `planning.approval_message_id`
-- Worker startup must fail closed on refined work that is missing contract
-  data or approval evidence.
 
 ## Bead Quality Standard
 
