@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def _load_script_module():
@@ -32,26 +33,30 @@ def test_close_epic_uses_readiness_path(monkeypatch) -> None:
         agent_bead_id: str,
         *,
         beads_root: Path,
-        cwd: Path,
+        repo_root: Path,
     ) -> bool:
         captured["epic_id"] = epic_id
         captured["agent_bead_id"] = agent_bead_id
         captured["beads_root"] = beads_root
-        captured["cwd"] = cwd
+        captured["repo_root"] = repo_root
         return True
 
-    monkeypatch.setattr(module.beads, "close_epic_if_complete", fake_close_epic_if_complete)
     monkeypatch.setattr(
-        module.beads,
-        "close_issue",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unexpected direct close")),
+        module,
+        "_load_epic_close_runtime_for_execution",
+        lambda: SimpleNamespace(
+            close_epic_if_complete=fake_close_epic_if_complete,
+            direct_close_epic=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("unexpected direct close")
+            ),
+        ),
     )
 
     closed = module.close_epic(
         epic_id="at-epic",
         agent_bead_id="at-agent",
         beads_root=Path("/beads"),
-        cwd=Path("/repo"),
+        repo_root=Path("/repo"),
         direct_close=False,
     )
 
@@ -60,7 +65,7 @@ def test_close_epic_uses_readiness_path(monkeypatch) -> None:
         "epic_id": "at-epic",
         "agent_bead_id": "at-agent",
         "beads_root": Path("/beads"),
-        "cwd": Path("/repo"),
+        "repo_root": Path("/repo"),
     }
 
 
@@ -68,36 +73,26 @@ def test_close_epic_direct_close_reconciles_and_clears_hook(monkeypatch) -> None
     module = _load_script_module()
     events: list[tuple[str, str]] = []
 
-    def fake_close_issue(
+    def fake_direct_close_epic(
         issue_id: str,
-        *,
-        beads_root: Path,
-        cwd: Path,
-    ) -> object:
-        events.append(("close", issue_id))
-        assert beads_root == Path("/beads")
-        assert cwd == Path("/repo")
-        return object()
-
-    def fake_clear_agent_hook(
         agent_bead_id: str,
         *,
         beads_root: Path,
-        cwd: Path,
-        expected_hook: str | None = None,
+        repo_root: Path,
     ) -> None:
+        events.append(("close", issue_id))
         events.append(("clear_hook", agent_bead_id))
         assert beads_root == Path("/beads")
-        assert cwd == Path("/repo")
-        assert expected_hook == "at-epic"
+        assert repo_root == Path("/repo")
 
-    monkeypatch.setattr(module.beads, "close_issue", fake_close_issue)
-    monkeypatch.setattr(module.beads, "clear_agent_hook", fake_clear_agent_hook)
     monkeypatch.setattr(
-        module.beads,
-        "close_epic_if_complete",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("unexpected readiness close")
+        module,
+        "_load_epic_close_runtime_for_execution",
+        lambda: SimpleNamespace(
+            direct_close_epic=fake_direct_close_epic,
+            close_epic_if_complete=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("unexpected readiness close")
+            ),
         ),
     )
 
@@ -105,7 +100,7 @@ def test_close_epic_direct_close_reconciles_and_clears_hook(monkeypatch) -> None
         epic_id="at-epic",
         agent_bead_id="at-agent",
         beads_root=Path("/beads"),
-        cwd=Path("/repo"),
+        repo_root=Path("/repo"),
         direct_close=True,
     )
 
@@ -114,3 +109,74 @@ def test_close_epic_direct_close_reconciles_and_clears_hook(monkeypatch) -> None
         ("close", "at-epic"),
         ("clear_hook", "at-agent"),
     ]
+
+
+def test_main_uses_bootstrap_repo_root_for_execution(monkeypatch, tmp_path) -> None:
+    module = _load_script_module()
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(module, "_BOOTSTRAP_REPO_ROOT", Path("/bootstrap/repo"))
+    monkeypatch.setattr(module, "close_epic", lambda **kwargs: captured.update(kwargs) or True)
+    monkeypatch.setenv("BEADS_DIR", str(beads_root))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "close_epic.py",
+            "--epic-id",
+            "at-epic",
+            "--agent-bead-id",
+            "at-agent",
+        ],
+    )
+
+    module.main()
+
+    assert captured == {
+        "epic_id": "at-epic",
+        "agent_bead_id": "at-agent",
+        "beads_root": beads_root.resolve(),
+        "repo_root": Path("/bootstrap/repo"),
+        "direct_close": False,
+    }
+
+
+def test_main_defaults_beads_root_from_bootstrap_repo_root(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    module = _load_script_module()
+    repo_root = tmp_path / "repo"
+    beads_root = repo_root / ".beads"
+    beads_root.mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(module, "_BOOTSTRAP_REPO_ROOT", repo_root)
+    monkeypatch.setattr(module, "close_epic", lambda **kwargs: captured.update(kwargs) or True)
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.delenv("BEADS_DIR", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "close_epic.py",
+            "--epic-id",
+            "at-epic",
+            "--agent-bead-id",
+            "at-agent",
+        ],
+    )
+
+    module.main()
+
+    assert captured == {
+        "epic_id": "at-epic",
+        "agent_bead_id": "at-agent",
+        "beads_root": beads_root.resolve(),
+        "repo_root": repo_root,
+        "direct_close": False,
+    }

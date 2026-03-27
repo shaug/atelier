@@ -667,7 +667,7 @@ def test_reconcile_stale_terminal_metadata_next_run_uses_closed_path_without_ref
                 },
             ),
         ),
-        patch("atelier.worker.reconcile.beads.reconcile_closed_issue_exported_github_tickets"),
+        patch("atelier.worker.reconcile.worker_store.reconcile_closed_external_tickets"),
         patch("atelier.worker.reconcile.worker_store.update_changeset_integrated_sha"),
         patch("atelier.worker.reconcile.resolve_hook_agent_bead_for_epic", return_value=None),
     ):
@@ -1124,9 +1124,15 @@ def test_reconcile_blocked_merged_changesets_reports_closed_active_pr_drift() ->
     logs: list[str] = []
     with (
         patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[drift_issue]),
+        patch.object(
+            reconcile.beads,
+            "close_transition_has_active_pr_lifecycle",
+            side_effect=AssertionError("worker reconcile should not use the legacy seam"),
+        ),
+        patch("atelier.worker.reconcile.worker_store.transition_lifecycle") as transition_lifecycle,
         patch(
-            "atelier.worker.reconcile.worker_store.mark_issue_in_progress"
-        ) as mark_issue_in_progress,
+            "atelier.worker.reconcile.worker_store.reconcile_reopened_external_tickets"
+        ) as reopen_tickets,
         patch("atelier.worker.reconcile.git.git_ref_exists", return_value=True),
         patch(
             "atelier.worker.reconcile.prs.lookup_github_pr_status",
@@ -1166,7 +1172,13 @@ def test_reconcile_blocked_merged_changesets_reports_closed_active_pr_drift() ->
     assert result.actionable == 1
     assert result.reconciled == 1
     assert result.failed == 0
-    mark_issue_in_progress.assert_called_once_with(
+    transition_lifecycle.assert_called_once_with(
+        "at-1.9",
+        target_status="in_progress",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+    reopen_tickets.assert_called_once_with(
         "at-1.9",
         beads_root=Path("/beads"),
         repo_root=Path("/repo"),
@@ -1204,9 +1216,10 @@ def test_reconcile_does_not_reopen_closed_changeset_when_live_pr_is_merged() -> 
                 },
             ),
         ),
+        patch("atelier.worker.reconcile.worker_store.transition_lifecycle") as transition_lifecycle,
         patch(
-            "atelier.worker.reconcile.worker_store.mark_issue_in_progress"
-        ) as mark_issue_in_progress,
+            "atelier.worker.reconcile.worker_store.reconcile_reopened_external_tickets"
+        ) as reopen_tickets,
     ):
         result = reconcile.reconcile_blocked_merged_changesets(
             agent_id="worker/1",
@@ -1232,7 +1245,8 @@ def test_reconcile_does_not_reopen_closed_changeset_when_live_pr_is_merged() -> 
     assert result.actionable == 0
     assert result.reconciled == 0
     assert result.failed == 0
-    mark_issue_in_progress.assert_not_called()
+    transition_lifecycle.assert_not_called()
+    reopen_tickets.assert_not_called()
 
 
 def test_reconcile_flags_closed_pr_lookup_error_without_reopen() -> None:
@@ -1254,9 +1268,10 @@ def test_reconcile_flags_closed_pr_lookup_error_without_reopen() -> None:
             "atelier.worker.reconcile.prs.lookup_github_pr_status",
             return_value=prs.GithubPrLookup(outcome="error", error="gh timeout"),
         ),
+        patch("atelier.worker.reconcile.worker_store.transition_lifecycle") as transition_lifecycle,
         patch(
-            "atelier.worker.reconcile.worker_store.mark_issue_in_progress"
-        ) as mark_issue_in_progress,
+            "atelier.worker.reconcile.worker_store.reconcile_reopened_external_tickets"
+        ) as reopen_tickets,
     ):
         result = reconcile.reconcile_blocked_merged_changesets(
             agent_id="worker/1",
@@ -1283,7 +1298,8 @@ def test_reconcile_flags_closed_pr_lookup_error_without_reopen() -> None:
     assert result.actionable == 1
     assert result.reconciled == 0
     assert result.failed == 1
-    mark_issue_in_progress.assert_not_called()
+    transition_lifecycle.assert_not_called()
+    reopen_tickets.assert_not_called()
     assert any("closed+pr-lifecycle-lookup-error(error=gh timeout)" in line for line in logs)
 
 
@@ -1317,9 +1333,10 @@ def test_reconcile_recovers_after_transient_pr_lookup_error_for_closed_active_pr
                 ),
             ],
         ) as lookup,
+        patch("atelier.worker.reconcile.worker_store.transition_lifecycle") as transition_lifecycle,
         patch(
-            "atelier.worker.reconcile.worker_store.mark_issue_in_progress"
-        ) as mark_issue_in_progress,
+            "atelier.worker.reconcile.worker_store.reconcile_reopened_external_tickets"
+        ) as reopen_tickets,
     ):
         result = reconcile.reconcile_blocked_merged_changesets(
             agent_id="worker/1",
@@ -1349,7 +1366,13 @@ def test_reconcile_recovers_after_transient_pr_lookup_error_for_closed_active_pr
     assert lookup.call_count == 2
     assert lookup.call_args_list[0].kwargs == {}
     assert lookup.call_args_list[1].kwargs == {"refresh": True}
-    mark_issue_in_progress.assert_called_once_with(
+    transition_lifecycle.assert_called_once_with(
+        "at-1.15",
+        target_status="in_progress",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+    reopen_tickets.assert_called_once_with(
         "at-1.15",
         beads_root=Path("/beads"),
         repo_root=Path("/repo"),

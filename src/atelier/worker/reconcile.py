@@ -622,11 +622,19 @@ def reconcile_blocked_merged_changesets(
                     f"closed+active-pr-lifecycle({_format_reopen_evidence(drift_evidence)})"
                 )
             continue
-        if beads.close_transition_has_active_pr_lifecycle(
+        if worker_store.close_transition_has_active_pr_lifecycle(
             issue,
+            beads_root=beads_root,
+            repo_root=repo_root,
             active_pr_lifecycle=True,
         ):
-            worker_store.mark_issue_in_progress(
+            worker_store.transition_lifecycle(
+                changeset_id,
+                target_status=worker_store.LifecycleStatus.IN_PROGRESS.value,
+                beads_root=beads_root,
+                repo_root=repo_root,
+            )
+            worker_store.reconcile_reopened_external_tickets(
                 changeset_id,
                 beads_root=beads_root,
                 repo_root=repo_root,
@@ -976,10 +984,10 @@ def reconcile_blocked_merged_changesets(
                         )
                     continue
             if candidate.status in {"closed", "done"}:
-                beads.reconcile_closed_issue_exported_github_tickets(
+                worker_store.reconcile_closed_external_tickets(
                     changeset_id,
                     beads_root=beads_root,
-                    cwd=repo_root,
+                    repo_root=repo_root,
                 )
                 if candidate.integrated_sha:
                     worker_store.update_changeset_integrated_sha(

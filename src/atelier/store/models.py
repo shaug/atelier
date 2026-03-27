@@ -257,6 +257,36 @@ class ExternalTicketLink(StoreModel):
         )
 
 
+class ExternalTicketMetadataRepairResult(StoreModel):
+    """Outcome for one external-ticket metadata repair attempt."""
+
+    issue_id: Identifier
+    providers: tuple[Identifier, ...] = ()
+    recovered: bool
+    repaired: bool
+    ticket_count: int = Field(default=0, ge=0)
+
+    @field_validator("providers")
+    @classmethod
+    def _dedupe_providers(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _dedupe_identifiers(value)
+
+
+class ExternalTicketReconcileResult(StoreModel):
+    """Outcome for one exported external-ticket lifecycle reconciliation run."""
+
+    issue_id: Identifier
+    stale_exported_github_tickets: int = Field(default=0, ge=0)
+    reconciled_tickets: int = Field(default=0, ge=0)
+    updated: bool
+    needs_decision_notes: tuple[str, ...] = ()
+
+    @field_validator("needs_decision_notes")
+    @classmethod
+    def _dedupe_notes(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _dedupe_identifiers(value)
+
+
 class ChangesetBranches(StoreModel):
     """Branch metadata needed to publish and reconcile one changeset."""
 

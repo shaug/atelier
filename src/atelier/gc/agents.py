@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .. import agent_home, beads
+from ..worker import store_adapter as worker_store
 from .hooks import release_epic
 from .models import GcAction
 
@@ -91,10 +92,10 @@ def collect_agent_homes(
             for epic_issue in epics_to_release:
                 release_epic(epic_issue, beads_root=beads_root, cwd=repo_root)
             if has_hook:
-                beads.clear_agent_hook(
+                worker_store.clear_agent_hook(
                     agent_bead_id,
                     beads_root=beads_root,
-                    cwd=repo_root,
+                    repo_root=repo_root,
                     expected_hook=hook_epic,
                 )
             beads.run_bd_command(

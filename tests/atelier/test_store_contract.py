@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import get_args, get_origin, get_type_hints
 
 import pytest
@@ -37,6 +39,8 @@ from atelier.store import (
     EpicQuery,
     EpicRecord,
     ExternalTicketLink,
+    ExternalTicketMetadataRepairResult,
+    ExternalTicketReconcileResult,
     HookRecord,
     LifecycleStatus,
     LifecycleTransitionRequest,
@@ -45,6 +49,7 @@ from atelier.store import (
     MessageQuery,
     MessageRecord,
     MessageThreadKind,
+    RepairExternalTicketMetadataRequest,
     ReviewMetadata,
     ReviewState,
     SetAgentBeadHookRequest,
@@ -96,7 +101,10 @@ _STORE_METHOD_NAMES = (
     "clear_agent_bead_hook",
     "clear_agent_hook",
     "get_external_tickets",
+    "reconcile_reopened_external_tickets",
+    "reconcile_closed_external_tickets",
     "update_external_tickets",
+    "repair_external_ticket_metadata",
     "update_review",
     "transition_lifecycle",
 )
@@ -332,6 +340,42 @@ def test_store_contract_docs_record_invariants_and_deferred_work() -> None:
     assert "Downstream migrations should import `atelier.store`" in adoption_guide
     assert "contract and concrete adapters for that layer now live in" in adoption_guide
     assert "process-backed coverage only" in adoption_guide
+
+
+def _seed_external_ticket_history(
+    db_path: Path,
+    *,
+    issue_id: str,
+    old_description: str,
+    new_description: str,
+) -> None:
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                issue_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                old_value TEXT,
+                new_value TEXT,
+                comment TEXT,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO events (issue_id, event_type, actor, old_value, new_value)
+            VALUES (?, 'updated', 'test-agent', ?, ?)
+            """,
+            (
+                issue_id,
+                json.dumps({"description": old_description}),
+                json.dumps({"description": new_description}),
+            ),
+        )
+        connection.commit()
 
 
 def test_epic_and_work_refs_are_store_native_models() -> None:
@@ -953,6 +997,194 @@ def test_store_dual_backend_mutation_snapshot_matches_expected_contract(backend:
         "appended_issue_lifecycle": "open",
         "refreshed_assignee": None,
     }
+
+
+@pytest.mark.parametrize("backend", _BACKENDS)
+def test_store_repairs_missing_external_ticket_metadata(backend: str) -> None:
+    issue_id = "at-change"
+    old_description = (
+        'scope: old\nexternal_tickets: [{"provider":"github","id":"174","direction":"export"}]\n'
+    )
+    new_description = "scope: rewritten\n"
+    issues = (
+        BUILDER.issue(
+            issue_id,
+            title="Change",
+            labels=("atelier", "ext:github"),
+            description=new_description,
+        ),
+    )
+
+    if backend == "in-memory":
+        client, issue_store = build_in_memory_beads_client(issues=issues)
+        issue_store.update(issue_id, description=old_description)
+        issue_store.update(issue_id, description=new_description)
+        store = build_atelier_store(beads=client)
+    else:
+        with TemporaryDirectory() as tmp:
+            beads_root = Path(tmp)
+            _seed_external_ticket_history(
+                beads_root / "beads.db",
+                issue_id=issue_id,
+                old_description=old_description,
+                new_description=new_description,
+            )
+            command_backend = InMemoryBeadsBackend(seeded_issues=issues)
+            client = SubprocessBeadsClient(
+                transport=_InMemorySubprocessTransport(command_backend),
+                beads_root=beads_root,
+            )
+            store = build_atelier_store(beads=client)
+            results = _RUN(
+                store.repair_external_ticket_metadata(
+                    RepairExternalTicketMetadataRequest(apply=True)
+                )
+            )
+            assert results == (
+                ExternalTicketMetadataRepairResult(
+                    issue_id=issue_id,
+                    providers=("github",),
+                    recovered=True,
+                    repaired=True,
+                    ticket_count=1,
+                ),
+            )
+            assert _RUN(store.get_external_tickets(issue_id)) == (
+                ExternalTicketLink(
+                    provider="github",
+                    ticket_id="174",
+                    direction="exported",
+                ),
+            )
+            return
+
+    results = _RUN(
+        store.repair_external_ticket_metadata(RepairExternalTicketMetadataRequest(apply=True))
+    )
+    assert results == (
+        ExternalTicketMetadataRepairResult(
+            issue_id=issue_id,
+            providers=("github",),
+            recovered=True,
+            repaired=True,
+            ticket_count=1,
+        ),
+    )
+    assert _RUN(store.get_external_tickets(issue_id)) == (
+        ExternalTicketLink(
+            provider="github",
+            ticket_id="174",
+            direction="exported",
+        ),
+    )
+
+
+@pytest.mark.parametrize("backend", _BACKENDS)
+def test_store_reconciles_reopened_external_tickets(backend: str, monkeypatch) -> None:
+    issue_id = "at-change"
+    issues = (
+        BUILDER.issue("at-epic", title="Epic", issue_type="epic", labels=("at:epic", "atelier")),
+        BUILDER.issue(
+            issue_id,
+            title="Change",
+            parent="at-epic",
+            status="in_progress",
+            labels=("atelier", "ext:github"),
+            description=(
+                'external_tickets: [{"provider":"github","id":"179",'
+                '"url":"https://api.github.com/repos/acme/widgets/issues/179",'
+                '"relation":"primary","direction":"exported","sync_mode":"export",'
+                '"state":"closed","parent_id":"174"}]\n'
+            ),
+        ),
+    )
+    store = _store_for_backend(backend, issues=issues)
+
+    def fake_reopen(self, ticket, *, comment=None):
+        assert comment == (
+            f"Reopening external ticket because local bead {issue_id} is active again."
+        )
+        return ExternalTicketLink(
+            provider="github",
+            ticket_id=ticket.ticket_id,
+            url="https://github.com/acme/widgets/issues/179",
+            direction="exported",
+            state="open",
+            raw_state="open",
+            state_updated_at="2026-03-26T03:00:00Z",
+            parent_id="200",
+        ).to_external_ref()
+
+    monkeypatch.setattr(
+        "atelier.github_issues_provider.GithubIssuesProvider.reopen_ticket",
+        fake_reopen,
+    )
+
+    result = _RUN(store.reconcile_reopened_external_tickets(issue_id))
+
+    assert result == ExternalTicketReconcileResult(
+        issue_id=issue_id,
+        stale_exported_github_tickets=1,
+        reconciled_tickets=1,
+        updated=True,
+        needs_decision_notes=(),
+    )
+    (ticket,) = _RUN(store.get_external_tickets(issue_id))
+    assert ticket.state == "open"
+    assert ticket.parent_id == "200"
+    assert ticket.last_synced_at is not None
+
+
+@pytest.mark.parametrize("backend", _BACKENDS)
+def test_store_reconciles_closed_external_tickets(backend: str, monkeypatch) -> None:
+    issue_id = "at-change"
+    issues = (
+        BUILDER.issue("at-epic", title="Epic", issue_type="epic", labels=("at:epic", "atelier")),
+        BUILDER.issue(
+            issue_id,
+            title="Change",
+            parent="at-epic",
+            status="closed",
+            labels=("atelier", "ext:github"),
+            description=(
+                'external_tickets: [{"provider":"github","id":"180",'
+                '"url":"https://api.github.com/repos/acme/widgets/issues/180",'
+                '"relation":"primary","direction":"exported","sync_mode":"export",'
+                '"state":"open","on_close":"comment"}]\n'
+            ),
+        ),
+    )
+    store = _store_for_backend(backend, issues=issues)
+
+    def fake_close(self, ticket, *, comment=None):
+        assert comment == f"Closing external ticket because local bead {issue_id} is closed."
+        return ExternalTicketLink(
+            provider="github",
+            ticket_id=ticket.ticket_id,
+            url="https://github.com/acme/widgets/issues/180",
+            direction="exported",
+            state="closed",
+            raw_state="closed",
+            state_updated_at="2026-03-26T03:05:00Z",
+        ).to_external_ref()
+
+    monkeypatch.setattr(
+        "atelier.github_issues_provider.GithubIssuesProvider.close_ticket",
+        fake_close,
+    )
+
+    result = _RUN(store.reconcile_closed_external_tickets(issue_id))
+
+    assert result == ExternalTicketReconcileResult(
+        issue_id=issue_id,
+        stale_exported_github_tickets=1,
+        reconciled_tickets=1,
+        updated=True,
+        needs_decision_notes=(),
+    )
+    (ticket,) = _RUN(store.get_external_tickets(issue_id))
+    assert ticket.state == "closed"
+    assert ticket.last_synced_at is not None
 
 
 @pytest.mark.parametrize("operation", ["add", "remove"])

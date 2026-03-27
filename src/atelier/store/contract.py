@@ -253,6 +253,18 @@ class UpdateExternalTicketsRequest(StoreModel):
         return tuple(normalized)
 
 
+class RepairExternalTicketMetadataRequest(StoreModel):
+    """Mutation request for repairing missing external ticket metadata."""
+
+    issue_ids: tuple[Identifier, ...] = ()
+    apply: bool = False
+
+    @field_validator("issue_ids")
+    @classmethod
+    def _dedupe_issue_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _dedupe_identifiers(value)
+
+
 class LifecycleTransitionRequest(StoreModel):
     """Mutation request for canonical lifecycle changes."""
 
@@ -277,6 +289,7 @@ __all__ = [
     "MarkMessageReadRequest",
     "MessageQuery",
     "ReadyChangesetQuery",
+    "RepairExternalTicketMetadataRequest",
     "SetAgentBeadHookRequest",
     "SetHookRequest",
     "UpdateExternalTicketsRequest",
