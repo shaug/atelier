@@ -5,8 +5,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import datetime as dt
+import os
 import sys
 from pathlib import Path
+from typing import Protocol
 
 _SHARED_SCRIPTS_ROOT = Path(__file__).resolve().parents[2] / "shared" / "scripts"
 if str(_SHARED_SCRIPTS_ROOT) not in sys.path:
@@ -22,11 +25,21 @@ bootstrap_projected_atelier_script(
     require_runtime_health=__name__ == "__main__",
 )
 
+from atelier import beads, trycycle_contract  # noqa: E402
 from atelier.beads_context import (  # noqa: E402
     resolve_runtime_repo_dir_hint,
     resolve_skill_beads_context,
 )
 from atelier.lib.beads import description_fields as bead_fields  # noqa: E402
+from atelier.store import AppendNotesRequest, CreateMessageRequest  # noqa: E402
+
+
+class _ApprovalStore(Protocol):
+    """Minimal typed boundary for trycycle approval persistence helpers."""
+
+    async def create_message(self, request: CreateMessageRequest) -> object: ...
+
+    async def append_notes(self, request: AppendNotesRequest) -> object: ...
 
 
 def _build_store_and_client(*, beads_root: Path, repo_root: Path):
@@ -188,6 +201,92 @@ def _render_issue_preview(*, header: str, issue: object) -> str:
     return "\n".join(lines)
 
 
+def _issue_metadata_payload(issue: object) -> dict[str, object]:
+    return {
+        "id": _issue_text(issue, "id") or "",
+        "description": _issue_text(issue, "description") or "",
+    }
+
+
+def _trycycle_validation_error(issue: object) -> str | None:
+    issue_id = _issue_text(issue, "id") or "(issue)"
+    readiness = trycycle_contract.evaluate_issue_trycycle_readiness(_issue_metadata_payload(issue))
+    if readiness.targeted and not readiness.ok:
+        return f"{issue_id} trycycle readiness failed: {readiness.summary}"
+    return None
+
+
+def _issue_thread_kind(issue_id: str):
+    from atelier.store import MessageThreadKind
+
+    return MessageThreadKind.CHANGESET if "." in issue_id else MessageThreadKind.EPIC
+
+
+def _approval_timestamp() -> str:
+    return (
+        dt.datetime.now(tz=dt.timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def _record_trycycle_approval(
+    *,
+    store: _ApprovalStore,
+    issue: object,
+    beads_root: Path,
+    repo_root: Path,
+    operator_id: str,
+) -> str:
+    issue_id = _issue_text(issue, "id")
+    if issue_id is None:
+        raise RuntimeError("targeted trycycle issue is missing id")
+
+    issue_payload = _issue_metadata_payload(issue)
+    evidence = trycycle_contract.approval_evidence_summary(issue_payload)
+    message = asyncio.run(
+        store.create_message(
+            CreateMessageRequest(
+                title=f"Trycycle approval: {issue_id}",
+                body=(
+                    f"Operator {operator_id} approved trycycle promotion for {issue_id}.\n"
+                    f"{evidence}"
+                ),
+                sender=operator_id,
+                thread_id=issue_id,
+                thread_kind=_issue_thread_kind(issue_id),
+            )
+        )
+    )
+    approval_message_id = str(getattr(message, "id", "")).strip()
+    if not approval_message_id:
+        raise RuntimeError(f"{issue_id} trycycle approval message id missing")
+
+    approved_at = _approval_timestamp()
+    updated = beads.update_issue_description_fields(
+        issue_id,
+        {
+            "trycycle.plan_stage": "approved",
+            "trycycle.approved_by": operator_id,
+            "trycycle.approved_at": approved_at,
+            "trycycle.approval_message_id": approval_message_id,
+        },
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    updated_evidence = trycycle_contract.approval_evidence_summary(updated)
+    asyncio.run(
+        store.append_notes(
+            AppendNotesRequest(
+                issue_id=issue_id,
+                notes=(f"Trycycle approval recorded. {updated_evidence}",),
+            )
+        )
+    )
+    return approval_message_id
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--epic-id", required=True, help="Deferred epic bead id")
@@ -244,6 +343,7 @@ def main() -> None:
         )
         preview_blocks = [_render_issue_preview(header=f"EPIC {epic_id}", issue=epic_issue)]
         child_missing: dict[str, tuple[str, ...]] = {}
+        child_issues_by_id = {str(getattr(issue, "id")): issue for issue in child_issues}
         promotable_children: list[str] = []
         for record, issue in zip(changesets, child_issues, strict=True):
             preview_blocks.append(
@@ -267,6 +367,15 @@ def main() -> None:
             problems.append(
                 "incomplete child changesets remain deferred: " + ", ".join(incomplete_children)
             )
+        validation_targets = tuple(child_issues) if changesets else (epic_issue,)
+        executable_targets = (
+            tuple(child_issues_by_id[issue_id] for issue_id in promotable_children)
+            if promotable_children
+            else ((epic_issue,) if not changesets and not epic_missing else ())
+        )
+        for issue in validation_targets:
+            if (trycycle_error := _trycycle_validation_error(issue)) is not None:
+                problems.append(trycycle_error)
 
         if problems:
             raise RuntimeError("; ".join(problems))
@@ -296,6 +405,20 @@ def main() -> None:
                 )
             )
             promoted_children.append(child_id)
+        operator_id = str(os.environ.get("ATELIER_AGENT_ID") or "operator").strip() or "operator"
+        approval_targets = list(executable_targets)
+        for issue in approval_targets:
+            readiness = trycycle_contract.evaluate_issue_trycycle_readiness(
+                _issue_metadata_payload(issue)
+            )
+            if readiness.targeted:
+                _record_trycycle_approval(
+                    store=store,
+                    issue=issue,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    operator_id=operator_id,
+                )
 
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
