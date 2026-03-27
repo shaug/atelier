@@ -19,6 +19,7 @@ def test_planner_agents_template_contains_core_sections() -> None:
     assert "Promotion" in content
     assert "External providers" in content
     assert "plan-changeset-guardrails" in content
+    assert "plan-refined-deliberation" in content
     assert "plan-promote-epic" in content
     assert "planner-startup-check" in content
     assert "mail-send" in content
@@ -60,8 +61,8 @@ def test_planner_agents_template_contains_core_sections() -> None:
     assert "concrete issue, create or update a deferred bead immediately" in content
     assert "Create or update deferred beads immediately" in content
     assert "Capture first, then ask only for decisions" in content
-    assert "trycycle.targeted: true" in content
-    assert "trycycle.contract_json" in content
-    assert "trycycle.plan_stage: planning_in_review" in content
-    assert "trycycle.plan_stage: approved" in content
+    assert "execution.strategy: refined" in content
+    assert "planning.contract_json" in content
+    assert "planning.stage: planning_in_review" in content
+    assert "planning.stage: approved" in content
     assert "fail closed" in content

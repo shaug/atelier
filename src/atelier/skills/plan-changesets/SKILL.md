@@ -31,12 +31,12 @@ create/edit deferred work.
 - Ensure the executable path for each changeset (the child plus inherited epic
   context) explicitly records `intent`, `rationale`, `non_goals`, `constraints`,
   `edge_cases`, `related_context`, and a done definition.
-- When a changeset is trycycle-targeted, record:
-  - `trycycle.targeted: true`
-  - `trycycle.contract_json: <typed-json-payload>`
-  - `trycycle.plan_stage: planning_in_review`
-- Do not mark a trycycle-targeted changeset runnable until explicit promotion
-  approval records `trycycle.plan_stage: approved` and approval metadata.
+- When a changeset is refined, record:
+  - `execution.strategy: refined`
+  - `planning.contract_json: <typed-json-payload>`
+  - `planning.stage: planning_in_review`
+- Do not mark a refined changeset runnable until explicit promotion approval
+  records `planning.stage: approved` and approval metadata.
 - Shared context can live on the epic; child changesets should add only the
   delta needed for worker execution.
 - For lifecycle/contract invariant bugs, record an upfront invariant impact map

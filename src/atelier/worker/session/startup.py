@@ -86,7 +86,7 @@ class NextChangesetService(Protocol):
 
     def is_changeset_in_progress(self, issue: dict[str, object]) -> bool: ...
 
-    def trycycle_claim_eligible(
+    def refined_planning_claim_eligible(
         self,
         issue: dict[str, object],
     ) -> tuple[bool, str | None]: ...
@@ -234,8 +234,8 @@ def next_changeset_service(
             git_path=context.git_path,
         )
 
-    def trycycle_eligible(issue: dict[str, object]) -> bool:
-        eligible, _reason = service.trycycle_claim_eligible(issue)
+    def refined_planning_eligible(issue: dict[str, object]) -> bool:
+        eligible, _reason = service.refined_planning_claim_eligible(issue)
         return eligible
 
     target = service.show_issue(context.epic_id)
@@ -289,9 +289,9 @@ def next_changeset_service(
                 or target_recovery_candidate
             )
         ):
-            if not service.has_open_descendant_changesets(context.epic_id) and trycycle_eligible(
-                issue
-            ):
+            if not service.has_open_descendant_changesets(
+                context.epic_id
+            ) and refined_planning_eligible(issue):
                 return issue
         if (
             isinstance(issue_id, str)
@@ -303,7 +303,7 @@ def next_changeset_service(
             return None
         if isinstance(issue_id, str) and issue_id == context.epic_id and claimability.role.is_epic:
             if not explicit_descendants:
-                if trycycle_eligible(issue):
+                if refined_planning_eligible(issue):
                     return issue
                 return None
 
@@ -348,7 +348,7 @@ def next_changeset_service(
         ),
     )
     for issue in prioritized:
-        if not trycycle_eligible(issue):
+        if not refined_planning_eligible(issue):
             continue
         issue_id = issue.get("id")
         if isinstance(issue_id, str) and issue_id:
@@ -500,7 +500,7 @@ class StartupContractService(Protocol):
 
     def die(self, message: str) -> None: ...
 
-    def trycycle_claim_eligible(
+    def refined_planning_claim_eligible(
         self,
         issue: dict[str, object],
     ) -> tuple[bool, str | None]: ...
@@ -540,28 +540,28 @@ def run_startup_contract_service(
         )
         return result
 
-    def trycycle_selection_allowed(
+    def refined_planning_selection_allowed(
         *,
         changeset_id: str,
         stage: str,
     ) -> bool:
         issue = service.show_issue(changeset_id)
         if issue is None:
-            detail = "unable to load changeset metadata for trycycle claim gate"
+            detail = "unable to load changeset metadata for refined claim gate"
             service.emit(f"Skipping {stage} changeset {changeset_id}: {detail}")
             atelier_log.warning(
                 "startup skipping "
-                f"{stage} changeset={changeset_id} reason=trycycle_metadata_unavailable"
+                f"{stage} changeset={changeset_id} reason=refined_metadata_unavailable"
             )
             return False
         payload: dict[str, object] = issue
-        eligible, reason = service.trycycle_claim_eligible(payload)
+        eligible, reason = service.refined_planning_claim_eligible(payload)
         if eligible:
             return True
-        detail = reason or "targeted changeset is not trycycle claim-eligible"
+        detail = reason or "refined changeset is not claim-eligible"
         service.emit(f"Skipping {stage} changeset {changeset_id}: {detail}")
         atelier_log.warning(
-            f"startup skipping {stage} changeset={changeset_id} reason=trycycle_ineligible"
+            f"startup skipping {stage} changeset={changeset_id} reason=refined_ineligible"
         )
         return False
 
@@ -657,7 +657,7 @@ def run_startup_contract_service(
                 ),
             )
             if explicit_conflict is not None:
-                if trycycle_selection_allowed(
+                if refined_planning_selection_allowed(
                     changeset_id=explicit_conflict.changeset_id,
                     stage="explicit merge-conflict",
                 ):
@@ -676,7 +676,7 @@ def run_startup_contract_service(
                 ),
             )
             if explicit_feedback is not None:
-                if trycycle_selection_allowed(
+                if refined_planning_selection_allowed(
                     changeset_id=explicit_feedback.changeset_id,
                     stage="explicit review-feedback",
                 ):
@@ -699,7 +699,7 @@ def run_startup_contract_service(
         )
         if explicit_next_changeset is not None:
             explicit_issue_id = _issue_id(explicit_next_changeset)
-            if explicit_issue_id is not None and not trycycle_selection_allowed(
+            if explicit_issue_id is not None and not refined_planning_selection_allowed(
                 changeset_id=explicit_issue_id,
                 stage="explicit next-changeset",
             ):
@@ -923,7 +923,7 @@ def run_startup_contract_service(
                 ),
             )
             if selection is not None:
-                if trycycle_selection_allowed(
+                if refined_planning_selection_allowed(
                     changeset_id=selection.changeset_id,
                     stage="merge-conflict",
                 ):
@@ -982,7 +982,7 @@ def run_startup_contract_service(
                 ),
             )
             if feedback_selection is not None:
-                if trycycle_selection_allowed(
+                if refined_planning_selection_allowed(
                     changeset_id=feedback_selection.changeset_id,
                     stage="review-feedback",
                 ):
@@ -1084,7 +1084,7 @@ def run_startup_contract_service(
                 global_conflict.epic_id, stage="global-merge-conflict"
             ) or is_excluded(global_conflict.epic_id, stage="global-merge-conflict"):
                 global_conflict = None
-            elif not trycycle_selection_allowed(
+            elif not refined_planning_selection_allowed(
                 changeset_id=global_conflict.changeset_id,
                 stage="global merge-conflict",
             ):
@@ -1105,7 +1105,7 @@ def run_startup_contract_service(
                 global_feedback = None
             elif not is_claimable(global_feedback.epic_id, stage="global-review-feedback"):
                 global_feedback = None
-            elif not trycycle_selection_allowed(
+            elif not refined_planning_selection_allowed(
                 changeset_id=global_feedback.changeset_id,
                 stage="global review-feedback",
             ):

@@ -34,11 +34,11 @@ description: >-
 - Do not require child changesets when the epic itself is guardrail-sized.
 - If the epic has exactly one child changeset, explicit decomposition rationale
   must be recorded before promotion.
-- For trycycle-targeted executable units (`trycycle.targeted: true`), contract
+- For refined executable units (`execution.strategy: refined`), contract
   validation must pass before promotion. Required planning-stage metadata:
-  - `trycycle.contract_json`
-  - `trycycle.plan_stage: planning_in_review`
-- Worker startup fails closed for targeted units unless approval evidence is
+  - `planning.contract_json`
+  - `planning.stage: planning_in_review`
+- Worker startup fails closed for refined units unless approval evidence is
   recorded.
 
 ## Steps
@@ -89,12 +89,11 @@ description: >-
 1. Promote each fully-defined child changeset from `deferred` to `open`
    regardless of current dependency blockers (dependency graph still gates
    runnability).
-1. For each promoted trycycle-targeted executable unit, persist approval
-   evidence:
-   - `trycycle.plan_stage: approved`
-   - `trycycle.approved_by`
-   - `trycycle.approved_at`
-   - `trycycle.approval_message_id` and record an approval evidence note/thread
+1. For each promoted refined executable unit, persist approval evidence:
+   - `planning.stage: approved`
+   - `planning.approved_by`
+   - `planning.approved_at`
+   - `planning.approval_message_id` and record an approval evidence note/thread
      message.
 1. Let dependency resolution determine runnability (`bd ready`) at worker time.
 

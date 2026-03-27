@@ -48,20 +48,20 @@ def _issue(
     )
 
 
-def _valid_trycycle_contract_json() -> str:
+def _valid_refined_contract_json() -> str:
     return json.dumps(
         {
-            "objective": "Enforce fail-closed trycycle promotion gate",
-            "non_goals": ["Do not alter non-trycycle promotion"],
+            "objective": "Enforce fail-closed refined promotion gate",
+            "non_goals": ["Do not alter non-refined promotion"],
             "acceptance_criteria": [
-                {"statement": "Reject invalid targeted payloads", "evidence": ["pytest"]}
+                {"statement": "Reject invalid refined payloads", "evidence": ["pytest"]}
             ],
             "scope": {
                 "includes": ["plan-promote-epic"],
                 "excludes": ["worker runtime redesign"],
             },
-            "verification_plan": ["uv run pytest tests/atelier/skills -k trycycle -v"],
-            "risks": [{"risk": "over-blocking", "mitigation": "targeted-only checks"}],
+            "verification_plan": ["uv run pytest tests/atelier/skills -k refined -v"],
+            "risks": [{"risk": "over-blocking", "mitigation": "refined-only checks"}],
             "escalation_conditions": ["validator disagreement"],
             "completion_definition": {
                 "requires_terminal_pr_state": True,
@@ -74,17 +74,17 @@ def _valid_trycycle_contract_json() -> str:
     )
 
 
-def _targeted_description(*, contract_json: str, stage: str = "planning_in_review") -> str:
+def _refined_description(*, contract_json: str, stage: str = "planning_in_review") -> str:
     return (
         "related_context: at-context\n"
         "changeset_strategy: Keep review scope small.\n"
-        "trycycle.targeted: true\n"
-        f"trycycle.plan_stage: {stage}\n"
-        f"trycycle.contract_json: {contract_json}\n"
+        "execution.strategy: refined\n"
+        f"planning.stage: {stage}\n"
+        f"planning.contract_json: {contract_json}\n"
     )
 
 
-def test_promote_epic_blocks_trycycle_target_without_valid_contract(
+def test_promote_epic_blocks_refined_target_without_valid_contract(
     monkeypatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
@@ -109,7 +109,7 @@ def test_promote_epic_blocks_trycycle_target_without_valid_contract(
     child_issue = _issue(
         "at-epic.1",
         title="Child",
-        description=_targeted_description(contract_json="{bad-json}"),
+        description=_refined_description(contract_json="{bad-json}"),
     )
 
     class FakeStore:
@@ -141,10 +141,10 @@ def test_promote_epic_blocks_trycycle_target_without_valid_contract(
         module.main()
 
     assert excinfo.value.code == 1
-    assert "trycycle readiness failed" in capsys.readouterr().err
+    assert "refined readiness failed" in capsys.readouterr().err
 
 
-def test_promote_epic_records_trycycle_approval_metadata_for_child_changeset(
+def test_promote_epic_records_refined_approval_metadata_for_child_changeset(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -172,7 +172,7 @@ def test_promote_epic_records_trycycle_approval_metadata_for_child_changeset(
     child_issue = _issue(
         "at-epic.1",
         title="Child",
-        description=_targeted_description(contract_json=_valid_trycycle_contract_json()),
+        description=_refined_description(contract_json=_valid_refined_contract_json()),
         notes="child notes",
     )
 
@@ -224,13 +224,13 @@ def test_promote_epic_records_trycycle_approval_metadata_for_child_changeset(
 
     assert [request.issue_id for request in transitions] == ["at-epic", "at-epic.1"]
     assert created_messages
-    assert metadata_updates["at-epic.1"]["trycycle.plan_stage"] == "approved"
-    assert metadata_updates["at-epic.1"]["trycycle.approved_by"] == "atelier/planner/codex/p1"
-    assert metadata_updates["at-epic.1"]["trycycle.approval_message_id"] == "at-msg.1"
-    assert metadata_updates["at-epic.1"]["trycycle.approved_at"] is not None
+    assert metadata_updates["at-epic.1"]["planning.stage"] == "approved"
+    assert metadata_updates["at-epic.1"]["planning.approved_by"] == "atelier/planner/codex/p1"
+    assert metadata_updates["at-epic.1"]["planning.approval_message_id"] == "at-msg.1"
+    assert metadata_updates["at-epic.1"]["planning.approved_at"] is not None
 
 
-def test_promote_epic_requires_explicit_operator_identity_for_trycycle_approval(
+def test_promote_epic_requires_explicit_operator_identity_for_refined_approval(
     monkeypatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
@@ -258,7 +258,7 @@ def test_promote_epic_requires_explicit_operator_identity_for_trycycle_approval(
     child_issue = _issue(
         "at-epic.1",
         title="Child",
-        description=_targeted_description(contract_json=_valid_trycycle_contract_json()),
+        description=_refined_description(contract_json=_valid_refined_contract_json()),
         notes="child notes",
     )
 
@@ -299,12 +299,12 @@ def test_promote_epic_requires_explicit_operator_identity_for_trycycle_approval(
         module.main()
 
     assert excinfo.value.code == 1
-    assert "ATELIER_AGENT_ID must be set for trycycle approvals" in capsys.readouterr().err
+    assert "ATELIER_AGENT_ID must be set for refined approvals" in capsys.readouterr().err
     assert created_messages == []
     assert transitions == []
 
 
-def test_promote_epic_does_not_transition_lifecycle_when_trycycle_approval_fails(
+def test_promote_epic_does_not_transition_lifecycle_when_refined_approval_fails(
     monkeypatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
@@ -331,7 +331,7 @@ def test_promote_epic_does_not_transition_lifecycle_when_trycycle_approval_fails
     child_issue = _issue(
         "at-epic.1",
         title="Child",
-        description=_targeted_description(contract_json=_valid_trycycle_contract_json()),
+        description=_refined_description(contract_json=_valid_refined_contract_json()),
         notes="child notes",
     )
 
@@ -382,7 +382,7 @@ def test_promote_epic_does_not_transition_lifecycle_when_trycycle_approval_fails
     assert transitions == []
 
 
-def test_promote_epic_records_trycycle_approval_metadata_for_epic_single_unit(
+def test_promote_epic_records_refined_approval_metadata_for_epic_single_unit(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -400,7 +400,7 @@ def test_promote_epic_records_trycycle_approval_metadata_for_epic_single_unit(
     epic_issue = _issue(
         "at-epic",
         title="Epic",
-        description=_targeted_description(contract_json=_valid_trycycle_contract_json()),
+        description=_refined_description(contract_json=_valid_refined_contract_json()),
         notes="epic notes",
     )
 
@@ -449,11 +449,11 @@ def test_promote_epic_records_trycycle_approval_metadata_for_epic_single_unit(
     module.main()
 
     assert created_messages
-    assert metadata_updates["at-epic"]["trycycle.plan_stage"] == "approved"
-    assert metadata_updates["at-epic"]["trycycle.approval_message_id"] == "at-msg.2"
+    assert metadata_updates["at-epic"]["planning.stage"] == "approved"
+    assert metadata_updates["at-epic"]["planning.approval_message_id"] == "at-msg.2"
 
 
-def test_promote_epic_non_targeted_changesets_do_not_write_trycycle_approval(
+def test_promote_epic_non_refined_changesets_do_not_write_refined_approval(
     monkeypatch,
     tmp_path: Path,
 ) -> None:

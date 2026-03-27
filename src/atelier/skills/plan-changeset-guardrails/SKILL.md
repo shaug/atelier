@@ -35,9 +35,9 @@ description: >-
   changeset or stack extension) when thresholds or new domains appear.
 - Require explicit guidance that review-feedback scope growth is captured
   immediately as deferred follow-on work or stack extension.
-- For trycycle-targeted executable units, require `trycycle.contract_json` and
-  `trycycle.plan_stage: planning_in_review`.
-- Surface deterministic errors from the shared trycycle validator, including
+- For refined executable units, require `planning.contract_json` and
+  `planning.stage: planning_in_review`.
+- Surface deterministic errors from the shared refined validator, including
   malformed JSON, missing required payload fields, and completion-definition
   lifecycle conflicts.
 
@@ -57,8 +57,8 @@ description: >-
    - If a large estimate is found (>800), ensure approval is recorded.
    - When lifecycle/contract invariant terms are present, verify the invariant
      impact map and re-split guidance fields are present.
-   - If `trycycle.targeted: true`, run shared trycycle validation and require
-     `trycycle.plan_stage: planning_in_review` before promotion.
+   - If `execution.strategy: refined`, run shared refined validation and require
+     `planning.stage: planning_in_review` before promotion.
 1. If an epic has exactly one child changeset, require explicit decomposition
    rationale in the epic or child notes/description.
 1. Summarize any violations and send a message to the planner/overseer with

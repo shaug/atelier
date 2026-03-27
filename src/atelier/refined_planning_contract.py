@@ -1,4 +1,4 @@
-"""Trycycle planner/worker contract models and readiness validators."""
+"""Planner/worker refined-planning contract models and readiness validators."""
 
 from __future__ import annotations
 
@@ -12,19 +12,26 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from . import beads
 
-_TARGETED_FIELD = "trycycle.targeted"
-_CONTRACT_JSON_FIELD = "trycycle.contract_json"
-_PLAN_STAGE_FIELD = "trycycle.plan_stage"
-_APPROVED_BY_FIELD = "trycycle.approved_by"
-_APPROVED_AT_FIELD = "trycycle.approved_at"
-_APPROVAL_MESSAGE_ID_FIELD = "trycycle.approval_message_id"
+_EXECUTION_STRATEGY_FIELD = "execution.strategy"
+_LEGACY_TARGETED_FIELD = "trycycle.targeted"
+_CONTRACT_JSON_FIELD = "planning.contract_json"
+_LEGACY_CONTRACT_JSON_FIELD = "trycycle.contract_json"
+_PLAN_STAGE_FIELD = "planning.stage"
+_LEGACY_PLAN_STAGE_FIELD = "trycycle.plan_stage"
+_APPROVED_BY_FIELD = "planning.approved_by"
+_LEGACY_APPROVED_BY_FIELD = "trycycle.approved_by"
+_APPROVED_AT_FIELD = "planning.approved_at"
+_LEGACY_APPROVED_AT_FIELD = "trycycle.approved_at"
+_APPROVAL_MESSAGE_ID_FIELD = "planning.approval_message_id"
+_LEGACY_APPROVAL_MESSAGE_ID_FIELD = "trycycle.approval_message_id"
 _APPROVAL_MESSAGE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._:-]*$")
 _PLANNING_IN_REVIEW = "planning_in_review"
 _APPROVED = "approved"
+_REFINED_STRATEGY = "refined"
 
 
 class AcceptanceCriterion(BaseModel):
-    """One measurable acceptance criterion for trycycle planning."""
+    """One measurable acceptance criterion for refined planning."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -103,8 +110,8 @@ class CompletionDefinition(BaseModel):
         return value
 
 
-class TrycycleContract(BaseModel):
-    """Typed trycycle contract payload stored under ``trycycle.contract_json``."""
+class RefinedPlanningContract(BaseModel):
+    """Typed refined contract payload stored under ``planning.contract_json``."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -139,7 +146,7 @@ class ReadinessResult(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    targeted: bool
+    refined: bool
     contract_present: bool
     stage: str | None
     ok: bool
@@ -147,6 +154,12 @@ class ReadinessResult(BaseModel):
     claim_eligible: bool
     errors: tuple[str, ...]
     claim_blockers: tuple[str, ...]
+
+    @property
+    def targeted(self) -> bool:
+        """Compatibility alias for older call sites."""
+
+        return self.refined
 
     @property
     def summary(self) -> str:
@@ -157,14 +170,14 @@ class ReadinessResult(BaseModel):
         return "; ".join(diagnostics)
 
 
-def parse_contract_json(raw_contract_json: str) -> TrycycleContract:
-    """Parse and validate a serialized ``trycycle.contract_json`` payload.
+def parse_contract_json(raw_contract_json: str) -> RefinedPlanningContract:
+    """Parse and validate a serialized ``planning.contract_json`` payload.
 
     Args:
         raw_contract_json: Raw JSON string captured in issue metadata.
 
     Returns:
-        Parsed and validated ``TrycycleContract`` model.
+        Parsed and validated ``RefinedPlanningContract`` model.
 
     Raises:
         ValueError: Raised when JSON is malformed or schema validation fails.
@@ -173,19 +186,19 @@ def parse_contract_json(raw_contract_json: str) -> TrycycleContract:
     try:
         payload = json.loads(raw_contract_json)
     except json.JSONDecodeError as exc:  # pragma: no cover - exercised via wrapper path
-        raise ValueError("trycycle.contract_json must be valid JSON") from exc
+        raise ValueError("planning.contract_json must be valid JSON") from exc
     try:
-        return TrycycleContract.model_validate(payload)
+        return RefinedPlanningContract.model_validate(payload)
     except ValidationError as exc:  # pragma: no cover - exercised via wrapper path
         first_error = exc.errors(include_url=False)[0]
         location = ".".join(str(part) for part in first_error.get("loc", ()) if part is not None)
         detail = first_error.get("msg", "invalid contract payload")
         if location:
-            raise ValueError(f"trycycle.contract_json invalid at {location}: {detail}") from exc
-        raise ValueError(f"trycycle.contract_json invalid: {detail}") from exc
+            raise ValueError(f"planning.contract_json invalid at {location}: {detail}") from exc
+        raise ValueError(f"planning.contract_json invalid: {detail}") from exc
 
 
-def serialize_contract(contract: TrycycleContract) -> str:
+def serialize_contract(contract: RefinedPlanningContract) -> str:
     """Serialize a validated contract for deterministic metadata persistence.
 
     Args:
@@ -198,8 +211,8 @@ def serialize_contract(contract: TrycycleContract) -> str:
     return json.dumps(contract.model_dump(mode="json"), separators=(",", ":"), sort_keys=True)
 
 
-def evaluate_issue_trycycle_readiness(issue: Mapping[str, object]) -> ReadinessResult:
-    """Evaluate planner/worker trycycle readiness for one issue payload.
+def evaluate_issue_refined_planning_readiness(issue: Mapping[str, object]) -> ReadinessResult:
+    """Evaluate planner/worker refined readiness for one issue payload.
 
     Args:
         issue: Issue-like mapping containing at least an optional description.
@@ -210,10 +223,10 @@ def evaluate_issue_trycycle_readiness(issue: Mapping[str, object]) -> ReadinessR
 
     description = issue.get("description")
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
-    targeted = _parse_bool(fields.get(_TARGETED_FIELD))
-    if not targeted:
+    refined = _is_refined_strategy(fields)
+    if not refined:
         return ReadinessResult(
-            targeted=False,
+            refined=False,
             contract_present=False,
             stage=None,
             ok=True,
@@ -226,20 +239,23 @@ def evaluate_issue_trycycle_readiness(issue: Mapping[str, object]) -> ReadinessR
     errors: list[str] = []
     claim_blockers: list[str] = []
 
-    stage_raw = fields.get(_PLAN_STAGE_FIELD)
+    stage_raw = _field_value(fields, primary=_PLAN_STAGE_FIELD, legacy=_LEGACY_PLAN_STAGE_FIELD)
     stage = _normalize_field(stage_raw)
     if stage not in {_PLANNING_IN_REVIEW, _APPROVED}:
         errors.append(
-            "targeted changesets require trycycle.plan_stage set to "
-            "'planning_in_review' or 'approved'"
+            "refined changesets require planning.stage set to 'planning_in_review' or 'approved'"
         )
 
-    contract_raw = fields.get(_CONTRACT_JSON_FIELD)
+    contract_raw = _field_value(
+        fields,
+        primary=_CONTRACT_JSON_FIELD,
+        legacy=_LEGACY_CONTRACT_JSON_FIELD,
+    )
     contract_text = contract_raw.strip() if isinstance(contract_raw, str) else ""
     contract_present = bool(contract_text)
-    contract: TrycycleContract | None = None
+    contract: RefinedPlanningContract | None = None
     if not contract_present:
-        errors.append("targeted changesets require trycycle.contract_json")
+        errors.append("refined changesets require planning.contract_json")
     else:
         try:
             contract = parse_contract_json(contract_text)
@@ -254,7 +270,7 @@ def evaluate_issue_trycycle_readiness(issue: Mapping[str, object]) -> ReadinessR
         errors.extend(approval_errors)
     else:
         claim_blockers.append(
-            "targeted changesets require trycycle.plan_stage=approved before worker claim"
+            "refined changesets require planning.stage=approved before worker claim"
         )
 
     ok = not errors
@@ -263,7 +279,7 @@ def evaluate_issue_trycycle_readiness(issue: Mapping[str, object]) -> ReadinessR
         claim_blockers.extend(errors)
 
     return ReadinessResult(
-        targeted=True,
+        refined=True,
         contract_present=contract_present,
         stage=stage,
         ok=ok,
@@ -274,7 +290,7 @@ def evaluate_issue_trycycle_readiness(issue: Mapping[str, object]) -> ReadinessR
     )
 
 
-def trycycle_claim_eligible(issue: Mapping[str, object]) -> tuple[bool, str | None]:
+def refined_planning_claim_eligible(issue: Mapping[str, object]) -> tuple[bool, str | None]:
     """Return worker-claim eligibility and rejection reason for one issue.
 
     Args:
@@ -282,13 +298,13 @@ def trycycle_claim_eligible(issue: Mapping[str, object]) -> tuple[bool, str | No
 
     Returns:
         Tuple ``(eligible, reason)`` where reason is populated only for blocked
-        trycycle-targeted changesets.
+        refined changesets.
     """
 
-    readiness = evaluate_issue_trycycle_readiness(issue)
-    if not readiness.targeted or readiness.claim_eligible:
+    readiness = evaluate_issue_refined_planning_readiness(issue)
+    if not readiness.refined or readiness.claim_eligible:
         return True, None
-    reason = readiness.summary or "targeted changeset is not claim-eligible"
+    reason = readiness.summary or "refined changeset is not claim-eligible"
     return False, reason
 
 
@@ -296,7 +312,7 @@ def approval_evidence_summary(issue: Mapping[str, object]) -> str:
     """Render a concise audit summary for persisted approval metadata.
 
     Args:
-        issue: Issue payload that may contain trycycle approval metadata fields.
+        issue: Issue payload that may contain refined approval metadata fields.
 
     Returns:
         Human-readable approval evidence summary string.
@@ -304,21 +320,56 @@ def approval_evidence_summary(issue: Mapping[str, object]) -> str:
 
     description = issue.get("description")
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
+    stage = _normalize_field(
+        _field_value(
+            fields,
+            primary=_PLAN_STAGE_FIELD,
+            legacy=_LEGACY_PLAN_STAGE_FIELD,
+        )
+    )
+    approved_by = _normalize_field(
+        _field_value(fields, primary=_APPROVED_BY_FIELD, legacy=_LEGACY_APPROVED_BY_FIELD)
+    )
+    approved_at = _normalize_field(
+        _field_value(fields, primary=_APPROVED_AT_FIELD, legacy=_LEGACY_APPROVED_AT_FIELD)
+    )
+    approval_message_id = _normalize_field(
+        _field_value(
+            fields,
+            primary=_APPROVAL_MESSAGE_ID_FIELD,
+            legacy=_LEGACY_APPROVAL_MESSAGE_ID_FIELD,
+        )
+    )
     parts = [
-        f"stage={_normalize_field(fields.get(_PLAN_STAGE_FIELD)) or '(missing)'}",
-        f"approved_by={_normalize_field(fields.get(_APPROVED_BY_FIELD)) or '(missing)'}",
-        f"approved_at={_normalize_field(fields.get(_APPROVED_AT_FIELD)) or '(missing)'}",
-        "approval_message_id="
-        f"{_normalize_field(fields.get(_APPROVAL_MESSAGE_ID_FIELD)) or '(missing)'}",
+        f"stage={stage or '(missing)'}",
+        f"approved_by={approved_by or '(missing)'}",
+        f"approved_at={approved_at or '(missing)'}",
+        f"approval_message_id={approval_message_id or '(missing)'}",
     ]
-    return "trycycle approval evidence: " + ", ".join(parts)
+    return "refined approval evidence: " + ", ".join(parts)
 
 
-def _parse_bool(raw: str | None) -> bool:
-    value = _normalize_field(raw)
-    if value is None:
-        return False
-    return value in {"1", "true", "yes", "on"}
+def _is_refined_strategy(fields: Mapping[str, str]) -> bool:
+    strategy = _normalize_field(fields.get(_EXECUTION_STRATEGY_FIELD))
+    if strategy == _REFINED_STRATEGY:
+        return True
+    legacy_targeted = _normalize_field(fields.get(_LEGACY_TARGETED_FIELD))
+    return legacy_targeted in {"1", "true", "yes", "on"}
+
+
+def _field_value(
+    fields: Mapping[str, str],
+    *,
+    primary: str,
+    legacy: str,
+) -> str | None:
+    primary_value = fields.get(primary)
+    if isinstance(primary_value, str) and primary_value.strip():
+        return primary_value
+    legacy_value = fields.get(legacy)
+    if isinstance(legacy_value, str) and legacy_value.strip():
+        return legacy_value
+    return None
 
 
 def _normalize_field(raw: str | None) -> str | None:
@@ -332,19 +383,29 @@ def _normalize_field(raw: str | None) -> str | None:
 
 def _approval_errors(fields: Mapping[str, str]) -> list[str]:
     errors: list[str] = []
-    approved_by = _normalize_field(fields.get(_APPROVED_BY_FIELD))
+    approved_by = _normalize_field(
+        _field_value(fields, primary=_APPROVED_BY_FIELD, legacy=_LEGACY_APPROVED_BY_FIELD)
+    )
     if approved_by is None:
-        errors.append("approved stage requires trycycle.approved_by")
-    approved_at_raw = _normalize_field(fields.get(_APPROVED_AT_FIELD))
+        errors.append("approved stage requires planning.approved_by")
+    approved_at_raw = _normalize_field(
+        _field_value(fields, primary=_APPROVED_AT_FIELD, legacy=_LEGACY_APPROVED_AT_FIELD)
+    )
     if approved_at_raw is None:
-        errors.append("approved stage requires trycycle.approved_at")
+        errors.append("approved stage requires planning.approved_at")
     elif not _is_valid_iso_timestamp(approved_at_raw):
-        errors.append("trycycle.approved_at must be an ISO-8601 timestamp")
-    approval_message_id = _normalize_field(fields.get(_APPROVAL_MESSAGE_ID_FIELD))
+        errors.append("planning.approved_at must be an ISO-8601 timestamp")
+    approval_message_id = _normalize_field(
+        _field_value(
+            fields,
+            primary=_APPROVAL_MESSAGE_ID_FIELD,
+            legacy=_LEGACY_APPROVAL_MESSAGE_ID_FIELD,
+        )
+    )
     if approval_message_id is None:
-        errors.append("approved stage requires trycycle.approval_message_id")
+        errors.append("approved stage requires planning.approval_message_id")
     elif not _APPROVAL_MESSAGE_ID_PATTERN.fullmatch(approval_message_id):
-        errors.append("trycycle.approval_message_id must be an identifier")
+        errors.append("planning.approval_message_id must be an identifier")
     return errors
 
 
@@ -380,12 +441,12 @@ __all__ = [
     "AcceptanceCriterion",
     "CompletionDefinition",
     "ReadinessResult",
+    "RefinedPlanningContract",
     "RiskItem",
     "ScopeBoundary",
-    "TrycycleContract",
     "approval_evidence_summary",
-    "evaluate_issue_trycycle_readiness",
+    "evaluate_issue_refined_planning_readiness",
     "parse_contract_json",
+    "refined_planning_claim_eligible",
     "serialize_contract",
-    "trycycle_claim_eligible",
 ]

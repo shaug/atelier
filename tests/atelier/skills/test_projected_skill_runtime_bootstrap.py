@@ -583,15 +583,15 @@ def test_projected_check_guardrails_reorders_repo_src_ahead_of_installed_package
             "planner_contract.py": (
                 "def validate_authoring_contract(*_args, **_kwargs):\n    return []\n"
             ),
-            "trycycle_contract.py": (
+            "refined_planning_contract.py": (
                 "class _Readiness:\n"
                 "    def __init__(self):\n"
-                "        self.targeted = False\n"
+                "        self.refined = False\n"
                 "        self.contract_present = False\n"
                 "        self.stage = None\n"
                 "        self.errors = ()\n"
                 "\n"
-                "def evaluate_issue_trycycle_readiness(_issue):\n"
+                "def evaluate_issue_refined_planning_readiness(_issue):\n"
                 "    return _Readiness()\n"
             ),
         },
@@ -621,15 +621,15 @@ def test_projected_check_guardrails_reorders_repo_src_ahead_of_installed_package
             "planner_contract.py": (
                 "def validate_authoring_contract(*_args, **_kwargs):\n    return []\n"
             ),
-            "trycycle_contract.py": (
+            "refined_planning_contract.py": (
                 "class _Readiness:\n"
                 "    def __init__(self):\n"
-                "        self.targeted = False\n"
+                "        self.refined = False\n"
                 "        self.contract_present = False\n"
                 "        self.stage = None\n"
                 "        self.errors = ()\n"
                 "\n"
-                "def evaluate_issue_trycycle_readiness(_issue):\n"
+                "def evaluate_issue_refined_planning_readiness(_issue):\n"
                 "    return _Readiness()\n"
             ),
         },
@@ -684,15 +684,15 @@ def test_projected_check_guardrails_ignores_inherited_pythonpath_when_repo_runti
             "planner_contract.py": (
                 "def validate_authoring_contract(*_args, **_kwargs):\n    return []\n"
             ),
-            "trycycle_contract.py": (
+            "refined_planning_contract.py": (
                 "class _Readiness:\n"
                 "    def __init__(self):\n"
-                "        self.targeted = False\n"
+                "        self.refined = False\n"
                 "        self.contract_present = False\n"
                 "        self.stage = None\n"
                 "        self.errors = ()\n"
                 "\n"
-                "def evaluate_issue_trycycle_readiness(_issue):\n"
+                "def evaluate_issue_refined_planning_readiness(_issue):\n"
                 "    return _Readiness()\n"
             ),
         },
@@ -713,15 +713,15 @@ def test_projected_check_guardrails_ignores_inherited_pythonpath_when_repo_runti
             "planner_contract.py": (
                 "def validate_authoring_contract(*_args, **_kwargs):\n    return []\n"
             ),
-            "trycycle_contract.py": (
+            "refined_planning_contract.py": (
                 "class _Readiness:\n"
                 "    def __init__(self):\n"
-                "        self.targeted = False\n"
+                "        self.refined = False\n"
                 "        self.contract_present = False\n"
                 "        self.stage = None\n"
                 "        self.errors = ()\n"
                 "\n"
-                "def evaluate_issue_trycycle_readiness(_issue):\n"
+                "def evaluate_issue_refined_planning_readiness(_issue):\n"
                 "    return _Readiness()\n"
             ),
         },
@@ -763,7 +763,7 @@ def test_projected_promote_epic_reorders_repo_src_ahead_of_installed_package(
     )
     repo_root = _fake_repo(
         tmp_path,
-        sentinel_import="trycycle_contract",
+        sentinel_import="refined_planning_contract",
         extra_modules={
             "beads_context.py": (
                 "class _Context:\n"
@@ -808,7 +808,7 @@ def test_projected_promote_epic_reorders_repo_src_ahead_of_installed_package(
     installed_root = _fake_installed_package(
         tmp_path,
         modules={
-            "trycycle_contract.py": (
+            "refined_planning_contract.py": (
                 "from pathlib import Path\n"
                 "import os\n"
                 "\n"
@@ -866,7 +866,7 @@ def test_projected_promote_epic_reorders_repo_src_ahead_of_installed_package(
 
     assert completed.returncode == 0
     assert sentinel_path.read_text(encoding="utf-8") == str(
-        repo_root / "src" / "atelier" / "trycycle_contract.py"
+        repo_root / "src" / "atelier" / "refined_planning_contract.py"
     )
 
 

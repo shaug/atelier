@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from atelier import config, lifecycle, planner_overview, trycycle_contract
+from atelier import config, lifecycle, planner_overview, refined_planning_contract
 from atelier.worker import finalize_pipeline, reconcile, selection
 from atelier.worker.session import startup
 
@@ -77,7 +77,7 @@ class _NextChangesetMatrixService(startup.NextChangesetService):
     def is_changeset_in_progress(self, issue: dict[str, object]) -> bool:
         return lifecycle.canonical_lifecycle_status(issue.get("status")) == "in_progress"
 
-    def trycycle_claim_eligible(
+    def refined_planning_claim_eligible(
         self,
         issue: dict[str, object],
     ) -> tuple[bool, str | None]:
@@ -367,11 +367,11 @@ def test_lifecycle_matrix_reconcile_ignores_terminal_labels_on_active_status() -
     assert candidates == {"at-1": ["at-1.7"]}
 
 
-def _valid_trycycle_contract_json() -> str:
+def _valid_refined_contract_json() -> str:
     return json.dumps(
         {
             "objective": "Protect worker startup from unapproved targeted claims",
-            "non_goals": ["Do not alter non-trycycle flows"],
+            "non_goals": ["Do not alter non-refined flows"],
             "acceptance_criteria": [
                 {"statement": "Skip unapproved targeted work", "evidence": ["startup tests"]}
             ],
@@ -379,7 +379,7 @@ def _valid_trycycle_contract_json() -> str:
                 "includes": ["worker startup"],
                 "excludes": ["planner UX redesign"],
             },
-            "verification_plan": ["uv run pytest tests/atelier/worker -k trycycle -v"],
+            "verification_plan": ["uv run pytest tests/atelier/worker -k refined -v"],
             "risks": [{"risk": "over-blocking", "mitigation": "targeted-only checks"}],
             "escalation_conditions": ["validator disagreement"],
             "completion_definition": {
@@ -393,16 +393,16 @@ def _valid_trycycle_contract_json() -> str:
     )
 
 
-def test_lifecycle_matrix_trycycle_unapproved_target_is_not_selected() -> None:
+def test_lifecycle_matrix_refined_unapproved_target_is_not_selected() -> None:
     issue = {
         "id": "at-epic",
         "status": "open",
         "labels": ["at:epic"],
         "assignee": None,
         "description": (
-            "trycycle.targeted: true\n"
-            "trycycle.plan_stage: planning_in_review\n"
-            f"trycycle.contract_json: {_valid_trycycle_contract_json()}\n"
+            "execution.strategy: refined\n"
+            "planning.stage: planning_in_review\n"
+            f"planning.contract_json: {_valid_refined_contract_json()}\n"
         ),
     }
     startup_context = startup.NextChangesetContext(
@@ -415,26 +415,26 @@ def test_lifecycle_matrix_trycycle_unapproved_target_is_not_selected() -> None:
     selected = startup.next_changeset_service(
         context=startup_context,
         service=_NextChangesetMatrixService(
-            issue, claim_eligibility=trycycle_contract.trycycle_claim_eligible
+            issue, claim_eligibility=refined_planning_contract.refined_planning_claim_eligible
         ),
     )
 
     assert selected is None
 
 
-def test_lifecycle_matrix_trycycle_approved_target_is_selected() -> None:
+def test_lifecycle_matrix_refined_approved_target_is_selected() -> None:
     issue = {
         "id": "at-epic",
         "status": "open",
         "labels": ["at:epic"],
         "assignee": None,
         "description": (
-            "trycycle.targeted: true\n"
-            "trycycle.plan_stage: approved\n"
-            f"trycycle.contract_json: {_valid_trycycle_contract_json()}\n"
-            "trycycle.approved_by: atelier/planner/codex/p1\n"
-            "trycycle.approved_at: 2026-03-26T18:00:00Z\n"
-            "trycycle.approval_message_id: at-msg.1\n"
+            "execution.strategy: refined\n"
+            "planning.stage: approved\n"
+            f"planning.contract_json: {_valid_refined_contract_json()}\n"
+            "planning.approved_by: atelier/planner/codex/p1\n"
+            "planning.approved_at: 2026-03-26T18:00:00Z\n"
+            "planning.approval_message_id: at-msg.1\n"
         ),
     }
     startup_context = startup.NextChangesetContext(
@@ -447,7 +447,7 @@ def test_lifecycle_matrix_trycycle_approved_target_is_selected() -> None:
     selected = startup.next_changeset_service(
         context=startup_context,
         service=_NextChangesetMatrixService(
-            issue, claim_eligibility=trycycle_contract.trycycle_claim_eligible
+            issue, claim_eligibility=refined_planning_contract.refined_planning_claim_eligible
         ),
     )
 

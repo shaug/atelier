@@ -36,11 +36,11 @@ def _planner_contract_text() -> str:
     )
 
 
-def _valid_trycycle_contract_json() -> str:
+def _valid_refined_contract_json() -> str:
     return json.dumps(
         {
-            "objective": "Ship fail-closed trycycle contract enforcement",
-            "non_goals": ["Do not modify non-trycycle startup semantics"],
+            "objective": "Ship fail-closed refined contract enforcement",
+            "non_goals": ["Do not modify non-refined startup semantics"],
             "acceptance_criteria": [
                 {"statement": "Reject missing contracts", "evidence": ["guardrails tests"]}
             ],
@@ -48,8 +48,8 @@ def _valid_trycycle_contract_json() -> str:
                 "includes": ["planner guardrails"],
                 "excludes": ["worker PR flow redesign"],
             },
-            "verification_plan": ["uv run pytest tests/atelier/skills -k trycycle -v"],
-            "risks": [{"risk": "over-blocking", "mitigation": "targeted-only gating"}],
+            "verification_plan": ["uv run pytest tests/atelier/skills -k refined -v"],
+            "risks": [{"risk": "over-blocking", "mitigation": "refined-only gating"}],
             "escalation_conditions": ["validator disagreement"],
             "completion_definition": {
                 "requires_terminal_pr_state": True,
@@ -62,20 +62,20 @@ def _valid_trycycle_contract_json() -> str:
     )
 
 
-def _targeted_description(*, stage: str, contract_json: str) -> str:
+def _refined_description(*, stage: str, contract_json: str) -> str:
     return (
         f"{_planner_contract_text()}\n"
         "LOC estimate: 220\n"
-        "done_definition: Done when guardrails and worker startup reject invalid targeted work.\n"
-        "trycycle.targeted: true\n"
-        f"trycycle.plan_stage: {stage}\n"
-        f"trycycle.contract_json: {contract_json}\n"
+        "done_definition: Done when guardrails and worker startup reject invalid refined work.\n"
+        "execution.strategy: refined\n"
+        f"planning.stage: {stage}\n"
+        f"planning.contract_json: {contract_json}\n"
     )
 
 
-def test_guardrails_flags_trycycle_target_missing_contract() -> None:
+def test_guardrails_flags_refined_target_missing_contract() -> None:
     module = _load_script_module()
-    child = {"id": "at-epic.1", "description": "trycycle.targeted: true"}
+    child = {"id": "at-epic.1", "description": "execution.strategy: refined"}
 
     report = module._evaluate_guardrails(
         epic_issue=None,
@@ -83,16 +83,16 @@ def test_guardrails_flags_trycycle_target_missing_contract() -> None:
         target_changesets=[child],
     )
 
-    assert any("trycycle.contract_json" in item for item in report.violations)
+    assert any("planning.contract_json" in item for item in report.violations)
 
 
-def test_guardrails_accepts_valid_targeted_trycycle_payload() -> None:
+def test_guardrails_accepts_valid_refined_payload() -> None:
     module = _load_script_module()
     child = {
         "id": "at-epic.1",
-        "description": _targeted_description(
+        "description": _refined_description(
             stage="planning_in_review",
-            contract_json=_valid_trycycle_contract_json(),
+            contract_json=_valid_refined_contract_json(),
         ),
         "acceptance_criteria": "Done when validation fails closed before promotion.",
     }
@@ -103,18 +103,18 @@ def test_guardrails_accepts_valid_targeted_trycycle_payload() -> None:
         target_changesets=[child],
     )
 
-    assert not any("trycycle." in item for item in report.violations)
+    assert not any("planning." in item for item in report.violations)
 
 
-def test_guardrails_flags_targeted_completion_definition_conflict() -> None:
+def test_guardrails_flags_refined_completion_definition_conflict() -> None:
     module = _load_script_module()
-    contract_payload = json.loads(_valid_trycycle_contract_json())
+    contract_payload = json.loads(_valid_refined_contract_json())
     contract_payload["completion_definition"]["allow_close_without_terminal_or_integrated_sha"] = (
         True
     )
     child = {
         "id": "at-epic.1",
-        "description": _targeted_description(
+        "description": _refined_description(
             stage="planning_in_review",
             contract_json=json.dumps(contract_payload, separators=(",", ":")),
         ),
@@ -130,17 +130,17 @@ def test_guardrails_flags_targeted_completion_definition_conflict() -> None:
     assert any("completion_definition conflicts" in item for item in report.violations)
 
 
-def test_guardrails_require_planning_in_review_for_targeted_payloads() -> None:
+def test_guardrails_require_planning_in_review_for_refined_payloads() -> None:
     module = _load_script_module()
     child = {
         "id": "at-epic.1",
-        "description": _targeted_description(
+        "description": _refined_description(
             stage="approved",
-            contract_json=_valid_trycycle_contract_json(),
+            contract_json=_valid_refined_contract_json(),
         )
-        + "trycycle.approved_by: operator\n"
-        + "trycycle.approved_at: 2026-03-26T12:00:00Z\n"
-        + "trycycle.approval_message_id: at-msg.1\n",
+        + "planning.approved_by: operator\n"
+        + "planning.approved_at: 2026-03-26T12:00:00Z\n"
+        + "planning.approval_message_id: at-msg.1\n",
         "acceptance_criteria": "Done when approval metadata is persisted.",
     }
 

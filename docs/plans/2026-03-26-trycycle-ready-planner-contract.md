@@ -1,6 +1,8 @@
 # Trycycle-Ready Planner Contract and Approval Gate Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use trycycle-executing to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use trycycle-executing to
+> implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for
+> tracking.
 
 **Goal:** Add a fail-closed planner+worker contract so trycycle-targeted
 changesets cannot be claimed until a validated plan package and explicit
@@ -17,7 +19,7 @@ existing lifecycle logic.
 **Tech Stack:** Python 3.11, Pydantic models, Atelier store/beads adapters,
 planner skill scripts, worker startup pipeline, pytest.
 
----
+______________________________________________________________________
 
 ## User-Visible Behavior Contract
 
@@ -32,8 +34,8 @@ planner skill scripts, worker startup pipeline, pytest.
    - `trycycle.approved_by`
    - `trycycle.approved_at`
    - `trycycle.approval_message_id`
-1. Worker startup refuses to select or resume trycycle-targeted changesets
-   whose contract is invalid, missing, or unapproved (including explicit-epic,
+1. Worker startup refuses to select or resume trycycle-targeted changesets whose
+   contract is invalid, missing, or unapproved (including explicit-epic,
    next-changeset, merge-conflict, and review-feedback selection paths).
 1. Non-trycycle changesets retain current behavior with no new gating.
 
@@ -58,18 +60,17 @@ planner skill scripts, worker startup pipeline, pytest.
 
 ## Strategy Gate Decisions (Locked)
 
-1. Use namespaced metadata fields, not a new lifecycle status.
-   Reason: adding lifecycle states would touch broad store/lifecycle/finalize
-   logic and risks regressions unrelated to #719.
+1. Use namespaced metadata fields, not a new lifecycle status. Reason: adding
+   lifecycle states would touch broad store/lifecycle/finalize logic and risks
+   regressions unrelated to #719.
 1. Use one typed JSON payload field (`trycycle.contract_json`) plus small,
-   auditable metadata fields for stage/approval.
-   Reason: typed payload gives strict schema guarantees; small scalar fields
-   keep approval evidence easy to inspect with current description-field
-   tooling.
-1. Reuse one shared core validator for planner and worker paths.
-   Reason: avoids drift where planner and worker disagree on readiness.
-1. Make worker gate selective (only `trycycle.targeted: true`).
-   Reason: preserves existing execution behavior for non-trycycle work.
+   auditable metadata fields for stage/approval. Reason: typed payload gives
+   strict schema guarantees; small scalar fields keep approval evidence easy to
+   inspect with current description-field tooling.
+1. Reuse one shared core validator for planner and worker paths. Reason: avoids
+   drift where planner and worker disagree on readiness.
+1. Make worker gate selective (only `trycycle.targeted: true`). Reason:
+   preserves existing execution behavior for non-trycycle work.
 
 ## File Structure
 
@@ -79,10 +80,10 @@ planner skill scripts, worker startup pipeline, pytest.
 - Create: `tests/atelier/test_trycycle_contract.py`
   - Unit tests for parsing, schema validation, quality checks, and lifecycle
     completion-definition conflict detection.
-- Modify: `src/atelier/skills/plan-changeset-guardrails/scripts/check_guardrails.py`
-  - Invoke shared trycycle validator, surface deterministic violations.
 - Modify:
-  `tests/atelier/skills/test_plan_changeset_guardrails_script.py`
+  `src/atelier/skills/plan-changeset-guardrails/scripts/check_guardrails.py`
+  - Invoke shared trycycle validator, surface deterministic violations.
+- Modify: `tests/atelier/skills/test_plan_changeset_guardrails_script.py`
   - Add trycycle-targeted valid/invalid/missing-field coverage.
 - Modify: `src/atelier/skills/plan-promote-epic/scripts/promote_epic.py`
   - Enforce trycycle validation before promotion, persist approval metadata,
@@ -120,26 +121,28 @@ planner skill scripts, worker startup pipeline, pytest.
 
 ## Cutover and Regression Risks
 
-1. Risk: worker refuses all work due to over-broad gating.
-   Mitigation: gate only when `trycycle.targeted: true`; add explicit tests for
-   unchanged non-trycycle flow.
+1. Risk: worker refuses all work due to over-broad gating. Mitigation: gate only
+   when `trycycle.targeted: true`; add explicit tests for unchanged non-trycycle
+   flow.
 1. Risk: startup bypasses gate via review-feedback/merge-conflict selection.
    Mitigation: apply one shared `trycycle_claim_eligible` check before every
    startup return path that yields a concrete changeset id.
 1. Risk: planner script import drift in projected skill runtime tests.
    Mitigation: update bootstrap fixture module stubs when introducing
    `trycycle_contract` import.
-1. Risk: approval metadata write succeeds partially.
-   Mitigation: use store/beads update + read-after-write verification (existing
-   atomic verification pattern used in store adapters).
-1. Risk: completion-definition checker blocks valid plans.
-   Mitigation: codify allowed forms aligned to current worker prompt/finalize
-   contract and cover with focused tests.
+1. Risk: approval metadata write succeeds partially. Mitigation: use store/beads
+   update + read-after-write verification (existing atomic verification pattern
+   used in store adapters).
+1. Risk: completion-definition checker blocks valid plans. Mitigation: codify
+   allowed forms aligned to current worker prompt/finalize contract and cover
+   with focused tests.
 
 ### Task 1: Add Typed Trycycle Contract Model and Shared Validator
 
 **Files:**
+
 - Create: `src/atelier/trycycle_contract.py`
+
 - Test: `tests/atelier/test_trycycle_contract.py`
 
 - [ ] **Step 1: Identify or write the failing test**
@@ -163,8 +166,8 @@ def test_validate_contract_accepts_complete_payload() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/atelier/test_trycycle_contract.py -v`
-Expected: FAIL (`ImportError` / missing module or missing API).
+Run: `uv run pytest tests/atelier/test_trycycle_contract.py -v` Expected: FAIL
+(`ImportError` / missing module or missing API).
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -190,19 +193,19 @@ def evaluate_issue_trycycle_readiness(issue: Mapping[str, object]) -> ReadinessR
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/atelier/test_trycycle_contract.py -v`
-Expected: PASS.
+Run: `uv run pytest tests/atelier/test_trycycle_contract.py -v` Expected: PASS.
 
 - [ ] **Step 5: Refactor and verify**
 
 Tighten parse/normalization boundaries and add dedicated tests for:
+
 - malformed JSON
 - missing escalation conditions
 - non-testable acceptance criteria (missing evidence)
 - conflicting completion definition
 
-Run: `uv run pytest tests/atelier/test_trycycle_contract.py -v`
-Expected: all PASS.
+Run: `uv run pytest tests/atelier/test_trycycle_contract.py -v` Expected: all
+PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -215,7 +218,10 @@ git commit -m "feat(planner): add typed trycycle contract validator" \
 ### Task 2: Enforce Trycycle Contract in Planner Guardrail Checks
 
 **Files:**
-- Modify: `src/atelier/skills/plan-changeset-guardrails/scripts/check_guardrails.py`
+
+- Modify:
+  `src/atelier/skills/plan-changeset-guardrails/scripts/check_guardrails.py`
+
 - Test: `tests/atelier/skills/test_plan_changeset_guardrails_script.py`
 
 - [ ] **Step 1: Identify or write the failing test**
@@ -260,11 +266,13 @@ Expected: PASS.
 - [ ] **Step 5: Refactor and verify**
 
 Add test coverage for:
+
 - valid targeted payload (no violations)
 - completion-definition conflict violation
 - explicit `planning_in_review` stage requirement
 
-Run: `uv run pytest tests/atelier/skills/test_plan_changeset_guardrails_script.py -v`
+Run:
+`uv run pytest tests/atelier/skills/test_plan_changeset_guardrails_script.py -v`
 Expected: all PASS.
 
 - [ ] **Step 6: Commit**
@@ -279,7 +287,9 @@ git commit -m "feat(planner): validate trycycle-ready contracts in guardrails" \
 ### Task 3: Add Promotion-Time Approval Capture and Evidence Persistence
 
 **Files:**
+
 - Modify: `src/atelier/skills/plan-promote-epic/scripts/promote_epic.py`
+
 - Test: `tests/atelier/skills/test_plan_promote_epic_script.py`
 
 - [ ] **Step 1: Identify or write the failing test**
@@ -336,6 +346,7 @@ Expected: PASS.
 - [ ] **Step 5: Refactor and verify**
 
 Add coverage for:
+
 - non-targeted changesets unchanged
 - target with `planning_in_review` stage transitions to `approved`
 - persisted approval message id is included in metadata
@@ -356,11 +367,17 @@ git commit -m "feat(planner): require and record trycycle operator approval" \
 ### Task 4: Gate Worker Claim Selection on Trycycle Readiness
 
 **Files:**
+
 - Modify: `src/atelier/worker/session/startup.py`
+
 - Modify: `src/atelier/worker/work_startup_runtime.py`
+
 - Test: `tests/atelier/worker/test_session_startup.py`
+
 - Test: `tests/atelier/worker/test_session_next_changeset.py`
+
 - Test: `tests/atelier/worker/test_work_startup_runtime.py`
+
 - Test: `tests/atelier/worker/test_lifecycle_matrix.py`
 
 - [ ] **Step 1: Identify or write the failing test**
@@ -389,8 +406,7 @@ def test_merge_conflict_selection_rejects_unapproved_trycycle_changeset() -> Non
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run:
-`uv run pytest tests/atelier/worker/test_session_startup.py -k trycycle -v`
+Run: `uv run pytest tests/atelier/worker/test_session_startup.py -k trycycle -v`
 `uv run pytest tests/atelier/worker/test_session_next_changeset.py -k trycycle -v`
 Expected: FAIL.
 
@@ -432,13 +448,13 @@ def trycycle_claim_eligible(self, issue):
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run:
-`uv run pytest tests/atelier/worker/test_session_startup.py -k trycycle -v`
+Run: `uv run pytest tests/atelier/worker/test_session_startup.py -k trycycle -v`
 Expected: PASS.
 
 - [ ] **Step 5: Refactor and verify**
 
 Add matrix/regression coverage:
+
 - targeted+approved is selectable
 - targeted+missing approval is not selectable
 - explicit/global review-feedback and merge-conflict selections cannot bypass
@@ -447,11 +463,15 @@ Add matrix/regression coverage:
 - fake/test services implement the new protocol method
 
 Run:
+
 - `uv run pytest tests/atelier/worker/test_session_startup.py -v`
+
 - `uv run pytest tests/atelier/worker/test_session_next_changeset.py -v`
+
 - `uv run pytest tests/atelier/worker/test_work_startup_runtime.py -v`
-- `uv run pytest tests/atelier/worker/test_lifecycle_matrix.py -v`
-Expected: all PASS.
+
+- `uv run pytest tests/atelier/worker/test_lifecycle_matrix.py -v` Expected: all
+  PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -468,13 +488,21 @@ git commit -m "feat(worker): fail closed on non-approved trycycle changesets" \
 ### Task 5: Keep Skill Runtime Bootstrap and Planner Guidance Consistent
 
 **Files:**
+
 - Modify: `tests/atelier/skills/test_projected_skill_runtime_bootstrap.py`
+
 - Modify: `src/atelier/templates/AGENTS.planner.md.tmpl`
+
 - Modify: `src/atelier/skills/plan-changesets/SKILL.md`
+
 - Modify: `src/atelier/skills/plan-changeset-guardrails/SKILL.md`
+
 - Modify: `src/atelier/skills/plan-promote-epic/SKILL.md`
+
 - Modify: `docs/behavior.md`
+
 - Test: `tests/atelier/test_planner_agents_template.py`
+
 - Test: `tests/atelier/test_skills.py`
 
 - [ ] **Step 1: Identify or write the failing test**
@@ -496,8 +524,11 @@ Expected: FAIL.
 - [ ] **Step 3: Write minimal implementation**
 
 Update planner guidance docs/templates to require:
+
 - `@plan-changeset-guardrails` validation for trycycle-targeted work
+
 - explicit operator confirmation and metadata fields
+
 - worker fail-closed expectation for unapproved trycycle changesets
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -530,11 +561,13 @@ git commit -m "docs(planner): codify trycycle-ready approval workflow" \
 ### Task 6: Run Full Verification and Land
 
 **Files:**
+
 - Modify: any files touched by fixes discovered during verification.
 
 - [ ] **Step 1: Run focused regression suite**
 
 Run:
+
 ```bash
 uv run pytest tests/atelier/test_trycycle_contract.py -v
 uv run pytest tests/atelier/skills/test_plan_changeset_guardrails_script.py -v
@@ -544,16 +577,19 @@ uv run pytest tests/atelier/worker/test_session_next_changeset.py -v
 uv run pytest tests/atelier/worker/test_work_startup_runtime.py -v
 uv run pytest tests/atelier/worker/test_lifecycle_matrix.py -v
 ```
+
 Expected: all PASS.
 
 - [ ] **Step 2: Run canonical project gates**
 
 Run:
+
 ```bash
 just format
 just lint
 just test
 ```
+
 Expected: all PASS.
 
 - [ ] **Step 3: If any gate fails, fix root cause (not tests)**
@@ -563,14 +599,16 @@ Prefer production/contract fixes over weakening assertions.
 - [ ] **Step 4: Re-run failing gate(s) and full required gates**
 
 Re-run whichever command failed, then re-run:
-`just format && just lint && just test`
-Expected: all PASS.
+`just format && just lint && just test` Expected: all PASS.
 
 - [ ] **Step 5: Final review of behavior invariants**
 
 Confirm before merge:
+
 - non-trycycle flows unchanged
+
 - trycycle-targeted flows fail closed unless approved
+
 - approval/evidence metadata is auditable from beads/messages
 
 - [ ] **Step 6: Commit verification fixes**

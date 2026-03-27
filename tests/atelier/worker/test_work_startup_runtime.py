@@ -149,13 +149,13 @@ def test_startup_contract_service_updates_integrated_sha_via_store_adapter(monke
     assert calls == [("at-epic.1", "abc1234", Path("/beads"), Path("/repo"), True)]
 
 
-def test_next_changeset_service_trycycle_eligibility_uses_shared_helper(monkeypatch) -> None:
+def test_next_changeset_service_refined_eligibility_uses_shared_helper(monkeypatch) -> None:
     calls: list[dict[str, object]] = []
-    issue = {"id": "at-epic.1", "description": "trycycle.targeted: true"}
+    issue = {"id": "at-epic.1", "description": "execution.strategy: refined"}
 
     monkeypatch.setattr(
         work_startup_runtime,
-        "_trycycle_claim_eligibility",
+        "_refined_planning_claim_eligibility",
         lambda candidate: (calls.append(candidate), (False, "blocked"))[1],
     )
     service = work_startup_runtime._NextChangesetService(  # pyright: ignore[reportPrivateUsage]
@@ -163,19 +163,19 @@ def test_next_changeset_service_trycycle_eligibility_uses_shared_helper(monkeypa
         repo_root=Path("/repo"),
     )
 
-    eligible, reason = service.trycycle_claim_eligible(issue)
+    eligible, reason = service.refined_planning_claim_eligible(issue)
 
     assert (eligible, reason) == (False, "blocked")
     assert calls == [issue]
 
 
-def test_startup_contract_service_trycycle_eligibility_uses_shared_helper(monkeypatch) -> None:
+def test_startup_contract_service_refined_eligibility_uses_shared_helper(monkeypatch) -> None:
     calls: list[dict[str, object]] = []
-    issue = {"id": "at-epic.1", "description": "trycycle.targeted: true"}
+    issue = {"id": "at-epic.1", "description": "execution.strategy: refined"}
 
     monkeypatch.setattr(
         work_startup_runtime,
-        "_trycycle_claim_eligibility",
+        "_refined_planning_claim_eligibility",
         lambda candidate: (calls.append(candidate), (True, None))[1],
     )
     service = work_startup_runtime._StartupContractService(  # pyright: ignore[reportPrivateUsage]
@@ -183,13 +183,13 @@ def test_startup_contract_service_trycycle_eligibility_uses_shared_helper(monkey
         repo_root=Path("/repo"),
     )
 
-    eligible, reason = service.trycycle_claim_eligible(issue)
+    eligible, reason = service.refined_planning_claim_eligible(issue)
 
     assert (eligible, reason) == (True, None)
     assert calls == [issue]
 
 
-def test_startup_contract_service_trycycle_eligibility_hydrates_sparse_issue(
+def test_startup_contract_service_refined_eligibility_hydrates_sparse_issue(
     monkeypatch,
 ) -> None:
     contract_json = json.dumps(
@@ -198,7 +198,7 @@ def test_startup_contract_service_trycycle_eligibility_hydrates_sparse_issue(
             "non_goals": ["Do not alter non-targeted startup paths"],
             "acceptance_criteria": [{"statement": "Reject unapproved", "evidence": ["pytest"]}],
             "scope": {"includes": ["startup"], "excludes": ["planner workflow"]},
-            "verification_plan": ["uv run pytest tests/atelier/worker -k trycycle -v"],
+            "verification_plan": ["uv run pytest tests/atelier/worker -k refined -v"],
             "risks": [{"risk": "claim drift", "mitigation": "shared validator"}],
             "escalation_conditions": ["validator mismatch"],
             "completion_definition": {
@@ -213,9 +213,9 @@ def test_startup_contract_service_trycycle_eligibility_hydrates_sparse_issue(
     hydrated_issue = {
         "id": "at-epic.1",
         "description": (
-            "trycycle.targeted: true\n"
-            "trycycle.plan_stage: planning_in_review\n"
-            f"trycycle.contract_json: {contract_json}\n"
+            "execution.strategy: refined\n"
+            "planning.stage: planning_in_review\n"
+            f"planning.contract_json: {contract_json}\n"
         ),
     }
     calls: list[str] = []
@@ -234,16 +234,16 @@ def test_startup_contract_service_trycycle_eligibility_hydrates_sparse_issue(
         repo_root=Path("/repo"),
     )
 
-    eligible, reason = service.trycycle_claim_eligible({"id": "at-epic.1"})
+    eligible, reason = service.refined_planning_claim_eligible({"id": "at-epic.1"})
 
     assert (eligible, reason) == (
         False,
-        "targeted changesets require trycycle.plan_stage=approved before worker claim",
+        "refined changesets require planning.stage=approved before worker claim",
     )
     assert calls == ["at-epic.1|/beads|/repo"]
 
 
-def test_startup_contract_service_trycycle_eligibility_fails_closed_when_hydration_missing(
+def test_startup_contract_service_refined_eligibility_fails_closed_when_hydration_missing(
     monkeypatch,
 ) -> None:
     calls: list[str] = []
@@ -260,10 +260,10 @@ def test_startup_contract_service_trycycle_eligibility_fails_closed_when_hydrati
         repo_root=Path("/repo"),
     )
 
-    eligible, reason = service.trycycle_claim_eligible({"id": "at-missing.1"})
+    eligible, reason = service.refined_planning_claim_eligible({"id": "at-missing.1"})
 
     assert (eligible, reason) == (
         False,
-        "unable to load changeset metadata for trycycle claim gate",
+        "unable to load changeset metadata for refined claim gate",
     )
     assert calls == ["at-missing.1|/beads|/repo"]

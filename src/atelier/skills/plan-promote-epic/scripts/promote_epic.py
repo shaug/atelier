@@ -26,7 +26,7 @@ bootstrap_projected_atelier_script(
     require_runtime_health=__name__ == "__main__",
 )
 
-from atelier import trycycle_contract  # noqa: E402
+from atelier import refined_planning_contract  # noqa: E402
 from atelier.beads_context import (  # noqa: E402
     resolve_runtime_repo_dir_hint,
     resolve_skill_beads_context,
@@ -37,7 +37,7 @@ from atelier.store import AppendNotesRequest, CreateMessageRequest  # noqa: E402
 
 
 class _ApprovalStore(Protocol):
-    """Minimal typed boundary for trycycle approval persistence helpers."""
+    """Minimal typed boundary for refined approval persistence helpers."""
 
     async def create_message(self, request: CreateMessageRequest) -> object: ...
 
@@ -218,11 +218,13 @@ def _issue_metadata_payload(issue: object) -> dict[str, object]:
     }
 
 
-def _trycycle_validation_error(issue: object) -> str | None:
+def _refined_validation_error(issue: object) -> str | None:
     issue_id = _issue_text(issue, "id") or "(issue)"
-    readiness = trycycle_contract.evaluate_issue_trycycle_readiness(_issue_metadata_payload(issue))
-    if readiness.targeted and not readiness.ok:
-        return f"{issue_id} trycycle readiness failed: {readiness.summary}"
+    readiness = refined_planning_contract.evaluate_issue_refined_planning_readiness(
+        _issue_metadata_payload(issue)
+    )
+    if readiness.refined and not readiness.ok:
+        return f"{issue_id} refined readiness failed: {readiness.summary}"
     return None
 
 
@@ -244,11 +246,11 @@ def _approval_timestamp() -> str:
 def _required_operator_id() -> str:
     operator_id = str(os.environ.get("ATELIER_AGENT_ID") or "").strip()
     if not operator_id:
-        raise RuntimeError("ATELIER_AGENT_ID must be set for trycycle approvals")
+        raise RuntimeError("ATELIER_AGENT_ID must be set for refined approvals")
     return operator_id
 
 
-def _record_trycycle_approval(
+def _record_refined_approval(
     *,
     store: _ApprovalStore,
     client: _ApprovalClient,
@@ -259,17 +261,16 @@ def _record_trycycle_approval(
 ) -> str:
     issue_id = _issue_text(issue, "id")
     if issue_id is None:
-        raise RuntimeError("targeted trycycle issue is missing id")
+        raise RuntimeError("refined issue is missing id")
 
     issue_payload = _issue_metadata_payload(issue)
-    evidence = trycycle_contract.approval_evidence_summary(issue_payload)
+    evidence = refined_planning_contract.approval_evidence_summary(issue_payload)
     message = asyncio.run(
         store.create_message(
             CreateMessageRequest(
-                title=f"Trycycle approval: {issue_id}",
+                title=f"Refined approval: {issue_id}",
                 body=(
-                    f"Operator {operator_id} approved trycycle promotion for {issue_id}.\n"
-                    f"{evidence}"
+                    f"Operator {operator_id} approved refined promotion for {issue_id}.\n{evidence}"
                 ),
                 sender=operator_id,
                 thread_id=issue_id,
@@ -279,25 +280,25 @@ def _record_trycycle_approval(
     )
     approval_message_id = str(getattr(message, "id", "")).strip()
     if not approval_message_id:
-        raise RuntimeError(f"{issue_id} trycycle approval message id missing")
+        raise RuntimeError(f"{issue_id} refined approval message id missing")
 
     approved_at = _approval_timestamp()
     updated = _update_description_metadata_fields(
         client=client,
         issue_id=issue_id,
         fields={
-            "trycycle.plan_stage": "approved",
-            "trycycle.approved_by": operator_id,
-            "trycycle.approved_at": approved_at,
-            "trycycle.approval_message_id": approval_message_id,
+            "planning.stage": "approved",
+            "planning.approved_by": operator_id,
+            "planning.approved_at": approved_at,
+            "planning.approval_message_id": approval_message_id,
         },
     )
-    updated_evidence = trycycle_contract.approval_evidence_summary(updated)
+    updated_evidence = refined_planning_contract.approval_evidence_summary(updated)
     asyncio.run(
         store.append_notes(
             AppendNotesRequest(
                 issue_id=issue_id,
-                notes=(f"Trycycle approval recorded. {updated_evidence}",),
+                notes=(f"Refined approval recorded. {updated_evidence}",),
             )
         )
     )
@@ -444,8 +445,8 @@ def main() -> None:
             else ((epic_issue,) if not changesets and not epic_missing else ())
         )
         for issue in validation_targets:
-            if (trycycle_error := _trycycle_validation_error(issue)) is not None:
-                problems.append(trycycle_error)
+            if (refined_error := _refined_validation_error(issue)) is not None:
+                problems.append(refined_error)
 
         if problems:
             raise RuntimeError("; ".join(problems))
@@ -457,14 +458,14 @@ def main() -> None:
         approval_targets = [
             issue
             for issue in executable_targets
-            if trycycle_contract.evaluate_issue_trycycle_readiness(
+            if refined_planning_contract.evaluate_issue_refined_planning_readiness(
                 _issue_metadata_payload(issue)
-            ).targeted
+            ).refined
         ]
         if approval_targets:
             operator_id = _required_operator_id()
             for issue in approval_targets:
-                _record_trycycle_approval(
+                _record_refined_approval(
                     store=store,
                     client=client,
                     issue=issue,

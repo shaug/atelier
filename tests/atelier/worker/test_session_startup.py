@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-from atelier import trycycle_contract
+from atelier import refined_planning_contract
 from atelier.worker import integration, work_startup_runtime
 from atelier.worker.models_boundary import parse_issue_boundary
 from atelier.worker.review import MergeConflictSelection, ReviewFeedbackSelection
@@ -71,8 +71,8 @@ class FakeStartupService:
         self._select_global_review_feedback_changeset = overrides.pop(
             "select_global_review_feedback_changeset", lambda **_kwargs: None
         )
-        self._trycycle_claim_eligible = overrides.pop(
-            "trycycle_claim_eligible", lambda _issue: (True, None)
+        self._refined_planning_claim_eligible = overrides.pop(
+            "refined_planning_claim_eligible", lambda _issue: (True, None)
         )
         self._check_inbox_before_claim = overrides.pop(
             "check_inbox_before_claim", lambda *_args: False
@@ -222,11 +222,11 @@ class FakeStartupService:
     ) -> ReviewFeedbackSelection | None:
         return self._select_global_review_feedback_changeset(repo_slug=repo_slug)
 
-    def trycycle_claim_eligible(
+    def refined_planning_claim_eligible(
         self,
         issue: dict[str, object],
     ) -> tuple[bool, str | None]:
-        return self._trycycle_claim_eligible(issue)
+        return self._refined_planning_claim_eligible(issue)
 
     def check_inbox_before_claim(self, agent_id: str) -> bool:
         return self._check_inbox_before_claim(agent_id)
@@ -311,11 +311,11 @@ def _run_startup(**overrides: Any) -> startup.StartupContractResult:
     return startup.run_startup_contract_service(context=context, service=service)
 
 
-def _valid_trycycle_contract_json() -> str:
+def _valid_refined_contract_json() -> str:
     return json.dumps(
         {
-            "objective": "Gate all startup claim paths with shared trycycle checks",
-            "non_goals": ["Do not alter non-trycycle selection"],
+            "objective": "Gate all startup claim paths with shared refined checks",
+            "non_goals": ["Do not alter non-refined selection"],
             "acceptance_criteria": [
                 {"statement": "Reject unapproved targeted work", "evidence": ["pytest"]}
             ],
@@ -334,22 +334,22 @@ def _valid_trycycle_contract_json() -> str:
     )
 
 
-def _trycycle_target_description(*, approved: bool) -> str:
+def _refined_target_description(*, approved: bool) -> str:
     lines = [
-        "trycycle.targeted: true",
-        f"trycycle.contract_json: {_valid_trycycle_contract_json()}",
+        "execution.strategy: refined",
+        f"planning.contract_json: {_valid_refined_contract_json()}",
     ]
     if approved:
         lines.extend(
             [
-                "trycycle.plan_stage: approved",
-                "trycycle.approved_by: atelier/planner/codex/p1",
-                "trycycle.approved_at: 2026-03-26T18:00:00Z",
-                "trycycle.approval_message_id: at-msg.1",
+                "planning.stage: approved",
+                "planning.approved_by: atelier/planner/codex/p1",
+                "planning.approved_at: 2026-03-26T18:00:00Z",
+                "planning.approval_message_id: at-msg.1",
             ]
         )
     else:
-        lines.append("trycycle.plan_stage: planning_in_review")
+        lines.append("planning.stage: planning_in_review")
     return "\n".join(lines) + "\n"
 
 
@@ -465,7 +465,7 @@ def test_run_startup_contract_explicit_epic_prioritizes_merge_conflict() -> None
     assert result.changeset_id == "at-explicit"
 
 
-def test_run_startup_contract_explicit_epic_rejects_unapproved_trycycle_next_changeset() -> None:
+def test_run_startup_contract_explicit_epic_rejects_unapproved_refined_next_changeset() -> None:
     emitted: list[str] = []
 
     result = _run_startup(
@@ -477,8 +477,8 @@ def test_run_startup_contract_explicit_epic_rejects_unapproved_trycycle_next_cha
             "issue_type": "task" if issue_id != "at-explicit" else "epic",
         },
         next_changeset=lambda **_kwargs: {"id": "at-explicit.1", "status": "open", "labels": []},
-        trycycle_claim_eligible=lambda issue: (
-            (False, "missing trycycle approval")
+        refined_planning_claim_eligible=lambda issue: (
+            (False, "missing refined approval")
             if issue.get("id") == "at-explicit.1"
             else (True, None)
         ),
@@ -487,10 +487,10 @@ def test_run_startup_contract_explicit_epic_rejects_unapproved_trycycle_next_cha
 
     assert result.should_exit is True
     assert result.reason == "explicit_epic_not_actionable"
-    assert any("missing trycycle approval" in message for message in emitted)
+    assert any("missing refined approval" in message for message in emitted)
 
 
-def test_run_startup_contract_explicit_review_feedback_rejects_unapproved_trycycle() -> None:
+def test_run_startup_contract_explicit_review_feedback_rejects_unapproved_refined() -> None:
     feedback = ReviewFeedbackSelection(
         epic_id="at-explicit",
         changeset_id="at-explicit.1",
@@ -509,8 +509,8 @@ def test_run_startup_contract_explicit_review_feedback_rejects_unapproved_trycyc
         },
         select_review_feedback_changeset=lambda **_kwargs: feedback,
         next_changeset=lambda **_kwargs: None,
-        trycycle_claim_eligible=lambda issue: (
-            (False, "missing trycycle approval")
+        refined_planning_claim_eligible=lambda issue: (
+            (False, "missing refined approval")
             if issue.get("id") == "at-explicit.1"
             else (True, None)
         ),
@@ -518,7 +518,7 @@ def test_run_startup_contract_explicit_review_feedback_rejects_unapproved_trycyc
     )
 
     assert result.reason == "explicit_epic_not_actionable"
-    assert any("missing trycycle approval" in message for message in emitted)
+    assert any("missing refined approval" in message for message in emitted)
 
 
 def test_run_startup_contract_explicit_review_feedback_fails_closed_on_missing_metadata() -> None:
@@ -545,12 +545,11 @@ def test_run_startup_contract_explicit_review_feedback_fails_closed_on_missing_m
 
     assert result.reason == "explicit_epic_not_actionable"
     assert any(
-        "unable to load changeset metadata for trycycle claim gate" in message
-        for message in emitted
+        "unable to load changeset metadata for refined claim gate" in message for message in emitted
     )
 
 
-def test_run_startup_contract_explicit_merge_conflict_rejects_unapproved_trycycle() -> None:
+def test_run_startup_contract_explicit_merge_conflict_rejects_unapproved_refined() -> None:
     conflict = MergeConflictSelection(
         epic_id="at-explicit",
         changeset_id="at-explicit.1",
@@ -570,8 +569,8 @@ def test_run_startup_contract_explicit_merge_conflict_rejects_unapproved_trycycl
         },
         select_conflicted_changeset=lambda **_kwargs: conflict,
         next_changeset=lambda **_kwargs: None,
-        trycycle_claim_eligible=lambda issue: (
-            (False, "missing trycycle approval")
+        refined_planning_claim_eligible=lambda issue: (
+            (False, "missing refined approval")
             if issue.get("id") == "at-explicit.1"
             else (True, None)
         ),
@@ -579,10 +578,10 @@ def test_run_startup_contract_explicit_merge_conflict_rejects_unapproved_trycycl
     )
 
     assert result.reason == "explicit_epic_not_actionable"
-    assert any("missing trycycle approval" in message for message in emitted)
+    assert any("missing refined approval" in message for message in emitted)
 
 
-def test_run_startup_contract_explicit_trycycle_paths_use_shared_validator() -> None:
+def test_run_startup_contract_explicit_refined_paths_use_shared_validator() -> None:
     scenarios: tuple[tuple[str, bool, str], ...] = (
         ("review", False, "explicit_epic_not_actionable"),
         ("review", True, "review_feedback"),
@@ -620,7 +619,7 @@ def test_run_startup_contract_explicit_trycycle_paths_use_shared_validator() -> 
                 "status": "open",
                 "labels": ["at:epic"] if issue_id == "at-explicit" else [],
                 "description": (
-                    _trycycle_target_description(approved=approved)
+                    _refined_target_description(approved=approved)
                     if issue_id == "at-explicit.1"
                     else ""
                 ),
@@ -628,13 +627,13 @@ def test_run_startup_contract_explicit_trycycle_paths_use_shared_validator() -> 
             select_conflicted_changeset=lambda **_kwargs: conflict,
             select_review_feedback_changeset=lambda **_kwargs: feedback,
             next_changeset=lambda **_kwargs: None,
-            trycycle_claim_eligible=trycycle_contract.trycycle_claim_eligible,
+            refined_planning_claim_eligible=refined_planning_contract.refined_planning_claim_eligible,
             emit=lambda message: emitted.append(message),
         )
 
         assert result.reason == expected_reason
         if not approved:
-            assert any("plan_stage=approved" in message for message in emitted)
+            assert any("planning.stage=approved" in message for message in emitted)
         else:
             assert result.changeset_id == "at-explicit.1"
 
@@ -1527,7 +1526,7 @@ def test_run_startup_contract_skips_unclaimable_global_review_feedback() -> None
     assert result.epic_id == "at-claimable"
 
 
-def test_run_startup_contract_global_review_feedback_rejects_unapproved_trycycle() -> None:
+def test_run_startup_contract_global_review_feedback_rejects_unapproved_refined() -> None:
     blocked_feedback = ReviewFeedbackSelection(
         epic_id="at-blocked",
         changeset_id="at-blocked.1",
@@ -1555,8 +1554,8 @@ def test_run_startup_contract_global_review_feedback_rejects_unapproved_trycycle
         next_changeset=lambda **kwargs: {"id": f"{kwargs['epic_id']}.1"},
         select_review_feedback_changeset=lambda **_kwargs: None,
         select_global_review_feedback_changeset=lambda **_kwargs: blocked_feedback,
-        trycycle_claim_eligible=lambda issue: (
-            (False, "missing trycycle approval")
+        refined_planning_claim_eligible=lambda issue: (
+            (False, "missing refined approval")
             if issue.get("id") == "at-blocked.1"
             else (True, None)
         ),
@@ -1565,10 +1564,10 @@ def test_run_startup_contract_global_review_feedback_rejects_unapproved_trycycle
 
     assert result.reason == "selected_auto"
     assert result.epic_id == "at-claimable"
-    assert any("missing trycycle approval" in message for message in emitted)
+    assert any("missing refined approval" in message for message in emitted)
 
 
-def test_run_startup_contract_global_merge_conflict_rejects_unapproved_trycycle() -> None:
+def test_run_startup_contract_global_merge_conflict_rejects_unapproved_refined() -> None:
     blocked_conflict = MergeConflictSelection(
         epic_id="at-blocked",
         changeset_id="at-blocked.1",
@@ -1597,8 +1596,8 @@ def test_run_startup_contract_global_merge_conflict_rejects_unapproved_trycycle(
         next_changeset=lambda **kwargs: {"id": f"{kwargs['epic_id']}.1"},
         select_conflicted_changeset=lambda **_kwargs: None,
         select_global_conflicted_changeset=lambda **_kwargs: blocked_conflict,
-        trycycle_claim_eligible=lambda issue: (
-            (False, "missing trycycle approval")
+        refined_planning_claim_eligible=lambda issue: (
+            (False, "missing refined approval")
             if issue.get("id") == "at-blocked.1"
             else (True, None)
         ),
@@ -1607,10 +1606,10 @@ def test_run_startup_contract_global_merge_conflict_rejects_unapproved_trycycle(
 
     assert result.reason == "selected_auto"
     assert result.epic_id == "at-claimable"
-    assert any("missing trycycle approval" in message for message in emitted)
+    assert any("missing refined approval" in message for message in emitted)
 
 
-def test_run_startup_contract_global_trycycle_paths_use_shared_validator() -> None:
+def test_run_startup_contract_global_refined_paths_use_shared_validator() -> None:
     scenarios: tuple[tuple[str, bool, str], ...] = (
         ("review", False, "selected_auto"),
         ("review", True, "review_feedback"),
@@ -1656,7 +1655,7 @@ def test_run_startup_contract_global_trycycle_paths_use_shared_validator() -> No
                 "status": "open",
                 "labels": ["at:epic"] if issue_id in {"at-blocked", "at-claimable"} else [],
                 "description": (
-                    _trycycle_target_description(approved=approved)
+                    _refined_target_description(approved=approved)
                     if issue_id == "at-blocked.1"
                     else ""
                 ),
@@ -1666,14 +1665,14 @@ def test_run_startup_contract_global_trycycle_paths_use_shared_validator() -> No
             select_global_conflicted_changeset=lambda **_kwargs: conflict,
             select_review_feedback_changeset=lambda **_kwargs: None,
             select_global_review_feedback_changeset=lambda **_kwargs: feedback,
-            trycycle_claim_eligible=trycycle_contract.trycycle_claim_eligible,
+            refined_planning_claim_eligible=refined_planning_contract.refined_planning_claim_eligible,
             emit=lambda message: emitted.append(message),
         )
 
         assert result.reason == expected_reason
         if not approved:
             assert result.epic_id == "at-claimable"
-            assert any("plan_stage=approved" in message for message in emitted)
+            assert any("planning.stage=approved" in message for message in emitted)
         else:
             assert result.epic_id == "at-blocked"
             assert result.changeset_id == "at-blocked.1"

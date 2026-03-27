@@ -30,7 +30,9 @@ _BOOTSTRAP_REPO_ROOT = bootstrap_projected_atelier_script(
 from atelier.bd_invocation import with_bd_mode  # noqa: E402
 from atelier.beads_context import resolve_runtime_repo_dir_hint  # noqa: E402
 from atelier.planner_contract import validate_authoring_contract  # noqa: E402
-from atelier.trycycle_contract import evaluate_issue_trycycle_readiness  # noqa: E402
+from atelier.refined_planning_contract import (
+    evaluate_issue_refined_planning_readiness,  # noqa: E402
+)
 
 _LOC_TRIGGER = re.compile(r"\b(?:loc|estimate)\b", re.IGNORECASE)
 _NUMBER = re.compile(r"\b\d{2,5}\b")
@@ -200,7 +202,7 @@ def _cross_cutting_corpus(
     return "\n".join(
         line
         for line in corpus.splitlines()
-        if not line.strip().lower().startswith("trycycle.contract_json:")
+        if not line.strip().lower().startswith("planning.contract_json:")
     )
 
 
@@ -287,18 +289,16 @@ def _evaluate_guardrails(
 
     for issue in target_changesets:
         issue_id = _issue_id(issue) or "(unknown)"
-        trycycle_readiness = evaluate_issue_trycycle_readiness(issue)
-        if trycycle_readiness.targeted:
-            if not trycycle_readiness.contract_present:
+        refined_readiness = evaluate_issue_refined_planning_readiness(issue)
+        if refined_readiness.refined:
+            if not refined_readiness.contract_present:
+                _append_violation(f"{issue_id}: refined changesets require planning.contract_json.")
+            if refined_readiness.stage != "planning_in_review":
                 _append_violation(
-                    f"{issue_id}: targeted changesets require trycycle.contract_json."
+                    f"{issue_id}: refined planner payload must set "
+                    "planning.stage: planning_in_review."
                 )
-            if trycycle_readiness.stage != "planning_in_review":
-                _append_violation(
-                    f"{issue_id}: targeted planner payload must set "
-                    "trycycle.plan_stage: planning_in_review."
-                )
-            for error in trycycle_readiness.errors:
+            for error in refined_readiness.errors:
                 _append_violation(f"{issue_id}: {error}")
 
         inherited_context = (

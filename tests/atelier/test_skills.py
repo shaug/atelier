@@ -42,6 +42,7 @@ def test_packaged_skills_include_core_set() -> None:
         "plan-changesets",
         "plan-changeset-guardrails",
         "plan-promote-epic",
+        "plan-refined-deliberation",
         "planner-startup-check",
     }.issubset(names)
     assert all("_" not in name for name in names)
@@ -94,6 +95,7 @@ def test_install_workspace_skills_writes_skill_docs() -> None:
             "plan-changesets",
             "plan-changeset-guardrails",
             "plan-promote-epic",
+            "plan-refined-deliberation",
             "planner-startup-check",
         ):
             assert (workspace_dir / "skills" / name / "SKILL.md").exists()
@@ -194,12 +196,12 @@ def test_github_issues_skill_mentions_list_script() -> None:
     assert "list_issues.py" in text
 
 
-def test_plan_promote_epic_skill_mentions_trycycle_approval_gate() -> None:
+def test_plan_promote_epic_skill_mentions_refined_approval_gate() -> None:
     skill = skills.load_packaged_skills()["plan-promote-epic"]
     text = skill.files["SKILL.md"].decode("utf-8")
-    assert "trycycle.plan_stage" in text
-    assert "trycycle.approved_by" in text
-    assert "trycycle.approval_message_id" in text
+    assert "planning.stage" in text
+    assert "planning.approved_by" in text
+    assert "planning.approval_message_id" in text
 
 
 def test_ensure_project_skills_installs_if_missing() -> None:

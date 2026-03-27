@@ -6,7 +6,7 @@ import datetime as dt
 from collections.abc import Callable
 from pathlib import Path
 
-from .. import agent_home, beads, changeset_fields, prs, trycycle_contract, work_feedback
+from .. import agent_home, beads, changeset_fields, prs, refined_planning_contract, work_feedback
 from ..io import die, prompt, say, select
 from ..work_feedback import ReviewFeedbackSnapshot
 from ..worker import prompts as worker_prompts
@@ -166,11 +166,11 @@ def startup_finalize_preflight(
     )
 
 
-def _trycycle_claim_eligibility(issue: dict[str, object]) -> tuple[bool, str | None]:
-    return trycycle_contract.trycycle_claim_eligible(issue)
+def _refined_planning_claim_eligibility(issue: dict[str, object]) -> tuple[bool, str | None]:
+    return refined_planning_contract.refined_planning_claim_eligible(issue)
 
 
-def _hydrate_trycycle_issue_payload(
+def _hydrate_refined_planning_issue_payload(
     issue: dict[str, object],
     *,
     beads_root: Path,
@@ -302,18 +302,18 @@ class _NextChangesetService(worker_startup.NextChangesetService):
     def is_changeset_in_progress(self, issue: dict[str, object]) -> bool:
         return is_changeset_in_progress(issue)
 
-    def trycycle_claim_eligible(
+    def refined_planning_claim_eligible(
         self,
         issue: dict[str, object],
     ) -> tuple[bool, str | None]:
-        payload = _hydrate_trycycle_issue_payload(
+        payload = _hydrate_refined_planning_issue_payload(
             issue,
             beads_root=self._beads_root,
             repo_root=self._repo_root,
         )
         if payload is None:
-            return False, "unable to load changeset metadata for trycycle claim gate"
-        return _trycycle_claim_eligibility(payload)
+            return False, "unable to load changeset metadata for refined claim gate"
+        return _refined_planning_claim_eligibility(payload)
 
 
 def _no_eligible_epics_summary(
@@ -952,18 +952,18 @@ class _StartupContractService(worker_startup.StartupContractService):
     ) -> ReviewFeedbackSelection | None:
         return self._global_startup_candidates(repo_slug=repo_slug).feedback
 
-    def trycycle_claim_eligible(
+    def refined_planning_claim_eligible(
         self,
         issue: dict[str, object],
     ) -> tuple[bool, str | None]:
-        payload = _hydrate_trycycle_issue_payload(
+        payload = _hydrate_refined_planning_issue_payload(
             issue,
             beads_root=self._beads_root,
             repo_root=self._repo_root,
         )
         if payload is None:
-            return False, "unable to load changeset metadata for trycycle claim gate"
-        return _trycycle_claim_eligibility(payload)
+            return False, "unable to load changeset metadata for refined claim gate"
+        return _refined_planning_claim_eligibility(payload)
 
     def check_inbox_before_claim(self, agent_id: str) -> bool:
         return check_inbox_before_claim(
