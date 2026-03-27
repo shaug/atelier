@@ -94,8 +94,8 @@ description: >-
    - `trycycle.plan_stage: approved`
    - `trycycle.approved_by`
    - `trycycle.approved_at`
-   - `trycycle.approval_message_id`
-   and record an approval evidence note/thread message.
+   - `trycycle.approval_message_id` and record an approval evidence note/thread
+     message.
 1. Let dependency resolution determine runnability (`bd ready`) at worker time.
 
 ## Verification

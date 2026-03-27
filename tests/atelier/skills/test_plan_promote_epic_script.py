@@ -205,20 +205,19 @@ def test_promote_epic_records_trycycle_approval_metadata_for_child_changeset(
             return {"at-epic": epic_issue, "at-epic.1": child_issue}[request.issue_id]
 
     def _record_metadata(
-        issue_id: str,
-        fields: dict[str, str | None],
         *,
-        beads_root: Path,
-        cwd: Path,
+        client: object,
+        issue_id: str,
+        fields: dict[str, str],
     ) -> dict[str, object]:
-        del beads_root, cwd
+        del client
         metadata_updates[issue_id] = fields
         return {"id": issue_id}
 
     monkeypatch.setattr(
         module, "_build_store_and_client", lambda **_kwargs: (FakeStore(), FakeClient())
     )
-    monkeypatch.setattr(module.beads, "update_issue_description_fields", _record_metadata)
+    monkeypatch.setattr(module, "_update_description_metadata_fields", _record_metadata)
     monkeypatch.setattr(sys, "argv", ["promote_epic.py", "--epic-id", "at-epic", "--yes"])
 
     module.main()
@@ -280,20 +279,19 @@ def test_promote_epic_records_trycycle_approval_metadata_for_epic_single_unit(
             return epic_issue
 
     def _record_metadata(
-        issue_id: str,
-        fields: dict[str, str | None],
         *,
-        beads_root: Path,
-        cwd: Path,
+        client: object,
+        issue_id: str,
+        fields: dict[str, str],
     ) -> dict[str, object]:
-        del beads_root, cwd
+        del client
         metadata_updates[issue_id] = fields
         return {"id": issue_id}
 
     monkeypatch.setattr(
         module, "_build_store_and_client", lambda **_kwargs: (FakeStore(), FakeClient())
     )
-    monkeypatch.setattr(module.beads, "update_issue_description_fields", _record_metadata)
+    monkeypatch.setattr(module, "_update_description_metadata_fields", _record_metadata)
     monkeypatch.setattr(sys, "argv", ["promote_epic.py", "--epic-id", "at-epic", "--yes"])
 
     module.main()
@@ -363,8 +361,8 @@ def test_promote_epic_non_targeted_changesets_do_not_write_trycycle_approval(
         module, "_build_store_and_client", lambda **_kwargs: (FakeStore(), FakeClient())
     )
     monkeypatch.setattr(
-        module.beads,
-        "update_issue_description_fields",
+        module,
+        "_update_description_metadata_fields",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError((args, kwargs))),
     )
     monkeypatch.setattr(sys, "argv", ["promote_epic.py", "--epic-id", "at-epic", "--yes"])

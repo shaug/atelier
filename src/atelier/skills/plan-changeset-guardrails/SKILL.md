@@ -35,8 +35,8 @@ description: >-
   changeset or stack extension) when thresholds or new domains appear.
 - Require explicit guidance that review-feedback scope growth is captured
   immediately as deferred follow-on work or stack extension.
-- For trycycle-targeted executable units, require
-  `trycycle.contract_json` and `trycycle.plan_stage: planning_in_review`.
+- For trycycle-targeted executable units, require `trycycle.contract_json` and
+  `trycycle.plan_stage: planning_in_review`.
 - Surface deterministic errors from the shared trycycle validator, including
   malformed JSON, missing required payload fields, and completion-definition
   lifecycle conflicts.

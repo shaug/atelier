@@ -8,6 +8,7 @@ import asyncio
 import datetime as dt
 import os
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Protocol
 
@@ -25,11 +26,12 @@ bootstrap_projected_atelier_script(
     require_runtime_health=__name__ == "__main__",
 )
 
-from atelier import beads, trycycle_contract  # noqa: E402
+from atelier import trycycle_contract  # noqa: E402
 from atelier.beads_context import (  # noqa: E402
     resolve_runtime_repo_dir_hint,
     resolve_skill_beads_context,
 )
+from atelier.lib.beads import ShowIssueRequest, UpdateIssueRequest  # noqa: E402
 from atelier.lib.beads import description_fields as bead_fields  # noqa: E402
 from atelier.store import AppendNotesRequest, CreateMessageRequest  # noqa: E402
 
@@ -40,6 +42,14 @@ class _ApprovalStore(Protocol):
     async def create_message(self, request: CreateMessageRequest) -> object: ...
 
     async def append_notes(self, request: AppendNotesRequest) -> object: ...
+
+
+class _ApprovalClient(Protocol):
+    """Typed client boundary for description-field persistence."""
+
+    async def show(self, request: ShowIssueRequest) -> object: ...
+
+    async def update(self, request: UpdateIssueRequest) -> object: ...
 
 
 def _build_store_and_client(*, beads_root: Path, repo_root: Path):
@@ -234,6 +244,7 @@ def _approval_timestamp() -> str:
 def _record_trycycle_approval(
     *,
     store: _ApprovalStore,
+    client: _ApprovalClient,
     issue: object,
     beads_root: Path,
     repo_root: Path,
@@ -264,16 +275,15 @@ def _record_trycycle_approval(
         raise RuntimeError(f"{issue_id} trycycle approval message id missing")
 
     approved_at = _approval_timestamp()
-    updated = beads.update_issue_description_fields(
-        issue_id,
-        {
+    updated = _update_description_metadata_fields(
+        client=client,
+        issue_id=issue_id,
+        fields={
             "trycycle.plan_stage": "approved",
             "trycycle.approved_by": operator_id,
             "trycycle.approved_at": approved_at,
             "trycycle.approval_message_id": approval_message_id,
         },
-        beads_root=beads_root,
-        cwd=repo_root,
     )
     updated_evidence = trycycle_contract.approval_evidence_summary(updated)
     asyncio.run(
@@ -285,6 +295,59 @@ def _record_trycycle_approval(
         )
     )
     return approval_message_id
+
+
+def _issue_mapping(issue: object) -> dict[str, object]:
+    if isinstance(issue, Mapping):
+        return {str(key): value for key, value in issue.items()}
+    return {"description": _issue_text(issue, "description") or ""}
+
+
+def _render_description_with_updates(
+    description: str | None,
+    *,
+    fields: Mapping[str, str],
+) -> str:
+    existing_lines = (description or "").splitlines()
+    update_keys = tuple(fields.keys())
+    preserved_lines = [
+        line
+        for line in existing_lines
+        if not any(line.strip().startswith(f"{key}:") for key in update_keys)
+    ]
+    update_lines = [f"{key}: {value}" for key, value in fields.items()]
+    merged = [*preserved_lines, *update_lines]
+    return ("\n".join(merged).rstrip("\n") + "\n") if merged else ""
+
+
+def _update_description_metadata_fields(
+    *,
+    client: _ApprovalClient,
+    issue_id: str,
+    fields: Mapping[str, str],
+) -> dict[str, object]:
+    for _ in range(3):
+        current = asyncio.run(client.show(ShowIssueRequest(issue_id=issue_id)))
+        current_description = _issue_text(current, "description")
+        next_description = _render_description_with_updates(
+            current_description,
+            fields=fields,
+        )
+        asyncio.run(
+            client.update(
+                UpdateIssueRequest(
+                    issue_id=issue_id,
+                    description=next_description,
+                )
+            )
+        )
+        refreshed = asyncio.run(client.show(ShowIssueRequest(issue_id=issue_id)))
+        refreshed_fields = bead_fields.parse_description_fields(
+            _issue_text(refreshed, "description") or ""
+        )
+        if all(refreshed_fields.get(key) == value for key, value in fields.items()):
+            return _issue_mapping(refreshed)
+    raise RuntimeError(f"{issue_id} metadata update could not be verified")
 
 
 def main() -> None:
@@ -414,6 +477,7 @@ def main() -> None:
             if readiness.targeted:
                 _record_trycycle_approval(
                     store=store,
+                    client=client,
                     issue=issue,
                     beads_root=beads_root,
                     repo_root=repo_root,
