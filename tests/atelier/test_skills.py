@@ -204,6 +204,17 @@ def test_plan_promote_epic_skill_mentions_refined_approval_gate() -> None:
     assert "planning.approval_message_id" in text
 
 
+def test_plan_refined_deliberation_skill_mentions_strategy_challenge() -> None:
+    skill = skills.load_packaged_skills()["plan-refined-deliberation"]
+    text = skill.files["SKILL.md"].decode("utf-8")
+    assert "Strategy Challenge" in text
+    assert "low bar for changing direction" in text
+    assert "high bar for stopping to ask the user" in text
+    assert "fundamental conflict between requirements and reality" in text
+    assert "execution.strategy: refined" in text
+    assert "planning.contract_json" in text
+
+
 def test_ensure_project_skills_installs_if_missing() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp)

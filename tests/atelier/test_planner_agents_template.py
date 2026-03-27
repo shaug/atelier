@@ -61,6 +61,13 @@ def test_planner_agents_template_contains_core_sections() -> None:
     assert "concrete issue, create or update a deferred bead immediately" in content
     assert "Create or update deferred beads immediately" in content
     assert "Capture first, then ask only for decisions" in content
+    assert "Before task decomposition, run a strategy challenge:" in content
+    assert "solving the right problem" in content
+    assert "low bar for changing direction" in content
+    assert "high bar for stopping to ask the user" in content
+    assert "fundamental conflict between requirements and reality" in content
+    assert "real risk of harm if you guess" in content
+    assert "document the decision and rationale on the" in content
     assert "execution.strategy: refined" in content
     assert "planning.contract_json" in content
     assert "planning.stage: planning_in_review" in content
