@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+from atelier import trycycle_contract
 from atelier.worker import integration, work_startup_runtime
 from atelier.worker.models_boundary import parse_issue_boundary
 from atelier.worker.review import MergeConflictSelection, ReviewFeedbackSelection
@@ -309,6 +311,48 @@ def _run_startup(**overrides: Any) -> startup.StartupContractResult:
     return startup.run_startup_contract_service(context=context, service=service)
 
 
+def _valid_trycycle_contract_json() -> str:
+    return json.dumps(
+        {
+            "objective": "Gate all startup claim paths with shared trycycle checks",
+            "non_goals": ["Do not alter non-trycycle selection"],
+            "acceptance_criteria": [
+                {"statement": "Reject unapproved targeted work", "evidence": ["pytest"]}
+            ],
+            "scope": {"includes": ["worker startup"], "excludes": ["planner workflows"]},
+            "verification_plan": ["uv run pytest tests/atelier/worker/test_session_startup.py -v"],
+            "risks": [{"risk": "selection drift", "mitigation": "shared validator parity"}],
+            "escalation_conditions": ["claim-path disagreement"],
+            "completion_definition": {
+                "requires_terminal_pr_state": True,
+                "allowed_terminal_pr_states": ["merged", "closed"],
+                "allows_integrated_sha_proof": True,
+                "allow_close_without_terminal_or_integrated_sha": False,
+            },
+        },
+        separators=(",", ":"),
+    )
+
+
+def _trycycle_target_description(*, approved: bool) -> str:
+    lines = [
+        "trycycle.targeted: true",
+        f"trycycle.contract_json: {_valid_trycycle_contract_json()}",
+    ]
+    if approved:
+        lines.extend(
+            [
+                "trycycle.plan_stage: approved",
+                "trycycle.approved_by: atelier/planner/codex/p1",
+                "trycycle.approved_at: 2026-03-26T18:00:00Z",
+                "trycycle.approval_message_id: at-msg.1",
+            ]
+        )
+    else:
+        lines.append("trycycle.plan_stage: planning_in_review")
+    return "\n".join(lines) + "\n"
+
+
 def test_run_startup_contract_service_supports_typed_context() -> None:
     context, service = _startup_context_service(
         explicit_epic_id="at-explicit",
@@ -507,6 +551,63 @@ def test_run_startup_contract_explicit_merge_conflict_rejects_unapproved_trycycl
 
     assert result.reason == "explicit_epic_not_actionable"
     assert any("missing trycycle approval" in message for message in emitted)
+
+
+def test_run_startup_contract_explicit_trycycle_paths_use_shared_validator() -> None:
+    scenarios: tuple[tuple[str, bool, str], ...] = (
+        ("review", False, "explicit_epic_not_actionable"),
+        ("review", True, "review_feedback"),
+        ("conflict", False, "explicit_epic_not_actionable"),
+        ("conflict", True, "merge_conflict"),
+    )
+    for selector, approved, expected_reason in scenarios:
+        emitted: list[str] = []
+        feedback = (
+            ReviewFeedbackSelection(
+                epic_id="at-explicit",
+                changeset_id="at-explicit.1",
+                feedback_at="2026-02-20T00:00:00Z",
+            )
+            if selector == "review"
+            else None
+        )
+        conflict = (
+            MergeConflictSelection(
+                epic_id="at-explicit",
+                changeset_id="at-explicit.1",
+                observed_at="2026-02-20T00:00:00Z",
+                pr_url="https://github.com/org/repo/pull/110",
+            )
+            if selector == "conflict"
+            else None
+        )
+
+        result = _run_startup(
+            explicit_epic_id="at-explicit",
+            branch_pr=True,
+            repo_slug="org/repo",
+            show_issue=lambda issue_id: {
+                "id": issue_id,
+                "status": "open",
+                "labels": ["at:epic"] if issue_id == "at-explicit" else [],
+                "description": (
+                    _trycycle_target_description(approved=approved)
+                    if issue_id == "at-explicit.1"
+                    else ""
+                ),
+            },
+            select_conflicted_changeset=lambda **_kwargs: conflict,
+            select_review_feedback_changeset=lambda **_kwargs: feedback,
+            next_changeset=lambda **_kwargs: None,
+            trycycle_claim_eligible=trycycle_contract.trycycle_claim_eligible,
+            emit=lambda message: emitted.append(message),
+        )
+
+        assert result.reason == expected_reason
+        if not approved:
+            assert any("plan_stage=approved" in message for message in emitted)
+        else:
+            assert result.changeset_id == "at-explicit.1"
 
 
 def test_run_startup_contract_explicit_epic_completed_exits_cleanly() -> None:
@@ -1270,6 +1371,14 @@ def test_run_startup_contract_resumes_unassigned_draft_pr_review_followup() -> N
             return_value=[],
         ),
         patch(
+            "atelier.worker.work_startup_runtime.worker_store.show_issue",
+            side_effect=lambda issue_id, *, beads_root, repo_root: (
+                epic
+                if issue_id == "at-v1se7"
+                else (changeset if issue_id == "at-v1se7.1" else None)
+            ),
+        ),
+        patch(
             "atelier.worker.work_startup_runtime.select_conflicted_changeset",
             return_value=None,
         ),
@@ -1434,6 +1543,75 @@ def test_run_startup_contract_global_merge_conflict_rejects_unapproved_trycycle(
     assert result.reason == "selected_auto"
     assert result.epic_id == "at-claimable"
     assert any("missing trycycle approval" in message for message in emitted)
+
+
+def test_run_startup_contract_global_trycycle_paths_use_shared_validator() -> None:
+    scenarios: tuple[tuple[str, bool, str], ...] = (
+        ("review", False, "selected_auto"),
+        ("review", True, "review_feedback"),
+        ("conflict", False, "selected_auto"),
+        ("conflict", True, "merge_conflict"),
+    )
+    for selector, approved, expected_reason in scenarios:
+        emitted: list[str] = []
+        feedback = (
+            ReviewFeedbackSelection(
+                epic_id="at-blocked",
+                changeset_id="at-blocked.1",
+                feedback_at="2026-02-19T00:00:00Z",
+            )
+            if selector == "review"
+            else None
+        )
+        conflict = (
+            MergeConflictSelection(
+                epic_id="at-blocked",
+                changeset_id="at-blocked.1",
+                observed_at="2026-02-19T00:00:00Z",
+                pr_url="https://github.com/org/repo/pull/404",
+            )
+            if selector == "conflict"
+            else None
+        )
+
+        result = _run_startup(
+            branch_pr=True,
+            repo_slug="org/repo",
+            list_epics=lambda: [
+                {
+                    "id": "at-claimable",
+                    "status": "open",
+                    "labels": ["at:epic"],
+                    "assignee": None,
+                    "created_at": "2026-02-21T00:00:00Z",
+                }
+            ],
+            show_issue=lambda issue_id: {
+                "id": issue_id,
+                "status": "open",
+                "labels": ["at:epic"] if issue_id in {"at-blocked", "at-claimable"} else [],
+                "description": (
+                    _trycycle_target_description(approved=approved)
+                    if issue_id == "at-blocked.1"
+                    else ""
+                ),
+            },
+            next_changeset=lambda **kwargs: {"id": f"{kwargs['epic_id']}.1"},
+            select_conflicted_changeset=lambda **_kwargs: None,
+            select_global_conflicted_changeset=lambda **_kwargs: conflict,
+            select_review_feedback_changeset=lambda **_kwargs: None,
+            select_global_review_feedback_changeset=lambda **_kwargs: feedback,
+            trycycle_claim_eligible=trycycle_contract.trycycle_claim_eligible,
+            emit=lambda message: emitted.append(message),
+        )
+
+        assert result.reason == expected_reason
+        if not approved:
+            assert result.epic_id == "at-claimable"
+            assert any("plan_stage=approved" in message for message in emitted)
+        else:
+            assert result.epic_id == "at-blocked"
+            assert result.changeset_id == "at-blocked.1"
 
 
 def test_run_startup_contract_claims_global_feedback_standalone_identity() -> None:

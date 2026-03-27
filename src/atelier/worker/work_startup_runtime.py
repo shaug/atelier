@@ -170,6 +170,26 @@ def _trycycle_claim_eligibility(issue: dict[str, object]) -> tuple[bool, str | N
     return trycycle_contract.trycycle_claim_eligible(issue)
 
 
+def _hydrate_trycycle_issue_payload(
+    issue: dict[str, object],
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> dict[str, object]:
+    payload = issue
+    if not isinstance(issue.get("description"), str):
+        issue_id = issue.get("id")
+        if isinstance(issue_id, str) and issue_id.strip():
+            hydrated = worker_store.show_issue(
+                issue_id,
+                beads_root=beads_root,
+                repo_root=repo_root,
+            )
+            if hydrated is not None:
+                payload = hydrated
+    return payload
+
+
 class _NextChangesetService(worker_startup.NextChangesetService):
     """Concrete next-changeset service implementation for worker startup."""
 
@@ -285,17 +305,11 @@ class _NextChangesetService(worker_startup.NextChangesetService):
         self,
         issue: dict[str, object],
     ) -> tuple[bool, str | None]:
-        payload = issue
-        if not isinstance(issue.get("description"), str):
-            issue_id = issue.get("id")
-            if isinstance(issue_id, str) and issue_id.strip():
-                hydrated = worker_store.show_issue(
-                    issue_id,
-                    beads_root=self._beads_root,
-                    repo_root=self._repo_root,
-                )
-                if hydrated is not None:
-                    payload = hydrated
+        payload = _hydrate_trycycle_issue_payload(
+            issue,
+            beads_root=self._beads_root,
+            repo_root=self._repo_root,
+        )
         return _trycycle_claim_eligibility(payload)
 
 
@@ -939,7 +953,12 @@ class _StartupContractService(worker_startup.StartupContractService):
         self,
         issue: dict[str, object],
     ) -> tuple[bool, str | None]:
-        return _trycycle_claim_eligibility(issue)
+        payload = _hydrate_trycycle_issue_payload(
+            issue,
+            beads_root=self._beads_root,
+            repo_root=self._repo_root,
+        )
+        return _trycycle_claim_eligibility(payload)
 
     def check_inbox_before_claim(self, agent_id: str) -> bool:
         return check_inbox_before_claim(

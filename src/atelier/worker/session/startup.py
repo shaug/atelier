@@ -545,7 +545,9 @@ def run_startup_contract_service(
         changeset_id: str,
         stage: str,
     ) -> bool:
-        eligible, reason = service.trycycle_claim_eligible({"id": changeset_id})
+        issue = service.show_issue(changeset_id)
+        payload: dict[str, object] = issue if issue is not None else {"id": changeset_id}
+        eligible, reason = service.trycycle_claim_eligible(payload)
         if eligible:
             return True
         detail = reason or "targeted changeset is not trycycle claim-eligible"

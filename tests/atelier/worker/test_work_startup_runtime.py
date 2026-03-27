@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 
 from atelier.lib.beads import SyncBeadsClient
@@ -186,3 +187,57 @@ def test_startup_contract_service_trycycle_eligibility_uses_shared_helper(monkey
 
     assert (eligible, reason) == (True, None)
     assert calls == [issue]
+
+
+def test_startup_contract_service_trycycle_eligibility_hydrates_sparse_issue(
+    monkeypatch,
+) -> None:
+    contract_json = json.dumps(
+        {
+            "objective": "Gate startup candidates",
+            "non_goals": ["Do not alter non-targeted startup paths"],
+            "acceptance_criteria": [{"statement": "Reject unapproved", "evidence": ["pytest"]}],
+            "scope": {"includes": ["startup"], "excludes": ["planner workflow"]},
+            "verification_plan": ["uv run pytest tests/atelier/worker -k trycycle -v"],
+            "risks": [{"risk": "claim drift", "mitigation": "shared validator"}],
+            "escalation_conditions": ["validator mismatch"],
+            "completion_definition": {
+                "requires_terminal_pr_state": True,
+                "allowed_terminal_pr_states": ["merged", "closed"],
+                "allows_integrated_sha_proof": True,
+                "allow_close_without_terminal_or_integrated_sha": False,
+            },
+        },
+        separators=(",", ":"),
+    )
+    hydrated_issue = {
+        "id": "at-epic.1",
+        "description": (
+            "trycycle.targeted: true\n"
+            "trycycle.plan_stage: planning_in_review\n"
+            f"trycycle.contract_json: {contract_json}\n"
+        ),
+    }
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        worker_store,
+        "show_issue",
+        lambda issue_id, *, beads_root, repo_root: (
+            calls.append(f"{issue_id}|{beads_root}|{repo_root}"),
+            hydrated_issue,
+        )[1],
+    )
+
+    service = work_startup_runtime._StartupContractService(  # pyright: ignore[reportPrivateUsage]
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    eligible, reason = service.trycycle_claim_eligible({"id": "at-epic.1"})
+
+    assert (eligible, reason) == (
+        False,
+        "targeted changesets require trycycle.plan_stage=approved before worker claim",
+    )
+    assert calls == ["at-epic.1|/beads|/repo"]
