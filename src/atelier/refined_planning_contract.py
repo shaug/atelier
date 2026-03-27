@@ -13,17 +13,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from . import beads
 
 _EXECUTION_STRATEGY_FIELD = "execution.strategy"
-_LEGACY_TARGETED_FIELD = "trycycle.targeted"
 _CONTRACT_JSON_FIELD = "planning.contract_json"
-_LEGACY_CONTRACT_JSON_FIELD = "trycycle.contract_json"
 _PLAN_STAGE_FIELD = "planning.stage"
-_LEGACY_PLAN_STAGE_FIELD = "trycycle.plan_stage"
 _APPROVED_BY_FIELD = "planning.approved_by"
-_LEGACY_APPROVED_BY_FIELD = "trycycle.approved_by"
 _APPROVED_AT_FIELD = "planning.approved_at"
-_LEGACY_APPROVED_AT_FIELD = "trycycle.approved_at"
 _APPROVAL_MESSAGE_ID_FIELD = "planning.approval_message_id"
-_LEGACY_APPROVAL_MESSAGE_ID_FIELD = "trycycle.approval_message_id"
 _APPROVAL_MESSAGE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._:-]*$")
 _PLANNING_IN_REVIEW = "planning_in_review"
 _APPROVED = "approved"
@@ -156,12 +150,6 @@ class ReadinessResult(BaseModel):
     claim_blockers: tuple[str, ...]
 
     @property
-    def targeted(self) -> bool:
-        """Compatibility alias for older call sites."""
-
-        return self.refined
-
-    @property
     def summary(self) -> str:
         """Return deterministic human-readable readiness diagnostics."""
 
@@ -239,18 +227,14 @@ def evaluate_issue_refined_planning_readiness(issue: Mapping[str, object]) -> Re
     errors: list[str] = []
     claim_blockers: list[str] = []
 
-    stage_raw = _field_value(fields, primary=_PLAN_STAGE_FIELD, legacy=_LEGACY_PLAN_STAGE_FIELD)
+    stage_raw = fields.get(_PLAN_STAGE_FIELD)
     stage = _normalize_field(stage_raw)
     if stage not in {_PLANNING_IN_REVIEW, _APPROVED}:
         errors.append(
             "refined changesets require planning.stage set to 'planning_in_review' or 'approved'"
         )
 
-    contract_raw = _field_value(
-        fields,
-        primary=_CONTRACT_JSON_FIELD,
-        legacy=_LEGACY_CONTRACT_JSON_FIELD,
-    )
+    contract_raw = fields.get(_CONTRACT_JSON_FIELD)
     contract_text = contract_raw.strip() if isinstance(contract_raw, str) else ""
     contract_present = bool(contract_text)
     contract: RefinedPlanningContract | None = None
@@ -320,26 +304,10 @@ def approval_evidence_summary(issue: Mapping[str, object]) -> str:
 
     description = issue.get("description")
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
-    stage = _normalize_field(
-        _field_value(
-            fields,
-            primary=_PLAN_STAGE_FIELD,
-            legacy=_LEGACY_PLAN_STAGE_FIELD,
-        )
-    )
-    approved_by = _normalize_field(
-        _field_value(fields, primary=_APPROVED_BY_FIELD, legacy=_LEGACY_APPROVED_BY_FIELD)
-    )
-    approved_at = _normalize_field(
-        _field_value(fields, primary=_APPROVED_AT_FIELD, legacy=_LEGACY_APPROVED_AT_FIELD)
-    )
-    approval_message_id = _normalize_field(
-        _field_value(
-            fields,
-            primary=_APPROVAL_MESSAGE_ID_FIELD,
-            legacy=_LEGACY_APPROVAL_MESSAGE_ID_FIELD,
-        )
-    )
+    stage = _normalize_field(fields.get(_PLAN_STAGE_FIELD))
+    approved_by = _normalize_field(fields.get(_APPROVED_BY_FIELD))
+    approved_at = _normalize_field(fields.get(_APPROVED_AT_FIELD))
+    approval_message_id = _normalize_field(fields.get(_APPROVAL_MESSAGE_ID_FIELD))
     parts = [
         f"stage={stage or '(missing)'}",
         f"approved_by={approved_by or '(missing)'}",
@@ -351,25 +319,7 @@ def approval_evidence_summary(issue: Mapping[str, object]) -> str:
 
 def _is_refined_strategy(fields: Mapping[str, str]) -> bool:
     strategy = _normalize_field(fields.get(_EXECUTION_STRATEGY_FIELD))
-    if strategy == _REFINED_STRATEGY:
-        return True
-    legacy_targeted = _normalize_field(fields.get(_LEGACY_TARGETED_FIELD))
-    return legacy_targeted in {"1", "true", "yes", "on"}
-
-
-def _field_value(
-    fields: Mapping[str, str],
-    *,
-    primary: str,
-    legacy: str,
-) -> str | None:
-    primary_value = fields.get(primary)
-    if isinstance(primary_value, str) and primary_value.strip():
-        return primary_value
-    legacy_value = fields.get(legacy)
-    if isinstance(legacy_value, str) and legacy_value.strip():
-        return legacy_value
-    return None
+    return strategy == _REFINED_STRATEGY
 
 
 def _normalize_field(raw: str | None) -> str | None:
@@ -383,25 +333,15 @@ def _normalize_field(raw: str | None) -> str | None:
 
 def _approval_errors(fields: Mapping[str, str]) -> list[str]:
     errors: list[str] = []
-    approved_by = _normalize_field(
-        _field_value(fields, primary=_APPROVED_BY_FIELD, legacy=_LEGACY_APPROVED_BY_FIELD)
-    )
+    approved_by = _normalize_field(fields.get(_APPROVED_BY_FIELD))
     if approved_by is None:
         errors.append("approved stage requires planning.approved_by")
-    approved_at_raw = _normalize_field(
-        _field_value(fields, primary=_APPROVED_AT_FIELD, legacy=_LEGACY_APPROVED_AT_FIELD)
-    )
+    approved_at_raw = _normalize_field(fields.get(_APPROVED_AT_FIELD))
     if approved_at_raw is None:
         errors.append("approved stage requires planning.approved_at")
     elif not _is_valid_iso_timestamp(approved_at_raw):
         errors.append("planning.approved_at must be an ISO-8601 timestamp")
-    approval_message_id = _normalize_field(
-        _field_value(
-            fields,
-            primary=_APPROVAL_MESSAGE_ID_FIELD,
-            legacy=_LEGACY_APPROVAL_MESSAGE_ID_FIELD,
-        )
-    )
+    approval_message_id = _normalize_field(fields.get(_APPROVAL_MESSAGE_ID_FIELD))
     if approval_message_id is None:
         errors.append("approved stage requires planning.approval_message_id")
     elif not _APPROVAL_MESSAGE_ID_PATTERN.fullmatch(approval_message_id):

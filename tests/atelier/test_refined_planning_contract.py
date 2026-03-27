@@ -137,6 +137,24 @@ def test_validate_contract_accepts_complete_payload() -> None:
     )
 
 
+def test_validate_contract_ignores_legacy_trycycle_fields() -> None:
+    issue = {
+        "description": (
+            "trycycle.targeted: true\n"
+            "trycycle.plan_stage: planning_in_review\n"
+            f"trycycle.contract_json: {_valid_contract_json()}\n"
+        )
+    }
+
+    result = refined_planning_contract.evaluate_issue_refined_planning_readiness(issue)
+
+    assert result.ok is True
+    assert result.refined is False
+    assert result.claim_eligible is True
+    assert result.errors == ()
+    assert result.claim_blockers == ()
+
+
 def test_validate_contract_rejects_malformed_json() -> None:
     issue = {
         "description": (
