@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 
 from atelier.lib.beads import SyncBeadsClient
@@ -146,3 +147,123 @@ def test_startup_contract_service_updates_integrated_sha_via_store_adapter(monke
     service.update_changeset_integrated_sha("at-epic.1", "abc1234")
 
     assert calls == [("at-epic.1", "abc1234", Path("/beads"), Path("/repo"), True)]
+
+
+def test_next_changeset_service_refined_eligibility_uses_shared_helper(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+    issue = {"id": "at-epic.1", "description": "execution.strategy: refined"}
+
+    monkeypatch.setattr(
+        work_startup_runtime,
+        "_refined_planning_claim_eligibility",
+        lambda candidate: (calls.append(candidate), (False, "blocked"))[1],
+    )
+    service = work_startup_runtime._NextChangesetService(  # pyright: ignore[reportPrivateUsage]
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    eligible, reason = service.refined_planning_claim_eligible(issue)
+
+    assert (eligible, reason) == (False, "blocked")
+    assert calls == [issue]
+
+
+def test_startup_contract_service_refined_eligibility_uses_shared_helper(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+    issue = {"id": "at-epic.1", "description": "execution.strategy: refined"}
+
+    monkeypatch.setattr(
+        work_startup_runtime,
+        "_refined_planning_claim_eligibility",
+        lambda candidate: (calls.append(candidate), (True, None))[1],
+    )
+    service = work_startup_runtime._StartupContractService(  # pyright: ignore[reportPrivateUsage]
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    eligible, reason = service.refined_planning_claim_eligible(issue)
+
+    assert (eligible, reason) == (True, None)
+    assert calls == [issue]
+
+
+def test_startup_contract_service_refined_eligibility_hydrates_sparse_issue(
+    monkeypatch,
+) -> None:
+    contract_json = json.dumps(
+        {
+            "objective": "Gate startup candidates",
+            "non_goals": ["Do not alter non-targeted startup paths"],
+            "acceptance_criteria": [{"statement": "Reject unapproved", "evidence": ["pytest"]}],
+            "scope": {"includes": ["startup"], "excludes": ["planner workflow"]},
+            "verification_plan": ["uv run pytest tests/atelier/worker -k refined -v"],
+            "risks": [{"risk": "claim drift", "mitigation": "shared validator"}],
+            "escalation_conditions": ["validator mismatch"],
+            "completion_definition": {
+                "requires_terminal_pr_state": True,
+                "allowed_terminal_pr_states": ["merged", "closed"],
+                "allows_integrated_sha_proof": True,
+                "allow_close_without_terminal_or_integrated_sha": False,
+            },
+        },
+        separators=(",", ":"),
+    )
+    hydrated_issue = {
+        "id": "at-epic.1",
+        "description": (
+            "execution.strategy: refined\n"
+            "planning.stage: planning_in_review\n"
+            f"planning.contract_json: {contract_json}\n"
+        ),
+    }
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        worker_store,
+        "show_issue",
+        lambda issue_id, *, beads_root, repo_root: (
+            calls.append(f"{issue_id}|{beads_root}|{repo_root}"),
+            hydrated_issue,
+        )[1],
+    )
+
+    service = work_startup_runtime._StartupContractService(  # pyright: ignore[reportPrivateUsage]
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    eligible, reason = service.refined_planning_claim_eligible({"id": "at-epic.1"})
+
+    assert (eligible, reason) == (
+        False,
+        "refined changesets require planning.stage=approved before worker claim",
+    )
+    assert calls == ["at-epic.1|/beads|/repo"]
+
+
+def test_startup_contract_service_refined_eligibility_fails_closed_when_hydration_missing(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        worker_store,
+        "show_issue",
+        lambda issue_id, *, beads_root, repo_root: (
+            calls.append(f"{issue_id}|{beads_root}|{repo_root}"),
+            None,
+        )[1],
+    )
+    service = work_startup_runtime._StartupContractService(  # pyright: ignore[reportPrivateUsage]
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    eligible, reason = service.refined_planning_claim_eligible({"id": "at-missing.1"})
+
+    assert (eligible, reason) == (
+        False,
+        "unable to load changeset metadata for refined claim gate",
+    )
+    assert calls == ["at-missing.1|/beads|/repo"]

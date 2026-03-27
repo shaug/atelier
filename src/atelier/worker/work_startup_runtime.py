@@ -6,7 +6,7 @@ import datetime as dt
 from collections.abc import Callable
 from pathlib import Path
 
-from .. import agent_home, beads, changeset_fields, prs, work_feedback
+from .. import agent_home, beads, changeset_fields, prs, refined_planning_contract, work_feedback
 from ..io import die, prompt, say, select
 from ..work_feedback import ReviewFeedbackSnapshot
 from ..worker import prompts as worker_prompts
@@ -166,6 +166,31 @@ def startup_finalize_preflight(
     )
 
 
+def _refined_planning_claim_eligibility(issue: dict[str, object]) -> tuple[bool, str | None]:
+    return refined_planning_contract.refined_planning_claim_eligible(issue)
+
+
+def _hydrate_refined_planning_issue_payload(
+    issue: dict[str, object],
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> dict[str, object] | None:
+    if isinstance(issue.get("description"), str):
+        return issue
+    issue_id = issue.get("id")
+    if not isinstance(issue_id, str) or not issue_id.strip():
+        return None
+    hydrated = worker_store.show_issue(
+        issue_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
+    if hydrated is None or not isinstance(hydrated.get("description"), str):
+        return None
+    return hydrated
+
+
 class _NextChangesetService(worker_startup.NextChangesetService):
     """Concrete next-changeset service implementation for worker startup."""
 
@@ -276,6 +301,19 @@ class _NextChangesetService(worker_startup.NextChangesetService):
 
     def is_changeset_in_progress(self, issue: dict[str, object]) -> bool:
         return is_changeset_in_progress(issue)
+
+    def refined_planning_claim_eligible(
+        self,
+        issue: dict[str, object],
+    ) -> tuple[bool, str | None]:
+        payload = _hydrate_refined_planning_issue_payload(
+            issue,
+            beads_root=self._beads_root,
+            repo_root=self._repo_root,
+        )
+        if payload is None:
+            return False, "unable to load changeset metadata for refined claim gate"
+        return _refined_planning_claim_eligibility(payload)
 
 
 def _no_eligible_epics_summary(
@@ -913,6 +951,19 @@ class _StartupContractService(worker_startup.StartupContractService):
         self, *, repo_slug: str | None
     ) -> ReviewFeedbackSelection | None:
         return self._global_startup_candidates(repo_slug=repo_slug).feedback
+
+    def refined_planning_claim_eligible(
+        self,
+        issue: dict[str, object],
+    ) -> tuple[bool, str | None]:
+        payload = _hydrate_refined_planning_issue_payload(
+            issue,
+            beads_root=self._beads_root,
+            repo_root=self._repo_root,
+        )
+        if payload is None:
+            return False, "unable to load changeset metadata for refined claim gate"
+        return _refined_planning_claim_eligibility(payload)
 
     def check_inbox_before_claim(self, agent_id: str) -> bool:
         return check_inbox_before_claim(

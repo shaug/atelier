@@ -10,6 +10,9 @@ description: >-
 When a concrete issue is identified, capture it as a deferred epic immediately.
 Do not request approval to create or edit deferred beads.
 
+Use the shared planning discipline from `plan-refined-deliberation`. Use the
+same drafting strategy for all planning passes.
+
 ## Inputs
 
 - title: Epic title.

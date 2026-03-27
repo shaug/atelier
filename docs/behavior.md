@@ -133,6 +133,24 @@ documented in `docs/beads-prefix-migration.md`.
 Repository-local Beads stores (for example `<repo>/.beads`) are not used for
 Atelier planning state. They are treated as external ticket sources.
 
+## Refined Planning Readiness Contract
+
+- A changeset is refined only when metadata includes
+  `execution.strategy: refined`.
+- Refined changesets must include a typed `planning.contract_json` payload.
+- Planner guardrails fail closed when refined contract data is missing,
+  malformed, or conflicts with finalize semantics.
+- Refined planning remains in review with `planning.stage: planning_in_review`
+  until operator approval.
+- Promotion approval persists auditable metadata: `planning.stage=approved`,
+  `planning.approved_by`, `planning.approved_at`, and
+  `planning.approval_message_id`.
+- Worker startup applies the same shared validator across next-changeset,
+  explicit review-feedback, merge-conflict, and global selector paths.
+- Startup claim selection fails closed for refined changesets that are not
+  approved or have invalid contract evidence.
+- Non-refined changesets keep existing startup/promotion behavior.
+
 ## Command behavior (high level)
 
 - `atelier init`

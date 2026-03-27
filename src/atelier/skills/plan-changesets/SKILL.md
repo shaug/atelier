@@ -10,6 +10,9 @@ Only use this when an epic should be decomposed. If the epic itself is already
 within guardrails, keep the epic as the executable changeset instead of creating
 children.
 
+Use the shared planning discipline from `plan-refined-deliberation`. Use the
+same drafting strategy for all planning passes.
+
 Capture new executable work immediately as deferred changesets
 (`status=deferred`) when issues are actionable. Do not wait for approval to
 create/edit deferred work.

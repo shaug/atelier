@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+from atelier import refined_planning_contract
 from atelier.worker import integration, work_startup_runtime
 from atelier.worker.models_boundary import parse_issue_boundary
 from atelier.worker.review import MergeConflictSelection, ReviewFeedbackSelection
@@ -68,6 +70,9 @@ class FakeStartupService:
         )
         self._select_global_review_feedback_changeset = overrides.pop(
             "select_global_review_feedback_changeset", lambda **_kwargs: None
+        )
+        self._refined_planning_claim_eligible = overrides.pop(
+            "refined_planning_claim_eligible", lambda _issue: (True, None)
         )
         self._check_inbox_before_claim = overrides.pop(
             "check_inbox_before_claim", lambda *_args: False
@@ -217,6 +222,12 @@ class FakeStartupService:
     ) -> ReviewFeedbackSelection | None:
         return self._select_global_review_feedback_changeset(repo_slug=repo_slug)
 
+    def refined_planning_claim_eligible(
+        self,
+        issue: dict[str, object],
+    ) -> tuple[bool, str | None]:
+        return self._refined_planning_claim_eligible(issue)
+
     def check_inbox_before_claim(self, agent_id: str) -> bool:
         return self._check_inbox_before_claim(agent_id)
 
@@ -298,6 +309,48 @@ def _startup_context_service(
 def _run_startup(**overrides: Any) -> startup.StartupContractResult:
     context, service = _startup_context_service(**overrides)
     return startup.run_startup_contract_service(context=context, service=service)
+
+
+def _valid_refined_contract_json() -> str:
+    return json.dumps(
+        {
+            "objective": "Gate all startup claim paths with shared refined checks",
+            "non_goals": ["Do not alter non-refined selection"],
+            "acceptance_criteria": [
+                {"statement": "Reject unapproved targeted work", "evidence": ["pytest"]}
+            ],
+            "scope": {"includes": ["worker startup"], "excludes": ["planner workflows"]},
+            "verification_plan": ["uv run pytest tests/atelier/worker/test_session_startup.py -v"],
+            "risks": [{"risk": "selection drift", "mitigation": "shared validator parity"}],
+            "escalation_conditions": ["claim-path disagreement"],
+            "completion_definition": {
+                "requires_terminal_pr_state": True,
+                "allowed_terminal_pr_states": ["merged", "closed"],
+                "allows_integrated_sha_proof": True,
+                "allow_close_without_terminal_or_integrated_sha": False,
+            },
+        },
+        separators=(",", ":"),
+    )
+
+
+def _refined_target_description(*, approved: bool) -> str:
+    lines = [
+        "execution.strategy: refined",
+        f"planning.contract_json: {_valid_refined_contract_json()}",
+    ]
+    if approved:
+        lines.extend(
+            [
+                "planning.stage: approved",
+                "planning.approved_by: atelier/planner/codex/p1",
+                "planning.approved_at: 2026-03-26T18:00:00Z",
+                "planning.approval_message_id: at-msg.1",
+            ]
+        )
+    else:
+        lines.append("planning.stage: planning_in_review")
+    return "\n".join(lines) + "\n"
 
 
 def test_run_startup_contract_service_supports_typed_context() -> None:
@@ -410,6 +463,179 @@ def test_run_startup_contract_explicit_epic_prioritizes_merge_conflict() -> None
     assert result.reason == "merge_conflict"
     assert result.epic_id == "at-explicit"
     assert result.changeset_id == "at-explicit"
+
+
+def test_run_startup_contract_explicit_epic_rejects_unapproved_refined_next_changeset() -> None:
+    emitted: list[str] = []
+
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id == "at-explicit" else [],
+            "issue_type": "task" if issue_id != "at-explicit" else "epic",
+        },
+        next_changeset=lambda **_kwargs: {"id": "at-explicit.1", "status": "open", "labels": []},
+        refined_planning_claim_eligible=lambda issue: (
+            (False, "missing refined approval")
+            if issue.get("id") == "at-explicit.1"
+            else (True, None)
+        ),
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.should_exit is True
+    assert result.reason == "explicit_epic_not_actionable"
+    assert any("missing refined approval" in message for message in emitted)
+
+
+def test_run_startup_contract_explicit_review_feedback_rejects_unapproved_refined() -> None:
+    feedback = ReviewFeedbackSelection(
+        epic_id="at-explicit",
+        changeset_id="at-explicit.1",
+        feedback_at="2026-02-20T00:00:00Z",
+    )
+    emitted: list[str] = []
+
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        branch_pr=True,
+        repo_slug="org/repo",
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id == "at-explicit" else [],
+        },
+        select_review_feedback_changeset=lambda **_kwargs: feedback,
+        next_changeset=lambda **_kwargs: None,
+        refined_planning_claim_eligible=lambda issue: (
+            (False, "missing refined approval")
+            if issue.get("id") == "at-explicit.1"
+            else (True, None)
+        ),
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.reason == "explicit_epic_not_actionable"
+    assert any("missing refined approval" in message for message in emitted)
+
+
+def test_run_startup_contract_explicit_review_feedback_fails_closed_on_missing_metadata() -> None:
+    feedback = ReviewFeedbackSelection(
+        epic_id="at-explicit",
+        changeset_id="at-explicit.1",
+        feedback_at="2026-02-20T00:00:00Z",
+    )
+    emitted: list[str] = []
+
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        branch_pr=True,
+        repo_slug="org/repo",
+        show_issue=lambda issue_id: (
+            {"id": issue_id, "status": "open", "labels": ["at:epic"]}
+            if issue_id == "at-explicit"
+            else None
+        ),
+        select_review_feedback_changeset=lambda **_kwargs: feedback,
+        next_changeset=lambda **_kwargs: None,
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.reason == "explicit_epic_not_actionable"
+    assert any(
+        "unable to load changeset metadata for refined claim gate" in message for message in emitted
+    )
+
+
+def test_run_startup_contract_explicit_merge_conflict_rejects_unapproved_refined() -> None:
+    conflict = MergeConflictSelection(
+        epic_id="at-explicit",
+        changeset_id="at-explicit.1",
+        observed_at="2026-02-20T00:00:00Z",
+        pr_url="https://github.com/org/repo/pull/110",
+    )
+    emitted: list[str] = []
+
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        branch_pr=True,
+        repo_slug="org/repo",
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id == "at-explicit" else [],
+        },
+        select_conflicted_changeset=lambda **_kwargs: conflict,
+        next_changeset=lambda **_kwargs: None,
+        refined_planning_claim_eligible=lambda issue: (
+            (False, "missing refined approval")
+            if issue.get("id") == "at-explicit.1"
+            else (True, None)
+        ),
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.reason == "explicit_epic_not_actionable"
+    assert any("missing refined approval" in message for message in emitted)
+
+
+def test_run_startup_contract_explicit_refined_paths_use_shared_validator() -> None:
+    scenarios: tuple[tuple[str, bool, str], ...] = (
+        ("review", False, "explicit_epic_not_actionable"),
+        ("review", True, "review_feedback"),
+        ("conflict", False, "explicit_epic_not_actionable"),
+        ("conflict", True, "merge_conflict"),
+    )
+    for selector, approved, expected_reason in scenarios:
+        emitted: list[str] = []
+        feedback = (
+            ReviewFeedbackSelection(
+                epic_id="at-explicit",
+                changeset_id="at-explicit.1",
+                feedback_at="2026-02-20T00:00:00Z",
+            )
+            if selector == "review"
+            else None
+        )
+        conflict = (
+            MergeConflictSelection(
+                epic_id="at-explicit",
+                changeset_id="at-explicit.1",
+                observed_at="2026-02-20T00:00:00Z",
+                pr_url="https://github.com/org/repo/pull/110",
+            )
+            if selector == "conflict"
+            else None
+        )
+
+        result = _run_startup(
+            explicit_epic_id="at-explicit",
+            branch_pr=True,
+            repo_slug="org/repo",
+            show_issue=lambda issue_id: {
+                "id": issue_id,
+                "status": "open",
+                "labels": ["at:epic"] if issue_id == "at-explicit" else [],
+                "description": (
+                    _refined_target_description(approved=approved)
+                    if issue_id == "at-explicit.1"
+                    else ""
+                ),
+            },
+            select_conflicted_changeset=lambda **_kwargs: conflict,
+            select_review_feedback_changeset=lambda **_kwargs: feedback,
+            next_changeset=lambda **_kwargs: None,
+            refined_planning_claim_eligible=refined_planning_contract.refined_planning_claim_eligible,
+            emit=lambda message: emitted.append(message),
+        )
+
+        assert result.reason == expected_reason
+        if not approved:
+            assert any("planning.stage=approved" in message for message in emitted)
+        else:
+            assert result.changeset_id == "at-explicit.1"
 
 
 def test_run_startup_contract_explicit_epic_completed_exits_cleanly() -> None:
@@ -775,6 +1001,12 @@ def test_run_startup_contract_prioritizes_review_feedback() -> None:
         branch_pr=True,
         repo_slug="org/repo",
         resolve_hooked_epic=lambda *_args: "at-epic",
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id == "at-epic" else [],
+            "description": "",
+        },
         select_review_feedback_changeset=lambda **_kwargs: feedback,
         next_changeset=next_changeset,
         list_epics=lambda: [
@@ -901,6 +1133,12 @@ def test_run_startup_contract_first_eligible_short_circuits_review_feedback() ->
         select="first-eligible",
         branch_pr=True,
         repo_slug="org/repo",
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id in {"at-early", "at-oldest"} else [],
+            "description": "",
+        },
         list_epics=lambda: [
             {
                 "id": "at-early",
@@ -952,6 +1190,12 @@ def test_run_startup_contract_oldest_feedback_scans_for_global_oldest() -> None:
         select="oldest-feedback",
         branch_pr=True,
         repo_slug="org/repo",
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id in {"at-early", "at-oldest"} else [],
+            "description": "",
+        },
         list_epics=lambda: [
             {
                 "id": "at-early",
@@ -995,6 +1239,12 @@ def test_run_startup_contract_prioritizes_merge_conflict() -> None:
         branch_pr=True,
         repo_slug="org/repo",
         resolve_hooked_epic=lambda *_args: "at-epic",
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id == "at-epic" else [],
+            "description": "",
+        },
         select_conflicted_changeset=lambda **_kwargs: conflict,
         next_changeset=next_changeset,
         list_epics=lambda: [{"id": "at-epic", "assignee": "atelier/worker/codex/p010"}],
@@ -1031,6 +1281,12 @@ def test_run_startup_contract_skips_non_claimable_review_feedback_epic() -> None
     result = _run_startup(
         branch_pr=True,
         repo_slug="org/repo",
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id in {"at-blocked", "at-claimable"} else [],
+            "description": "",
+        },
         list_epics=lambda: [
             {
                 "id": "at-blocked",
@@ -1116,6 +1372,12 @@ def test_run_startup_contract_selects_stale_reclaimable_review_feedback() -> Non
     result = _run_startup(
         branch_pr=True,
         repo_slug="org/repo",
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id == "at-stale" else [],
+            "description": "",
+        },
         list_epics=lambda: [stale_issue],
         stale_family_assigned_epics=lambda _issues, agent_id: [stale_issue],
         next_changeset=lambda **_kwargs: {"id": "at-stale.2"},
@@ -1171,6 +1433,14 @@ def test_run_startup_contract_resumes_unassigned_draft_pr_review_followup() -> N
         patch(
             "atelier.worker.work_startup_runtime.worker_selection.stale_family_assigned_epics",
             return_value=[],
+        ),
+        patch(
+            "atelier.worker.work_startup_runtime.worker_store.show_issue",
+            side_effect=lambda issue_id, *, beads_root, repo_root: (
+                epic
+                if issue_id == "at-v1se7"
+                else (changeset if issue_id == "at-v1se7.1" else None)
+            ),
         ),
         patch(
             "atelier.worker.work_startup_runtime.select_conflicted_changeset",
@@ -1254,6 +1524,158 @@ def test_run_startup_contract_skips_unclaimable_global_review_feedback() -> None
 
     assert result.reason == "selected_auto"
     assert result.epic_id == "at-claimable"
+
+
+def test_run_startup_contract_global_review_feedback_rejects_unapproved_refined() -> None:
+    blocked_feedback = ReviewFeedbackSelection(
+        epic_id="at-blocked",
+        changeset_id="at-blocked.1",
+        feedback_at="2026-02-19T00:00:00Z",
+    )
+    emitted: list[str] = []
+
+    result = _run_startup(
+        branch_pr=True,
+        repo_slug="org/repo",
+        list_epics=lambda: [
+            {
+                "id": "at-claimable",
+                "status": "open",
+                "labels": ["at:epic"],
+                "assignee": None,
+                "created_at": "2026-02-21T00:00:00Z",
+            }
+        ],
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id == "at-blocked" else [],
+        },
+        next_changeset=lambda **kwargs: {"id": f"{kwargs['epic_id']}.1"},
+        select_review_feedback_changeset=lambda **_kwargs: None,
+        select_global_review_feedback_changeset=lambda **_kwargs: blocked_feedback,
+        refined_planning_claim_eligible=lambda issue: (
+            (False, "missing refined approval")
+            if issue.get("id") == "at-blocked.1"
+            else (True, None)
+        ),
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.reason == "selected_auto"
+    assert result.epic_id == "at-claimable"
+    assert any("missing refined approval" in message for message in emitted)
+
+
+def test_run_startup_contract_global_merge_conflict_rejects_unapproved_refined() -> None:
+    blocked_conflict = MergeConflictSelection(
+        epic_id="at-blocked",
+        changeset_id="at-blocked.1",
+        observed_at="2026-02-19T00:00:00Z",
+        pr_url="https://github.com/org/repo/pull/404",
+    )
+    emitted: list[str] = []
+
+    result = _run_startup(
+        branch_pr=True,
+        repo_slug="org/repo",
+        list_epics=lambda: [
+            {
+                "id": "at-claimable",
+                "status": "open",
+                "labels": ["at:epic"],
+                "assignee": None,
+                "created_at": "2026-02-21T00:00:00Z",
+            }
+        ],
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id == "at-blocked" else [],
+        },
+        next_changeset=lambda **kwargs: {"id": f"{kwargs['epic_id']}.1"},
+        select_conflicted_changeset=lambda **_kwargs: None,
+        select_global_conflicted_changeset=lambda **_kwargs: blocked_conflict,
+        refined_planning_claim_eligible=lambda issue: (
+            (False, "missing refined approval")
+            if issue.get("id") == "at-blocked.1"
+            else (True, None)
+        ),
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.reason == "selected_auto"
+    assert result.epic_id == "at-claimable"
+    assert any("missing refined approval" in message for message in emitted)
+
+
+def test_run_startup_contract_global_refined_paths_use_shared_validator() -> None:
+    scenarios: tuple[tuple[str, bool, str], ...] = (
+        ("review", False, "selected_auto"),
+        ("review", True, "review_feedback"),
+        ("conflict", False, "selected_auto"),
+        ("conflict", True, "merge_conflict"),
+    )
+    for selector, approved, expected_reason in scenarios:
+        emitted: list[str] = []
+        feedback = (
+            ReviewFeedbackSelection(
+                epic_id="at-blocked",
+                changeset_id="at-blocked.1",
+                feedback_at="2026-02-19T00:00:00Z",
+            )
+            if selector == "review"
+            else None
+        )
+        conflict = (
+            MergeConflictSelection(
+                epic_id="at-blocked",
+                changeset_id="at-blocked.1",
+                observed_at="2026-02-19T00:00:00Z",
+                pr_url="https://github.com/org/repo/pull/404",
+            )
+            if selector == "conflict"
+            else None
+        )
+
+        result = _run_startup(
+            branch_pr=True,
+            repo_slug="org/repo",
+            list_epics=lambda: [
+                {
+                    "id": "at-claimable",
+                    "status": "open",
+                    "labels": ["at:epic"],
+                    "assignee": None,
+                    "created_at": "2026-02-21T00:00:00Z",
+                }
+            ],
+            show_issue=lambda issue_id: {
+                "id": issue_id,
+                "status": "open",
+                "labels": ["at:epic"] if issue_id in {"at-blocked", "at-claimable"} else [],
+                "description": (
+                    _refined_target_description(approved=approved)
+                    if issue_id == "at-blocked.1"
+                    else ""
+                ),
+            },
+            next_changeset=lambda **kwargs: {"id": f"{kwargs['epic_id']}.1"},
+            select_conflicted_changeset=lambda **_kwargs: None,
+            select_global_conflicted_changeset=lambda **_kwargs: conflict,
+            select_review_feedback_changeset=lambda **_kwargs: None,
+            select_global_review_feedback_changeset=lambda **_kwargs: feedback,
+            refined_planning_claim_eligible=refined_planning_contract.refined_planning_claim_eligible,
+            emit=lambda message: emitted.append(message),
+        )
+
+        assert result.reason == expected_reason
+        if not approved:
+            assert result.epic_id == "at-claimable"
+            assert any("planning.stage=approved" in message for message in emitted)
+        else:
+            assert result.epic_id == "at-blocked"
+            assert result.changeset_id == "at-blocked.1"
 
 
 def test_run_startup_contract_claims_global_feedback_standalone_identity() -> None:

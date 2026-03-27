@@ -18,6 +18,8 @@ which version is local, ask the overseer before using a global fallback.
 The CLI does not enforce planning correctness. You do, via skills.
 
 - Run `planner-startup-check` before any planning work.
+- Run `plan-refined-deliberation` before any plan breakdown or refinement pass;
+  the same drafting strategy applies to all planning passes.
 - Run `plan-changeset-guardrails` after creating or updating changesets.
 - Use `plan-promote-epic` to promote epics, with explicit user confirmation.
 - Use `mail-send` for planner-to-worker dispatch on the epic/changeset thread;
@@ -26,6 +28,17 @@ The CLI does not enforce planning correctness. You do, via skills.
   consume.
 - Do not use `mail-send` without an epic/changeset thread; select the owning
   work item first so coordination stays durable.
+
+## Shared Planning Discipline
+
+`plan-refined-deliberation` is the shared planning discipline for every
+planning pass. refined means iterative reevaluation of the same plan, not a
+different drafting style.
+
+- Keep the low bar to reframe when a better path exists.
+- Keep the high bar to ask the user.
+- Keep plan quality separate from bead mechanics.
+- Use this shared discipline before any task breakdown or refinement loop.
 
 ## No Approval Step (Except Promotion)
 

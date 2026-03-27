@@ -5,8 +5,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import datetime as dt
+import os
 import sys
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Protocol
 
 _SHARED_SCRIPTS_ROOT = Path(__file__).resolve().parents[2] / "shared" / "scripts"
 if str(_SHARED_SCRIPTS_ROOT) not in sys.path:
@@ -22,11 +26,30 @@ bootstrap_projected_atelier_script(
     require_runtime_health=__name__ == "__main__",
 )
 
+from atelier import refined_planning_contract  # noqa: E402
 from atelier.beads_context import (  # noqa: E402
     resolve_runtime_repo_dir_hint,
     resolve_skill_beads_context,
 )
+from atelier.lib.beads import ShowIssueRequest, UpdateIssueRequest  # noqa: E402
 from atelier.lib.beads import description_fields as bead_fields  # noqa: E402
+from atelier.store import AppendNotesRequest, CreateMessageRequest  # noqa: E402
+
+
+class _ApprovalStore(Protocol):
+    """Minimal typed boundary for refined approval persistence helpers."""
+
+    async def create_message(self, request: CreateMessageRequest) -> object: ...
+
+    async def append_notes(self, request: AppendNotesRequest) -> object: ...
+
+
+class _ApprovalClient(Protocol):
+    """Typed client boundary for description-field persistence."""
+
+    async def show(self, request: ShowIssueRequest) -> object: ...
+
+    async def update(self, request: UpdateIssueRequest) -> object: ...
 
 
 def _build_store_and_client(*, beads_root: Path, repo_root: Path):
@@ -188,6 +211,153 @@ def _render_issue_preview(*, header: str, issue: object) -> str:
     return "\n".join(lines)
 
 
+def _issue_metadata_payload(issue: object) -> dict[str, object]:
+    return {
+        "id": _issue_text(issue, "id") or "",
+        "description": _issue_text(issue, "description") or "",
+    }
+
+
+def _refined_validation_error(issue: object) -> str | None:
+    issue_id = _issue_text(issue, "id") or "(issue)"
+    readiness = refined_planning_contract.evaluate_issue_refined_planning_readiness(
+        _issue_metadata_payload(issue)
+    )
+    if readiness.refined and not readiness.ok:
+        return f"{issue_id} refined readiness failed: {readiness.summary}"
+    return None
+
+
+def _issue_thread_kind(issue_id: str):
+    from atelier.store import MessageThreadKind
+
+    return MessageThreadKind.CHANGESET if "." in issue_id else MessageThreadKind.EPIC
+
+
+def _approval_timestamp() -> str:
+    return (
+        dt.datetime.now(tz=dt.timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def _required_operator_id() -> str:
+    operator_id = str(os.environ.get("ATELIER_AGENT_ID") or "").strip()
+    if not operator_id:
+        raise RuntimeError("ATELIER_AGENT_ID must be set for refined approvals")
+    return operator_id
+
+
+def _record_refined_approval(
+    *,
+    store: _ApprovalStore,
+    client: _ApprovalClient,
+    issue: object,
+    beads_root: Path,
+    repo_root: Path,
+    operator_id: str,
+) -> str:
+    issue_id = _issue_text(issue, "id")
+    if issue_id is None:
+        raise RuntimeError("refined issue is missing id")
+
+    issue_payload = _issue_metadata_payload(issue)
+    evidence = refined_planning_contract.approval_evidence_summary(issue_payload)
+    message = asyncio.run(
+        store.create_message(
+            CreateMessageRequest(
+                title=f"Refined approval: {issue_id}",
+                body=(
+                    f"Operator {operator_id} approved refined promotion for {issue_id}.\n{evidence}"
+                ),
+                sender=operator_id,
+                thread_id=issue_id,
+                thread_kind=_issue_thread_kind(issue_id),
+            )
+        )
+    )
+    approval_message_id = str(getattr(message, "id", "")).strip()
+    if not approval_message_id:
+        raise RuntimeError(f"{issue_id} refined approval message id missing")
+
+    approved_at = _approval_timestamp()
+    updated = _update_description_metadata_fields(
+        client=client,
+        issue_id=issue_id,
+        fields={
+            "planning.stage": "approved",
+            "planning.approved_by": operator_id,
+            "planning.approved_at": approved_at,
+            "planning.approval_message_id": approval_message_id,
+        },
+    )
+    updated_evidence = refined_planning_contract.approval_evidence_summary(updated)
+    asyncio.run(
+        store.append_notes(
+            AppendNotesRequest(
+                issue_id=issue_id,
+                notes=(f"Refined approval recorded. {updated_evidence}",),
+            )
+        )
+    )
+    return approval_message_id
+
+
+def _issue_mapping(issue: object) -> dict[str, object]:
+    if isinstance(issue, Mapping):
+        return {str(key): value for key, value in issue.items()}
+    return {"description": _issue_text(issue, "description") or ""}
+
+
+def _render_description_with_updates(
+    description: str | None,
+    *,
+    fields: Mapping[str, str],
+) -> str:
+    existing_lines = (description or "").splitlines()
+    update_keys = tuple(fields.keys())
+    preserved_lines = [
+        line
+        for line in existing_lines
+        if not any(line.strip().startswith(f"{key}:") for key in update_keys)
+    ]
+    update_lines = [f"{key}: {value}" for key, value in fields.items()]
+    merged = [*preserved_lines, *update_lines]
+    return ("\n".join(merged).rstrip("\n") + "\n") if merged else ""
+
+
+def _update_description_metadata_fields(
+    *,
+    client: _ApprovalClient,
+    issue_id: str,
+    fields: Mapping[str, str],
+) -> dict[str, object]:
+    for _ in range(3):
+        current = asyncio.run(client.show(ShowIssueRequest(issue_id=issue_id)))
+        current_description = _issue_text(current, "description")
+        next_description = _render_description_with_updates(
+            current_description,
+            fields=fields,
+        )
+        asyncio.run(
+            client.update(
+                UpdateIssueRequest(
+                    issue_id=issue_id,
+                    description=next_description,
+                )
+            )
+        )
+        refreshed = asyncio.run(client.show(ShowIssueRequest(issue_id=issue_id)))
+        refreshed_fields = bead_fields.parse_description_fields(
+            _issue_text(refreshed, "description") or ""
+        )
+        if all(refreshed_fields.get(key) == value for key, value in fields.items()):
+            return _issue_mapping(refreshed)
+    raise RuntimeError(f"{issue_id} metadata update could not be verified")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--epic-id", required=True, help="Deferred epic bead id")
@@ -244,6 +414,7 @@ def main() -> None:
         )
         preview_blocks = [_render_issue_preview(header=f"EPIC {epic_id}", issue=epic_issue)]
         child_missing: dict[str, tuple[str, ...]] = {}
+        child_issues_by_id = {str(getattr(issue, "id")): issue for issue in child_issues}
         promotable_children: list[str] = []
         for record, issue in zip(changesets, child_issues, strict=True):
             preview_blocks.append(
@@ -267,6 +438,15 @@ def main() -> None:
             problems.append(
                 "incomplete child changesets remain deferred: " + ", ".join(incomplete_children)
             )
+        validation_targets = tuple(child_issues) if changesets else (epic_issue,)
+        executable_targets = (
+            tuple(child_issues_by_id[issue_id] for issue_id in promotable_children)
+            if promotable_children
+            else ((epic_issue,) if not changesets and not epic_missing else ())
+        )
+        for issue in validation_targets:
+            if (refined_error := _refined_validation_error(issue)) is not None:
+                problems.append(refined_error)
 
         if problems:
             raise RuntimeError("; ".join(problems))
@@ -274,6 +454,25 @@ def main() -> None:
         if not args.yes:
             print("confirmation_required: rerun with --yes after explicit operator confirmation")
             return
+
+        approval_targets = [
+            issue
+            for issue in executable_targets
+            if refined_planning_contract.evaluate_issue_refined_planning_readiness(
+                _issue_metadata_payload(issue)
+            ).refined
+        ]
+        if approval_targets:
+            operator_id = _required_operator_id()
+            for issue in approval_targets:
+                _record_refined_approval(
+                    store=store,
+                    client=client,
+                    issue=issue,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    operator_id=operator_id,
+                )
 
         asyncio.run(
             store.transition_lifecycle(

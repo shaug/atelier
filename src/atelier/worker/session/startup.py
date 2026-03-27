@@ -86,6 +86,11 @@ class NextChangesetService(Protocol):
 
     def is_changeset_in_progress(self, issue: dict[str, object]) -> bool: ...
 
+    def refined_planning_claim_eligible(
+        self,
+        issue: dict[str, object],
+    ) -> tuple[bool, str | None]: ...
+
 
 def _issue_id(issue: dict[str, object]) -> str | None:
     issue_id = issue.get("id")
@@ -229,6 +234,10 @@ def next_changeset_service(
             git_path=context.git_path,
         )
 
+    def refined_planning_eligible(issue: dict[str, object]) -> bool:
+        eligible, _reason = service.refined_planning_claim_eligible(issue)
+        return eligible
+
     target = service.show_issue(context.epic_id)
     if target:
         issue = target
@@ -280,7 +289,9 @@ def next_changeset_service(
                 or target_recovery_candidate
             )
         ):
-            if not service.has_open_descendant_changesets(context.epic_id):
+            if not service.has_open_descendant_changesets(
+                context.epic_id
+            ) and refined_planning_eligible(issue):
                 return issue
         if (
             isinstance(issue_id, str)
@@ -292,7 +303,9 @@ def next_changeset_service(
             return None
         if isinstance(issue_id, str) and issue_id == context.epic_id and claimability.role.is_epic:
             if not explicit_descendants:
-                return issue
+                if refined_planning_eligible(issue):
+                    return issue
+                return None
 
     descendants = service.list_descendant_changesets(context.epic_id, include_closed=False)
     descendants_by_id = {
@@ -335,6 +348,8 @@ def next_changeset_service(
         ),
     )
     for issue in prioritized:
+        if not refined_planning_eligible(issue):
+            continue
         issue_id = issue.get("id")
         if isinstance(issue_id, str) and issue_id:
             if not service.has_open_descendant_changesets(issue_id):
@@ -485,6 +500,11 @@ class StartupContractService(Protocol):
 
     def die(self, message: str) -> None: ...
 
+    def refined_planning_claim_eligible(
+        self,
+        issue: dict[str, object],
+    ) -> tuple[bool, str | None]: ...
+
 
 def run_startup_contract_service(
     *, context: StartupContractContext, service: StartupContractService
@@ -519,6 +539,31 @@ def run_startup_contract_service(
             f"startup timing stage={stage} elapsed={elapsed:.4f}s select={select_mode}"
         )
         return result
+
+    def refined_planning_selection_allowed(
+        *,
+        changeset_id: str,
+        stage: str,
+    ) -> bool:
+        issue = service.show_issue(changeset_id)
+        if issue is None:
+            detail = "unable to load changeset metadata for refined claim gate"
+            service.emit(f"Skipping {stage} changeset {changeset_id}: {detail}")
+            atelier_log.warning(
+                "startup skipping "
+                f"{stage} changeset={changeset_id} reason=refined_metadata_unavailable"
+            )
+            return False
+        payload: dict[str, object] = issue
+        eligible, reason = service.refined_planning_claim_eligible(payload)
+        if eligible:
+            return True
+        detail = reason or "refined changeset is not claim-eligible"
+        service.emit(f"Skipping {stage} changeset {changeset_id}: {detail}")
+        atelier_log.warning(
+            f"startup skipping {stage} changeset={changeset_id} reason=refined_ineligible"
+        )
+        return False
 
     """Apply startup-contract skill ordering to select the next epic."""
     selected_epic: str | None = None
@@ -612,13 +657,17 @@ def run_startup_contract_service(
                 ),
             )
             if explicit_conflict is not None:
-                return StartupContractResult(
-                    epic_id=explicit_conflict.epic_id,
+                if refined_planning_selection_allowed(
                     changeset_id=explicit_conflict.changeset_id,
-                    should_exit=False,
-                    reason="merge_conflict",
-                    reassign_from=explicit_reassign_from,
-                )
+                    stage="explicit merge-conflict",
+                ):
+                    return StartupContractResult(
+                        epic_id=explicit_conflict.epic_id,
+                        changeset_id=explicit_conflict.changeset_id,
+                        should_exit=False,
+                        reason="merge_conflict",
+                        reassign_from=explicit_reassign_from,
+                    )
             explicit_feedback = stage_call(
                 "explicit.review-feedback",
                 lambda: service.select_review_feedback_changeset(
@@ -627,13 +676,17 @@ def run_startup_contract_service(
                 ),
             )
             if explicit_feedback is not None:
-                return StartupContractResult(
-                    epic_id=explicit_feedback.epic_id,
+                if refined_planning_selection_allowed(
                     changeset_id=explicit_feedback.changeset_id,
-                    should_exit=False,
-                    reason="review_feedback",
-                    reassign_from=explicit_reassign_from,
-                )
+                    stage="explicit review-feedback",
+                ):
+                    return StartupContractResult(
+                        epic_id=explicit_feedback.epic_id,
+                        changeset_id=explicit_feedback.changeset_id,
+                        should_exit=False,
+                        reason="review_feedback",
+                        reassign_from=explicit_reassign_from,
+                    )
         explicit_next_changeset = stage_call(
             "explicit.next-changeset",
             lambda: service.next_changeset(
@@ -644,6 +697,13 @@ def run_startup_contract_service(
                 resume_review=resume_review,
             ),
         )
+        if explicit_next_changeset is not None:
+            explicit_issue_id = _issue_id(explicit_next_changeset)
+            if explicit_issue_id is not None and not refined_planning_selection_allowed(
+                changeset_id=explicit_issue_id,
+                stage="explicit next-changeset",
+            ):
+                explicit_next_changeset = None
         if explicit_next_changeset is None:
             if status in {"in_progress", "hooked"}:
                 service.emit(
@@ -863,9 +923,13 @@ def run_startup_contract_service(
                 ),
             )
             if selection is not None:
-                if select_first_eligible:
-                    return selection
-                conflict_candidates.append(selection)
+                if refined_planning_selection_allowed(
+                    changeset_id=selection.changeset_id,
+                    stage="merge-conflict",
+                ):
+                    if select_first_eligible:
+                        return selection
+                    conflict_candidates.append(selection)
         if not conflict_candidates:
             return None
         conflict_candidates.sort(
@@ -918,9 +982,13 @@ def run_startup_contract_service(
                 ),
             )
             if feedback_selection is not None:
-                if select_first_eligible:
-                    return feedback_selection
-                feedback_candidates.append(feedback_selection)
+                if refined_planning_selection_allowed(
+                    changeset_id=feedback_selection.changeset_id,
+                    stage="review-feedback",
+                ):
+                    if select_first_eligible:
+                        return feedback_selection
+                    feedback_candidates.append(feedback_selection)
         if not feedback_candidates:
             return None
         feedback_candidates.sort(
@@ -1016,6 +1084,11 @@ def run_startup_contract_service(
                 global_conflict.epic_id, stage="global-merge-conflict"
             ) or is_excluded(global_conflict.epic_id, stage="global-merge-conflict"):
                 global_conflict = None
+            elif not refined_planning_selection_allowed(
+                changeset_id=global_conflict.changeset_id,
+                stage="global merge-conflict",
+            ):
+                global_conflict = None
         if global_conflict is not None:
             return resume_conflict(global_conflict)
         feedback = select_feedback_candidate(unhooked_epics)
@@ -1031,6 +1104,11 @@ def run_startup_contract_service(
             ) or is_excluded(global_feedback.epic_id, stage="global-review-feedback"):
                 global_feedback = None
             elif not is_claimable(global_feedback.epic_id, stage="global-review-feedback"):
+                global_feedback = None
+            elif not refined_planning_selection_allowed(
+                changeset_id=global_feedback.changeset_id,
+                stage="global review-feedback",
+            ):
                 global_feedback = None
         if global_feedback is not None:
             return resume_feedback(global_feedback)

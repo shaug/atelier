@@ -40,6 +40,7 @@ def test_packaged_skills_include_core_set() -> None:
         "plan-create-epic",
         "plan-split-tasks",
         "plan-changesets",
+        "plan-refined-deliberation",
         "plan-changeset-guardrails",
         "plan-promote-epic",
         "planner-startup-check",
@@ -92,6 +93,7 @@ def test_install_workspace_skills_writes_skill_docs() -> None:
             "plan-create-epic",
             "plan-split-tasks",
             "plan-changesets",
+            "plan-refined-deliberation",
             "plan-changeset-guardrails",
             "plan-promote-epic",
             "planner-startup-check",
@@ -162,6 +164,29 @@ def test_packaged_planning_skills_include_scripts() -> None:
     assert "scripts/send_message.py" in definitions["mail-send"].files
     assert "scripts/mark_message_read.py" in definitions["mail-mark-read"].files
     assert "scripts/claim_message.py" in definitions["mail-queue-claim"].files
+
+
+def test_refined_deliberation_skill_is_packaged_and_shared() -> None:
+    definitions = skills.load_packaged_skills()
+    skill = definitions["plan-refined-deliberation"]
+    text = skill.files["SKILL.md"].decode("utf-8")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        workspace_dir = Path(tmp)
+        metadata = skills.install_workspace_skills(workspace_dir)
+
+        assert "plan-refined-deliberation" in metadata
+        assert (workspace_dir / "skills" / "plan-refined-deliberation" / "SKILL.md").is_file()
+
+    assert "strategy gate before task breakdown" in text
+    assert "low bar to reframe when a better path exists" in text
+    assert "high bar to ask the user" in text
+    assert "fresh, stateless pass" in text
+    assert "stop at sign-off or loop limit" in text
+    assert "epic and changeset beads" in text
+    assert "applies to all planning, not just refinement rounds" in text
+    assert "epic and changeset beads, not markdown checklists" in text
+    assert "trycycle" not in text.lower()
 
 
 def test_work_done_skill_references_close_epic_script() -> None:
@@ -323,6 +348,15 @@ def test_plan_create_epic_skill_captures_drafts_without_approval() -> None:
     assert "not request approval to create or edit deferred beads." in text
     assert "edge_cases" in text
     assert "done_definition" in text
+
+
+def test_planning_skills_reference_shared_discipline() -> None:
+    for name in ("plan-create-epic", "plan-changesets", "plan-split-tasks"):
+        text = skills.load_packaged_skills()[name].files["SKILL.md"].decode("utf-8")
+        assert "plan-refined-deliberation" in text
+        assert "shared planning discipline" in text
+        assert "same drafting strategy" in text
+        assert "trycycle" not in text.lower()
 
 
 def test_beads_conventions_reference_includes_concrete_authoring_examples() -> None:

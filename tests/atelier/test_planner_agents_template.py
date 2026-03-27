@@ -21,6 +21,7 @@ def test_planner_agents_template_contains_core_sections() -> None:
     assert "plan-changeset-guardrails" in content
     assert "plan-promote-epic" in content
     assert "planner-startup-check" in content
+    assert "plan-refined-deliberation" in content
     assert "mail-send" in content
     assert "epic-list" in content
     assert "one child changeset" in content
@@ -60,3 +61,9 @@ def test_planner_agents_template_contains_core_sections() -> None:
     assert "concrete issue, create or update a deferred bead immediately" in content
     assert "Create or update deferred beads immediately" in content
     assert "Capture first, then ask only for decisions" in content
+    assert "same drafting strategy applies to all planning passes" in content
+    assert "refined means iterative reevaluation of the same plan" in content
+    assert "low bar to reframe when a better path exists" in content
+    assert "high bar to ask the user" in content
+    assert "plan quality separate from bead mechanics" in content
+    assert "trycycle" not in content.lower()

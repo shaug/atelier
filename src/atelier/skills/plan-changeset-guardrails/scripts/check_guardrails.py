@@ -30,6 +30,9 @@ _BOOTSTRAP_REPO_ROOT = bootstrap_projected_atelier_script(
 from atelier.bd_invocation import with_bd_mode  # noqa: E402
 from atelier.beads_context import resolve_runtime_repo_dir_hint  # noqa: E402
 from atelier.planner_contract import validate_authoring_contract  # noqa: E402
+from atelier.refined_planning_contract import (
+    evaluate_issue_refined_planning_readiness,  # noqa: E402
+)
 
 _LOC_TRIGGER = re.compile(r"\b(?:loc|estimate)\b", re.IGNORECASE)
 _NUMBER = re.compile(r"\b\d{2,5}\b")
@@ -194,7 +197,13 @@ def _cross_cutting_corpus(
     if epic_issue is not None:
         parts.append(_text_blob(epic_issue))
     parts.extend(_text_blob(issue) for issue in target_changesets)
-    return "\n".join(part for part in parts if part.strip())
+    corpus = "\n".join(part for part in parts if part.strip())
+    # Ignore raw contract metadata lines that would otherwise trip narrative checks.
+    return "\n".join(
+        line
+        for line in corpus.splitlines()
+        if not line.strip().lower().startswith("planning.contract_json:")
+    )
 
 
 def _subject_id(
@@ -270,9 +279,28 @@ def _evaluate_guardrails(
 ) -> _GuardrailReport:
     violations: list[str] = []
     path_summary: str | None = None
+    seen_violations: set[str] = set()
+
+    def _append_violation(message: str) -> None:
+        if message in seen_violations:
+            return
+        seen_violations.add(message)
+        violations.append(message)
 
     for issue in target_changesets:
         issue_id = _issue_id(issue) or "(unknown)"
+        refined_readiness = evaluate_issue_refined_planning_readiness(issue)
+        if refined_readiness.refined:
+            if not refined_readiness.contract_present:
+                _append_violation(f"{issue_id}: refined changesets require planning.contract_json.")
+            if refined_readiness.stage != "planning_in_review":
+                _append_violation(
+                    f"{issue_id}: refined planner payload must set "
+                    "planning.stage: planning_in_review."
+                )
+            for error in refined_readiness.errors:
+                _append_violation(f"{issue_id}: {error}")
+
         inherited_context = (
             [epic_issue] if epic_issue is not None and epic_issue is not issue else []
         )
@@ -285,23 +313,23 @@ def _evaluate_guardrails(
                 field for field in missing_contract_fields if field != "done_definition"
             )
             if missing_sections:
-                violations.append(
+                _append_violation(
                     f"{issue_id}: missing planner authoring contract fields "
                     f"({', '.join(missing_sections)}); add explicit key/value context to the "
                     "epic or changeset description/notes/design."
                 )
             if "done_definition" in missing_contract_fields:
-                violations.append(
+                _append_violation(
                     f"{issue_id}: missing explicit done definition; add acceptance criteria or "
                     "`done_definition:` to the executable path."
                 )
         text = _text_blob(issue)
         estimate = _extract_loc_estimate(text)
         if estimate is None:
-            violations.append(f"{issue_id}: missing LOC estimate in notes/description.")
+            _append_violation(f"{issue_id}: missing LOC estimate in notes/description.")
             continue
         if estimate > 800 and not _APPROVAL.search(text):
-            violations.append(
+            _append_violation(
                 f"{issue_id}: LOC estimate {estimate} exceeds 800 without explicit approval note."
             )
 
@@ -321,7 +349,7 @@ def _evaluate_guardrails(
                 )
             else:
                 path_summary = f"{epic_id}: one child changeset ({child_id}) without rationale."
-                violations.append(
+                _append_violation(
                     f"{epic_id}: one-child anti-pattern; add decomposition rationale "
                     f"for {child_id} or keep the epic as the executable changeset."
                 )
