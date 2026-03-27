@@ -241,3 +241,29 @@ def test_startup_contract_service_trycycle_eligibility_hydrates_sparse_issue(
         "targeted changesets require trycycle.plan_stage=approved before worker claim",
     )
     assert calls == ["at-epic.1|/beads|/repo"]
+
+
+def test_startup_contract_service_trycycle_eligibility_fails_closed_when_hydration_missing(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        worker_store,
+        "show_issue",
+        lambda issue_id, *, beads_root, repo_root: (
+            calls.append(f"{issue_id}|{beads_root}|{repo_root}"),
+            None,
+        )[1],
+    )
+    service = work_startup_runtime._StartupContractService(  # pyright: ignore[reportPrivateUsage]
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    eligible, reason = service.trycycle_claim_eligible({"id": "at-missing.1"})
+
+    assert (eligible, reason) == (
+        False,
+        "unable to load changeset metadata for trycycle claim gate",
+    )
+    assert calls == ["at-missing.1|/beads|/repo"]

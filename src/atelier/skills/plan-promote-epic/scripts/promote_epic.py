@@ -241,6 +241,13 @@ def _approval_timestamp() -> str:
     )
 
 
+def _required_operator_id() -> str:
+    operator_id = str(os.environ.get("ATELIER_AGENT_ID") or "").strip()
+    if not operator_id:
+        raise RuntimeError("ATELIER_AGENT_ID must be set for trycycle approvals")
+    return operator_id
+
+
 def _record_trycycle_approval(
     *,
     store: _ApprovalStore,
@@ -447,13 +454,16 @@ def main() -> None:
             print("confirmation_required: rerun with --yes after explicit operator confirmation")
             return
 
-        operator_id = str(os.environ.get("ATELIER_AGENT_ID") or "operator").strip() or "operator"
-        approval_targets = list(executable_targets)
-        for issue in approval_targets:
-            readiness = trycycle_contract.evaluate_issue_trycycle_readiness(
+        approval_targets = [
+            issue
+            for issue in executable_targets
+            if trycycle_contract.evaluate_issue_trycycle_readiness(
                 _issue_metadata_payload(issue)
-            )
-            if readiness.targeted:
+            ).targeted
+        ]
+        if approval_targets:
+            operator_id = _required_operator_id()
+            for issue in approval_targets:
                 _record_trycycle_approval(
                     store=store,
                     client=client,

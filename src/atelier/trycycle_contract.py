@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 from collections.abc import Mapping
 from typing import Literal
 
@@ -17,6 +18,7 @@ _PLAN_STAGE_FIELD = "trycycle.plan_stage"
 _APPROVED_BY_FIELD = "trycycle.approved_by"
 _APPROVED_AT_FIELD = "trycycle.approved_at"
 _APPROVAL_MESSAGE_ID_FIELD = "trycycle.approval_message_id"
+_APPROVAL_MESSAGE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._:-]*$")
 _PLANNING_IN_REVIEW = "planning_in_review"
 _APPROVED = "approved"
 
@@ -341,6 +343,8 @@ def _approval_errors(fields: Mapping[str, str]) -> list[str]:
     approval_message_id = _normalize_field(fields.get(_APPROVAL_MESSAGE_ID_FIELD))
     if approval_message_id is None:
         errors.append("approved stage requires trycycle.approval_message_id")
+    elif not _APPROVAL_MESSAGE_ID_PATTERN.fullmatch(approval_message_id):
+        errors.append("trycycle.approval_message_id must be an identifier")
     return errors
 
 

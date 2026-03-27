@@ -521,6 +521,35 @@ def test_run_startup_contract_explicit_review_feedback_rejects_unapproved_trycyc
     assert any("missing trycycle approval" in message for message in emitted)
 
 
+def test_run_startup_contract_explicit_review_feedback_fails_closed_on_missing_metadata() -> None:
+    feedback = ReviewFeedbackSelection(
+        epic_id="at-explicit",
+        changeset_id="at-explicit.1",
+        feedback_at="2026-02-20T00:00:00Z",
+    )
+    emitted: list[str] = []
+
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        branch_pr=True,
+        repo_slug="org/repo",
+        show_issue=lambda issue_id: (
+            {"id": issue_id, "status": "open", "labels": ["at:epic"]}
+            if issue_id == "at-explicit"
+            else None
+        ),
+        select_review_feedback_changeset=lambda **_kwargs: feedback,
+        next_changeset=lambda **_kwargs: None,
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.reason == "explicit_epic_not_actionable"
+    assert any(
+        "unable to load changeset metadata for trycycle claim gate" in message
+        for message in emitted
+    )
+
+
 def test_run_startup_contract_explicit_merge_conflict_rejects_unapproved_trycycle() -> None:
     conflict = MergeConflictSelection(
         epic_id="at-explicit",
@@ -973,6 +1002,12 @@ def test_run_startup_contract_prioritizes_review_feedback() -> None:
         branch_pr=True,
         repo_slug="org/repo",
         resolve_hooked_epic=lambda *_args: "at-epic",
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id == "at-epic" else [],
+            "description": "",
+        },
         select_review_feedback_changeset=lambda **_kwargs: feedback,
         next_changeset=next_changeset,
         list_epics=lambda: [
@@ -1099,6 +1134,12 @@ def test_run_startup_contract_first_eligible_short_circuits_review_feedback() ->
         select="first-eligible",
         branch_pr=True,
         repo_slug="org/repo",
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id in {"at-early", "at-oldest"} else [],
+            "description": "",
+        },
         list_epics=lambda: [
             {
                 "id": "at-early",
@@ -1150,6 +1191,12 @@ def test_run_startup_contract_oldest_feedback_scans_for_global_oldest() -> None:
         select="oldest-feedback",
         branch_pr=True,
         repo_slug="org/repo",
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id in {"at-early", "at-oldest"} else [],
+            "description": "",
+        },
         list_epics=lambda: [
             {
                 "id": "at-early",
@@ -1193,6 +1240,12 @@ def test_run_startup_contract_prioritizes_merge_conflict() -> None:
         branch_pr=True,
         repo_slug="org/repo",
         resolve_hooked_epic=lambda *_args: "at-epic",
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id == "at-epic" else [],
+            "description": "",
+        },
         select_conflicted_changeset=lambda **_kwargs: conflict,
         next_changeset=next_changeset,
         list_epics=lambda: [{"id": "at-epic", "assignee": "atelier/worker/codex/p010"}],
@@ -1229,6 +1282,12 @@ def test_run_startup_contract_skips_non_claimable_review_feedback_epic() -> None
     result = _run_startup(
         branch_pr=True,
         repo_slug="org/repo",
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id in {"at-blocked", "at-claimable"} else [],
+            "description": "",
+        },
         list_epics=lambda: [
             {
                 "id": "at-blocked",
@@ -1314,6 +1373,12 @@ def test_run_startup_contract_selects_stale_reclaimable_review_feedback() -> Non
     result = _run_startup(
         branch_pr=True,
         repo_slug="org/repo",
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id == "at-stale" else [],
+            "description": "",
+        },
         list_epics=lambda: [stale_issue],
         stale_family_assigned_epics=lambda _issues, agent_id: [stale_issue],
         next_changeset=lambda **_kwargs: {"id": "at-stale.2"},

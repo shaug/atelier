@@ -546,7 +546,15 @@ def run_startup_contract_service(
         stage: str,
     ) -> bool:
         issue = service.show_issue(changeset_id)
-        payload: dict[str, object] = issue if issue is not None else {"id": changeset_id}
+        if issue is None:
+            detail = "unable to load changeset metadata for trycycle claim gate"
+            service.emit(f"Skipping {stage} changeset {changeset_id}: {detail}")
+            atelier_log.warning(
+                "startup skipping "
+                f"{stage} changeset={changeset_id} reason=trycycle_metadata_unavailable"
+            )
+            return False
+        payload: dict[str, object] = issue
         eligible, reason = service.trycycle_claim_eligible(payload)
         if eligible:
             return True

@@ -175,19 +175,20 @@ def _hydrate_trycycle_issue_payload(
     *,
     beads_root: Path,
     repo_root: Path,
-) -> dict[str, object]:
-    payload = issue
-    if not isinstance(issue.get("description"), str):
-        issue_id = issue.get("id")
-        if isinstance(issue_id, str) and issue_id.strip():
-            hydrated = worker_store.show_issue(
-                issue_id,
-                beads_root=beads_root,
-                repo_root=repo_root,
-            )
-            if hydrated is not None:
-                payload = hydrated
-    return payload
+) -> dict[str, object] | None:
+    if isinstance(issue.get("description"), str):
+        return issue
+    issue_id = issue.get("id")
+    if not isinstance(issue_id, str) or not issue_id.strip():
+        return None
+    hydrated = worker_store.show_issue(
+        issue_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
+    if hydrated is None or not isinstance(hydrated.get("description"), str):
+        return None
+    return hydrated
 
 
 class _NextChangesetService(worker_startup.NextChangesetService):
@@ -310,6 +311,8 @@ class _NextChangesetService(worker_startup.NextChangesetService):
             beads_root=self._beads_root,
             repo_root=self._repo_root,
         )
+        if payload is None:
+            return False, "unable to load changeset metadata for trycycle claim gate"
         return _trycycle_claim_eligibility(payload)
 
 
@@ -958,6 +961,8 @@ class _StartupContractService(worker_startup.StartupContractService):
             beads_root=self._beads_root,
             repo_root=self._repo_root,
         )
+        if payload is None:
+            return False, "unable to load changeset metadata for trycycle claim gate"
         return _trycycle_claim_eligibility(payload)
 
     def check_inbox_before_claim(self, agent_id: str) -> bool:
