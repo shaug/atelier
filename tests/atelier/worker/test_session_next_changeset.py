@@ -16,6 +16,7 @@ class FakeNextChangesetService:
         waiting_by_id: dict[str, bool] | None = None,
         integrated_by_id: dict[str, bool] | None = None,
         work_children_by_id: dict[str, list[dict[str, object]]] | None = None,
+        trycycle_eligibility_by_id: dict[str, tuple[bool, str | None]] | None = None,
     ) -> None:
         self._issues_by_id = issues_by_id
         self._ready_changesets = ready_changesets
@@ -24,6 +25,7 @@ class FakeNextChangesetService:
         self._waiting_by_id = waiting_by_id or {}
         self._integrated_by_id = integrated_by_id or {}
         self._work_children_by_id = work_children_by_id or {}
+        self._trycycle_eligibility_by_id = trycycle_eligibility_by_id or {}
 
     def show_issue(self, issue_id: str) -> dict[str, object] | None:
         return self._issues_by_id.get(issue_id)
@@ -119,6 +121,15 @@ class FakeNextChangesetService:
 
     def is_changeset_in_progress(self, issue: dict[str, object]) -> bool:
         return str(issue.get("status") or "").strip().lower() == "in_progress"
+
+    def trycycle_claim_eligible(
+        self,
+        issue: dict[str, object],
+    ) -> tuple[bool, str | None]:
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str):
+            return True, None
+        return self._trycycle_eligibility_by_id.get(issue_id, (True, None))
 
 
 def _changeset(
@@ -623,3 +634,19 @@ def test_next_changeset_service_rehydrates_sparse_ready_candidates() -> None:
 
     assert selected is not None
     assert selected["id"] == "at-epic.1"
+
+
+def test_next_changeset_service_skips_unapproved_trycycle_changeset() -> None:
+    blocked = _changeset("at-epic.1", status="open", work_branch="feat/at-epic.1")
+    allowed = _changeset("at-epic.2", status="open", work_branch="feat/at-epic.2")
+    service = FakeNextChangesetService(
+        issues_by_id={"at-epic": _epic(), blocked["id"]: blocked, allowed["id"]: allowed},
+        ready_changesets=[],
+        descendants=[blocked, allowed],
+        trycycle_eligibility_by_id={"at-epic.1": (False, "missing trycycle approval")},
+    )
+
+    selected = startup.next_changeset_service(context=_context(), service=service)
+
+    assert selected is not None
+    assert selected["id"] == "at-epic.2"

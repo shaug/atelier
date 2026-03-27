@@ -6,7 +6,7 @@ import datetime as dt
 from collections.abc import Callable
 from pathlib import Path
 
-from .. import agent_home, beads, changeset_fields, prs, work_feedback
+from .. import agent_home, beads, changeset_fields, prs, trycycle_contract, work_feedback
 from ..io import die, prompt, say, select
 from ..work_feedback import ReviewFeedbackSnapshot
 from ..worker import prompts as worker_prompts
@@ -166,6 +166,10 @@ def startup_finalize_preflight(
     )
 
 
+def _trycycle_claim_eligibility(issue: dict[str, object]) -> tuple[bool, str | None]:
+    return trycycle_contract.trycycle_claim_eligible(issue)
+
+
 class _NextChangesetService(worker_startup.NextChangesetService):
     """Concrete next-changeset service implementation for worker startup."""
 
@@ -276,6 +280,23 @@ class _NextChangesetService(worker_startup.NextChangesetService):
 
     def is_changeset_in_progress(self, issue: dict[str, object]) -> bool:
         return is_changeset_in_progress(issue)
+
+    def trycycle_claim_eligible(
+        self,
+        issue: dict[str, object],
+    ) -> tuple[bool, str | None]:
+        payload = issue
+        if not isinstance(issue.get("description"), str):
+            issue_id = issue.get("id")
+            if isinstance(issue_id, str) and issue_id.strip():
+                hydrated = worker_store.show_issue(
+                    issue_id,
+                    beads_root=self._beads_root,
+                    repo_root=self._repo_root,
+                )
+                if hydrated is not None:
+                    payload = hydrated
+        return _trycycle_claim_eligibility(payload)
 
 
 def _no_eligible_epics_summary(
@@ -913,6 +934,12 @@ class _StartupContractService(worker_startup.StartupContractService):
         self, *, repo_slug: str | None
     ) -> ReviewFeedbackSelection | None:
         return self._global_startup_candidates(repo_slug=repo_slug).feedback
+
+    def trycycle_claim_eligible(
+        self,
+        issue: dict[str, object],
+    ) -> tuple[bool, str | None]:
+        return _trycycle_claim_eligibility(issue)
 
     def check_inbox_before_claim(self, agent_id: str) -> bool:
         return check_inbox_before_claim(

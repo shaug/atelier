@@ -1,19 +1,27 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from atelier import config, lifecycle, planner_overview
+from atelier import config, lifecycle, planner_overview, trycycle_contract
 from atelier.worker import finalize_pipeline, reconcile, selection
 from atelier.worker.session import startup
 
 
 class _NextChangesetMatrixService(startup.NextChangesetService):
-    def __init__(self, issue: dict[str, object]) -> None:
+    def __init__(
+        self,
+        issue: dict[str, object],
+        *,
+        claim_eligibility: Callable[[dict[str, object]], tuple[bool, str | None]] | None = None,
+    ) -> None:
         self._issue = issue
+        self._claim_eligibility = claim_eligibility or (lambda _issue: (True, None))
 
     def show_issue(self, issue_id: str) -> dict[str, object] | None:
         if issue_id == "at-epic":
@@ -68,6 +76,12 @@ class _NextChangesetMatrixService(startup.NextChangesetService):
 
     def is_changeset_in_progress(self, issue: dict[str, object]) -> bool:
         return lifecycle.canonical_lifecycle_status(issue.get("status")) == "in_progress"
+
+    def trycycle_claim_eligible(
+        self,
+        issue: dict[str, object],
+    ) -> tuple[bool, str | None]:
+        return self._claim_eligibility(issue)
 
 
 class _FinalizeMatrixService(finalize_pipeline.FinalizePipelineService):
@@ -351,3 +365,91 @@ def test_lifecycle_matrix_reconcile_ignores_terminal_labels_on_active_status() -
         )
 
     assert candidates == {"at-1": ["at-1.7"]}
+
+
+def _valid_trycycle_contract_json() -> str:
+    return json.dumps(
+        {
+            "objective": "Protect worker startup from unapproved targeted claims",
+            "non_goals": ["Do not alter non-trycycle flows"],
+            "acceptance_criteria": [
+                {"statement": "Skip unapproved targeted work", "evidence": ["startup tests"]}
+            ],
+            "scope": {
+                "includes": ["worker startup"],
+                "excludes": ["planner UX redesign"],
+            },
+            "verification_plan": ["uv run pytest tests/atelier/worker -k trycycle -v"],
+            "risks": [{"risk": "over-blocking", "mitigation": "targeted-only checks"}],
+            "escalation_conditions": ["validator disagreement"],
+            "completion_definition": {
+                "requires_terminal_pr_state": True,
+                "allowed_terminal_pr_states": ["merged", "closed"],
+                "allows_integrated_sha_proof": True,
+                "allow_close_without_terminal_or_integrated_sha": False,
+            },
+        },
+        separators=(",", ":"),
+    )
+
+
+def test_lifecycle_matrix_trycycle_unapproved_target_is_not_selected() -> None:
+    issue = {
+        "id": "at-epic",
+        "status": "open",
+        "labels": ["at:epic"],
+        "assignee": None,
+        "description": (
+            "trycycle.targeted: true\n"
+            "trycycle.plan_stage: planning_in_review\n"
+            f"trycycle.contract_json: {_valid_trycycle_contract_json()}\n"
+        ),
+    }
+    startup_context = startup.NextChangesetContext(
+        epic_id="at-epic",
+        repo_slug=None,
+        branch_pr=False,
+        git_path=None,
+    )
+
+    selected = startup.next_changeset_service(
+        context=startup_context,
+        service=_NextChangesetMatrixService(
+            issue, claim_eligibility=trycycle_contract.trycycle_claim_eligible
+        ),
+    )
+
+    assert selected is None
+
+
+def test_lifecycle_matrix_trycycle_approved_target_is_selected() -> None:
+    issue = {
+        "id": "at-epic",
+        "status": "open",
+        "labels": ["at:epic"],
+        "assignee": None,
+        "description": (
+            "trycycle.targeted: true\n"
+            "trycycle.plan_stage: approved\n"
+            f"trycycle.contract_json: {_valid_trycycle_contract_json()}\n"
+            "trycycle.approved_by: atelier/planner/codex/p1\n"
+            "trycycle.approved_at: 2026-03-26T18:00:00Z\n"
+            "trycycle.approval_message_id: at-msg.1\n"
+        ),
+    }
+    startup_context = startup.NextChangesetContext(
+        epic_id="at-epic",
+        repo_slug=None,
+        branch_pr=False,
+        git_path=None,
+    )
+
+    selected = startup.next_changeset_service(
+        context=startup_context,
+        service=_NextChangesetMatrixService(
+            issue, claim_eligibility=trycycle_contract.trycycle_claim_eligible
+        ),
+    )
+
+    assert selected is not None
+    assert selected["id"] == "at-epic"

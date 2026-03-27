@@ -69,6 +69,9 @@ class FakeStartupService:
         self._select_global_review_feedback_changeset = overrides.pop(
             "select_global_review_feedback_changeset", lambda **_kwargs: None
         )
+        self._trycycle_claim_eligible = overrides.pop(
+            "trycycle_claim_eligible", lambda _issue: (True, None)
+        )
         self._check_inbox_before_claim = overrides.pop(
             "check_inbox_before_claim", lambda *_args: False
         )
@@ -216,6 +219,12 @@ class FakeStartupService:
         repo_slug: str | None,
     ) -> ReviewFeedbackSelection | None:
         return self._select_global_review_feedback_changeset(repo_slug=repo_slug)
+
+    def trycycle_claim_eligible(
+        self,
+        issue: dict[str, object],
+    ) -> tuple[bool, str | None]:
+        return self._trycycle_claim_eligible(issue)
 
     def check_inbox_before_claim(self, agent_id: str) -> bool:
         return self._check_inbox_before_claim(agent_id)
@@ -410,6 +419,94 @@ def test_run_startup_contract_explicit_epic_prioritizes_merge_conflict() -> None
     assert result.reason == "merge_conflict"
     assert result.epic_id == "at-explicit"
     assert result.changeset_id == "at-explicit"
+
+
+def test_run_startup_contract_explicit_epic_rejects_unapproved_trycycle_next_changeset() -> None:
+    emitted: list[str] = []
+
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id == "at-explicit" else [],
+            "issue_type": "task" if issue_id != "at-explicit" else "epic",
+        },
+        next_changeset=lambda **_kwargs: {"id": "at-explicit.1", "status": "open", "labels": []},
+        trycycle_claim_eligible=lambda issue: (
+            (False, "missing trycycle approval")
+            if issue.get("id") == "at-explicit.1"
+            else (True, None)
+        ),
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.should_exit is True
+    assert result.reason == "explicit_epic_not_actionable"
+    assert any("missing trycycle approval" in message for message in emitted)
+
+
+def test_run_startup_contract_explicit_review_feedback_rejects_unapproved_trycycle() -> None:
+    feedback = ReviewFeedbackSelection(
+        epic_id="at-explicit",
+        changeset_id="at-explicit.1",
+        feedback_at="2026-02-20T00:00:00Z",
+    )
+    emitted: list[str] = []
+
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        branch_pr=True,
+        repo_slug="org/repo",
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id == "at-explicit" else [],
+        },
+        select_review_feedback_changeset=lambda **_kwargs: feedback,
+        next_changeset=lambda **_kwargs: None,
+        trycycle_claim_eligible=lambda issue: (
+            (False, "missing trycycle approval")
+            if issue.get("id") == "at-explicit.1"
+            else (True, None)
+        ),
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.reason == "explicit_epic_not_actionable"
+    assert any("missing trycycle approval" in message for message in emitted)
+
+
+def test_run_startup_contract_explicit_merge_conflict_rejects_unapproved_trycycle() -> None:
+    conflict = MergeConflictSelection(
+        epic_id="at-explicit",
+        changeset_id="at-explicit.1",
+        observed_at="2026-02-20T00:00:00Z",
+        pr_url="https://github.com/org/repo/pull/110",
+    )
+    emitted: list[str] = []
+
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        branch_pr=True,
+        repo_slug="org/repo",
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id == "at-explicit" else [],
+        },
+        select_conflicted_changeset=lambda **_kwargs: conflict,
+        next_changeset=lambda **_kwargs: None,
+        trycycle_claim_eligible=lambda issue: (
+            (False, "missing trycycle approval")
+            if issue.get("id") == "at-explicit.1"
+            else (True, None)
+        ),
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.reason == "explicit_epic_not_actionable"
+    assert any("missing trycycle approval" in message for message in emitted)
 
 
 def test_run_startup_contract_explicit_epic_completed_exits_cleanly() -> None:
@@ -1254,6 +1351,89 @@ def test_run_startup_contract_skips_unclaimable_global_review_feedback() -> None
 
     assert result.reason == "selected_auto"
     assert result.epic_id == "at-claimable"
+
+
+def test_run_startup_contract_global_review_feedback_rejects_unapproved_trycycle() -> None:
+    blocked_feedback = ReviewFeedbackSelection(
+        epic_id="at-blocked",
+        changeset_id="at-blocked.1",
+        feedback_at="2026-02-19T00:00:00Z",
+    )
+    emitted: list[str] = []
+
+    result = _run_startup(
+        branch_pr=True,
+        repo_slug="org/repo",
+        list_epics=lambda: [
+            {
+                "id": "at-claimable",
+                "status": "open",
+                "labels": ["at:epic"],
+                "assignee": None,
+                "created_at": "2026-02-21T00:00:00Z",
+            }
+        ],
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id == "at-blocked" else [],
+        },
+        next_changeset=lambda **kwargs: {"id": f"{kwargs['epic_id']}.1"},
+        select_review_feedback_changeset=lambda **_kwargs: None,
+        select_global_review_feedback_changeset=lambda **_kwargs: blocked_feedback,
+        trycycle_claim_eligible=lambda issue: (
+            (False, "missing trycycle approval")
+            if issue.get("id") == "at-blocked.1"
+            else (True, None)
+        ),
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.reason == "selected_auto"
+    assert result.epic_id == "at-claimable"
+    assert any("missing trycycle approval" in message for message in emitted)
+
+
+def test_run_startup_contract_global_merge_conflict_rejects_unapproved_trycycle() -> None:
+    blocked_conflict = MergeConflictSelection(
+        epic_id="at-blocked",
+        changeset_id="at-blocked.1",
+        observed_at="2026-02-19T00:00:00Z",
+        pr_url="https://github.com/org/repo/pull/404",
+    )
+    emitted: list[str] = []
+
+    result = _run_startup(
+        branch_pr=True,
+        repo_slug="org/repo",
+        list_epics=lambda: [
+            {
+                "id": "at-claimable",
+                "status": "open",
+                "labels": ["at:epic"],
+                "assignee": None,
+                "created_at": "2026-02-21T00:00:00Z",
+            }
+        ],
+        show_issue=lambda issue_id: {
+            "id": issue_id,
+            "status": "open",
+            "labels": ["at:epic"] if issue_id == "at-blocked" else [],
+        },
+        next_changeset=lambda **kwargs: {"id": f"{kwargs['epic_id']}.1"},
+        select_conflicted_changeset=lambda **_kwargs: None,
+        select_global_conflicted_changeset=lambda **_kwargs: blocked_conflict,
+        trycycle_claim_eligible=lambda issue: (
+            (False, "missing trycycle approval")
+            if issue.get("id") == "at-blocked.1"
+            else (True, None)
+        ),
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.reason == "selected_auto"
+    assert result.epic_id == "at-claimable"
+    assert any("missing trycycle approval" in message for message in emitted)
 
 
 def test_run_startup_contract_claims_global_feedback_standalone_identity() -> None:

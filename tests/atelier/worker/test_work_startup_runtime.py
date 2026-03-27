@@ -146,3 +146,43 @@ def test_startup_contract_service_updates_integrated_sha_via_store_adapter(monke
     service.update_changeset_integrated_sha("at-epic.1", "abc1234")
 
     assert calls == [("at-epic.1", "abc1234", Path("/beads"), Path("/repo"), True)]
+
+
+def test_next_changeset_service_trycycle_eligibility_uses_shared_helper(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+    issue = {"id": "at-epic.1", "description": "trycycle.targeted: true"}
+
+    monkeypatch.setattr(
+        work_startup_runtime,
+        "_trycycle_claim_eligibility",
+        lambda candidate: (calls.append(candidate), (False, "blocked"))[1],
+    )
+    service = work_startup_runtime._NextChangesetService(  # pyright: ignore[reportPrivateUsage]
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    eligible, reason = service.trycycle_claim_eligible(issue)
+
+    assert (eligible, reason) == (False, "blocked")
+    assert calls == [issue]
+
+
+def test_startup_contract_service_trycycle_eligibility_uses_shared_helper(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+    issue = {"id": "at-epic.1", "description": "trycycle.targeted: true"}
+
+    monkeypatch.setattr(
+        work_startup_runtime,
+        "_trycycle_claim_eligibility",
+        lambda candidate: (calls.append(candidate), (True, None))[1],
+    )
+    service = work_startup_runtime._StartupContractService(  # pyright: ignore[reportPrivateUsage]
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    eligible, reason = service.trycycle_claim_eligible(issue)
+
+    assert (eligible, reason) == (True, None)
+    assert calls == [issue]
