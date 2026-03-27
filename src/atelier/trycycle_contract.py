@@ -349,9 +349,13 @@ def _approval_errors(fields: Mapping[str, str]) -> list[str]:
 
 
 def _is_valid_iso_timestamp(value: str) -> bool:
+    if "t" not in value:
+        return False
     try:
-        dt.datetime.fromisoformat(value.replace("z", "+00:00"))
+        parsed = dt.datetime.fromisoformat(value.replace("z", "+00:00"))
     except ValueError:
+        return False
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
         return False
     return True
 

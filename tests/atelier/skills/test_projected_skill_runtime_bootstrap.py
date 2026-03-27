@@ -753,6 +753,123 @@ def test_projected_check_guardrails_ignores_inherited_pythonpath_when_repo_runti
     )
 
 
+def test_projected_promote_epic_reorders_repo_src_ahead_of_installed_package(
+    tmp_path: Path,
+) -> None:
+    agent_home, projected_script = _install_projected_script(
+        tmp_path,
+        skill_name="plan-promote-epic",
+        script_name="promote_epic.py",
+    )
+    repo_root = _fake_repo(
+        tmp_path,
+        sentinel_import="trycycle_contract",
+        extra_modules={
+            "beads_context.py": (
+                "class _Context:\n"
+                "    def __init__(self, repo_dir):\n"
+                "        self.beads_root = repo_dir\n"
+                "        self.repo_root = repo_dir\n"
+                "        self.override_warning = None\n"
+                "\n"
+                "def resolve_runtime_repo_dir_hint(*, repo_dir=None, cwd=None, env=None):\n"
+                "    return (repo_dir, None)\n"
+                "\n"
+                "def resolve_skill_beads_context(*, beads_dir=None, repo_dir=None):\n"
+                "    return _Context(repo_dir)\n"
+            ),
+            "lib/beads.py": (
+                "class ShowIssueRequest:\n"
+                "    def __init__(self, issue_id):\n"
+                "        self.issue_id = issue_id\n"
+                "\n"
+                "class UpdateIssueRequest:\n"
+                "    def __init__(self, issue_id, description):\n"
+                "        self.issue_id = issue_id\n"
+                "        self.description = description\n"
+                "\n"
+                "class description_fields:\n"
+                "    @staticmethod\n"
+                "    def parse_description_fields(_description):\n"
+                "        return {}\n"
+            ),
+            "store.py": (
+                "class AppendNotesRequest:\n"
+                "    def __init__(self, issue_id, notes):\n"
+                "        self.issue_id = issue_id\n"
+                "        self.notes = notes\n"
+                "\n"
+                "class CreateMessageRequest:\n"
+                "    def __init__(self, **kwargs):\n"
+                "        self.kwargs = kwargs\n"
+            ),
+        },
+    )
+    installed_root = _fake_installed_package(
+        tmp_path,
+        modules={
+            "trycycle_contract.py": (
+                "from pathlib import Path\n"
+                "import os\n"
+                "\n"
+                "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text(__file__, encoding='utf-8')\n"
+            ),
+            "beads_context.py": (
+                "class _Context:\n"
+                "    def __init__(self, repo_dir):\n"
+                "        self.beads_root = repo_dir\n"
+                "        self.repo_root = repo_dir\n"
+                "        self.override_warning = None\n"
+                "\n"
+                "def resolve_runtime_repo_dir_hint(*, repo_dir=None, cwd=None, env=None):\n"
+                "    return (repo_dir, None)\n"
+                "\n"
+                "def resolve_skill_beads_context(*, beads_dir=None, repo_dir=None):\n"
+                "    return _Context(repo_dir)\n"
+            ),
+            "lib/beads.py": (
+                "class ShowIssueRequest:\n"
+                "    pass\n"
+                "\n"
+                "class UpdateIssueRequest:\n"
+                "    pass\n"
+                "\n"
+                "class description_fields:\n"
+                "    @staticmethod\n"
+                "    def parse_description_fields(_description):\n"
+                "        return {}\n"
+            ),
+            "store.py": (
+                "class AppendNotesRequest:\n    pass\n\nclass CreateMessageRequest:\n    pass\n"
+            ),
+        },
+    )
+    sentinel_path = tmp_path / "promote-epic-sentinel.txt"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(projected_script),
+            "--repo-dir",
+            str(repo_root),
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=agent_home,
+        env={
+            "BOOTSTRAP_SENTINEL": str(sentinel_path),
+            "PYTHONPATH": os.pathsep.join([str(installed_root), str(repo_root / "src")]),
+        },
+    )
+
+    assert completed.returncode == 0
+    assert sentinel_path.read_text(encoding="utf-8") == str(
+        repo_root / "src" / "atelier" / "trycycle_contract.py"
+    )
+
+
 def test_projected_render_tickets_section_reorders_repo_src_ahead_of_installed_package(
     tmp_path: Path,
 ) -> None:

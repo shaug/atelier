@@ -233,6 +233,42 @@ def test_validate_contract_rejects_malformed_approved_timestamp() -> None:
     assert "trycycle.approved_at must be an ISO-8601 timestamp" in result.summary
 
 
+def test_validate_contract_rejects_date_only_approved_timestamp() -> None:
+    issue = {
+        "description": (
+            "trycycle.targeted: true\n"
+            "trycycle.plan_stage: approved\n"
+            f"trycycle.contract_json: {_valid_contract_json()}\n"
+            "trycycle.approved_by: atelier/planner/codex/p1\n"
+            "trycycle.approved_at: 2026-03-27\n"
+            "trycycle.approval_message_id: at-msg.1\n"
+        )
+    }
+
+    result = trycycle_contract.evaluate_issue_trycycle_readiness(issue)
+
+    assert result.ok is False
+    assert "trycycle.approved_at must be an ISO-8601 timestamp" in result.summary
+
+
+def test_validate_contract_rejects_naive_approved_timestamp() -> None:
+    issue = {
+        "description": (
+            "trycycle.targeted: true\n"
+            "trycycle.plan_stage: approved\n"
+            f"trycycle.contract_json: {_valid_contract_json()}\n"
+            "trycycle.approved_by: atelier/planner/codex/p1\n"
+            "trycycle.approved_at: 2026-03-27T01:00:00\n"
+            "trycycle.approval_message_id: at-msg.1\n"
+        )
+    }
+
+    result = trycycle_contract.evaluate_issue_trycycle_readiness(issue)
+
+    assert result.ok is False
+    assert "trycycle.approved_at must be an ISO-8601 timestamp" in result.summary
+
+
 def test_validate_contract_rejects_malformed_approval_message_id() -> None:
     issue = {
         "description": (
