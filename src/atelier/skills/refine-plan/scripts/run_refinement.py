@@ -448,13 +448,13 @@ def _persist_refinement_evidence(
     issue_id: str,
     beads_root: Path,
     repo_root: Path,
+    effective_plan_edit_rounds_max: int,
+    effective_post_impl_review_rounds_max: int,
     result: RefinementRunResult,
     initial_plan_path: Path,
     output_dir: Path,
 ) -> None:
     from atelier.planning_refinement import (
-        DEFAULT_PLAN_EDIT_ROUNDS_MAX,
-        DEFAULT_POST_IMPL_REVIEW_ROUNDS_MAX,
         PlanningRefinementRecord,
         parse_refinement_blocks,
         select_winning_refinement,
@@ -479,14 +479,8 @@ def _persist_refinement_evidence(
         approval_source=selected.approval_source if selected is not None else None,
         approved_by=selected.approved_by if selected is not None else None,
         approved_at=selected.approved_at if selected is not None else None,
-        plan_edit_rounds_max=(
-            selected.plan_edit_rounds_max if selected is not None else DEFAULT_PLAN_EDIT_ROUNDS_MAX
-        ),
-        post_impl_review_rounds_max=(
-            selected.post_impl_review_rounds_max
-            if selected is not None
-            else DEFAULT_POST_IMPL_REVIEW_ROUNDS_MAX
-        ),
+        plan_edit_rounds_max=effective_plan_edit_rounds_max,
+        post_impl_review_rounds_max=effective_post_impl_review_rounds_max,
         plan_edit_rounds_used=result.rounds_used,
         latest_verdict=result.latest_verdict,
         initial_plan_path=str(initial_plan_path),
@@ -531,6 +525,18 @@ def _simulate_round_executor(verdicts: list[str]) -> RoundExecutor:
 def _selected_refinement_round_limit(
     *, store, issue_id: str, beads_root: Path, repo_root: Path
 ) -> int | None:
+    selected_plan_limit, _selected_post_limit = _selected_refinement_round_limits(
+        store=store,
+        issue_id=issue_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
+    return selected_plan_limit
+
+
+def _selected_refinement_round_limits(
+    *, store, issue_id: str, beads_root: Path, repo_root: Path
+) -> tuple[int | None, int | None]:
     from atelier.planning_refinement import parse_refinement_blocks, select_winning_refinement
 
     notes = _load_existing_notes(
@@ -541,11 +547,21 @@ def _selected_refinement_round_limit(
     )
     selected = select_winning_refinement(parse_refinement_blocks(notes))
     if selected is None:
-        return None
-    return int(selected.plan_edit_rounds_max)
+        return None, None
+    return int(selected.plan_edit_rounds_max), int(selected.post_impl_review_rounds_max)
 
 
 def _resolve_policy_round_limit(*, repo_root: Path) -> int | None:
+    plan_limit, _post_limit = _resolve_policy_round_limits(repo_root=repo_root)
+    return plan_limit
+
+
+def _resolve_policy_post_impl_round_limit(*, repo_root: Path) -> int | None:
+    _plan_limit, post_limit = _resolve_policy_round_limits(repo_root=repo_root)
+    return post_limit
+
+
+def _resolve_policy_round_limits(*, repo_root: Path) -> tuple[int | None, int | None]:
     from atelier import config as atelier_config
     from atelier import git, paths
     from atelier.commands.resolve import resolve_project_for_enlistment
@@ -558,13 +574,53 @@ def _resolve_policy_round_limit(*, repo_root: Path) -> int | None:
         config_path = paths.project_config_path(project_root)
         project_config = atelier_config.load_project_config(config_path)
     except (Exception, SystemExit):
-        return None
+        return None, None
     if project_config is None:
-        return None
+        return None, None
     policy = atelier_config.resolve_refinement_policy(project_config)
     if policy is None:
-        return None
-    return int(policy.plan_edit_rounds_max)
+        return None, None
+    return int(policy.plan_edit_rounds_max), int(policy.post_impl_review_rounds_max)
+
+
+def _resolve_effective_round_limits(
+    *,
+    cli_max_rounds: int | None,
+    store,
+    issue_id: str,
+    beads_root: Path,
+    repo_root: Path,
+) -> tuple[int, int]:
+    from atelier.planning_refinement import (
+        DEFAULT_PLAN_EDIT_ROUNDS_MAX,
+        DEFAULT_POST_IMPL_REVIEW_ROUNDS_MAX,
+    )
+
+    selected_plan_limit, selected_post_limit = _selected_refinement_round_limits(
+        store=store,
+        issue_id=issue_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
+    policy_plan_limit = _resolve_policy_round_limit(repo_root=repo_root)
+    policy_post_limit = _resolve_policy_post_impl_round_limit(repo_root=repo_root)
+    plan_limit = (
+        int(cli_max_rounds)
+        if cli_max_rounds is not None
+        else selected_plan_limit
+        if selected_plan_limit is not None
+        else policy_plan_limit
+        if policy_plan_limit is not None
+        else DEFAULT_PLAN_EDIT_ROUNDS_MAX
+    )
+    post_limit = (
+        selected_post_limit
+        if selected_post_limit is not None
+        else policy_post_limit
+        if policy_post_limit is not None
+        else DEFAULT_POST_IMPL_REVIEW_ROUNDS_MAX
+    )
+    return int(plan_limit), int(post_limit)
 
 
 def _resolve_max_rounds(
@@ -575,20 +631,14 @@ def _resolve_max_rounds(
     beads_root: Path,
     repo_root: Path,
 ) -> int:
-    if cli_max_rounds is not None:
-        return int(cli_max_rounds)
-    selected_limit = _selected_refinement_round_limit(
+    effective_plan_limit, _effective_post_limit = _resolve_effective_round_limits(
+        cli_max_rounds=cli_max_rounds,
         store=store,
         issue_id=issue_id,
         beads_root=beads_root,
         repo_root=repo_root,
     )
-    if selected_limit is not None:
-        return selected_limit
-    policy_limit = _resolve_policy_round_limit(repo_root=repo_root)
-    if policy_limit is not None:
-        return policy_limit
-    return REFINEMENT_MAX_ROUNDS_DEFAULT
+    return effective_plan_limit
 
 
 def _parse_args() -> argparse.Namespace:
@@ -622,13 +672,14 @@ def main() -> int:
         if runtime_warning:
             print(runtime_warning, file=sys.stderr)
         store = _build_store(beads_root=beads_root, repo_root=repo_root)
-        max_rounds = _resolve_max_rounds(
+        effective_plan_rounds_max, effective_post_impl_rounds_max = _resolve_effective_round_limits(
             cli_max_rounds=args.max_rounds,
             store=store,
             issue_id=issue_id,
             beads_root=beads_root,
             repo_root=repo_root,
         )
+        max_rounds = effective_plan_rounds_max
 
         if args.simulate_verdicts:
             verdicts = [item.strip() for item in args.simulate_verdicts.split(",") if item.strip()]
@@ -646,6 +697,8 @@ def main() -> int:
             issue_id=issue_id,
             beads_root=beads_root,
             repo_root=repo_root,
+            effective_plan_edit_rounds_max=effective_plan_rounds_max,
+            effective_post_impl_review_rounds_max=effective_post_impl_rounds_max,
             result=result,
             initial_plan_path=initial_plan_path,
             output_dir=output_dir,

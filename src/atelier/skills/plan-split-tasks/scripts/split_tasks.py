@@ -159,8 +159,15 @@ def _resolve_parent(
 def _inherited_refinement_note(*, parent_notes: str | None, lineage_root: str) -> str | None:
     if not parent_notes:
         return None
-    selected = select_winning_refinement(parse_refinement_blocks(parent_notes))
-    if selected is None or not selected.required:
+    parsed_blocks = parse_refinement_blocks(parent_notes)
+    selected = select_winning_refinement(parsed_blocks)
+    if selected is None:
+        authoritative_scope = tuple(block for block in parsed_blocks if block.authoritative_hint)
+        scope = authoritative_scope or parsed_blocks
+        if any(block.required_hint for block in scope):
+            raise RuntimeError("required parent refinement metadata is malformed")
+        return None
+    if not selected.required:
         return None
     inherited = PlanningRefinementRecord(
         authoritative=True,

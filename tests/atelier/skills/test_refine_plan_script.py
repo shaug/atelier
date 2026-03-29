@@ -391,6 +391,73 @@ def test_refine_plan_main_uses_show_fallback_when_store_model_omits_notes(
     assert "lineage_root: at-epic" in note
 
 
+def test_refine_plan_main_persists_effective_round_budgets_after_cli_override(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    initial_plan_path = tmp_path / "initial.md"
+    output_dir = tmp_path / "artifacts"
+    appended_notes: list[tuple[str, ...]] = []
+    initial_plan_path.write_text("initial\n", encoding="utf-8")
+
+    class FakeStore:
+        async def get_epic(self, issue_id: str):
+            return SimpleNamespace(
+                id=issue_id,
+                notes=(
+                    "planning_refinement.v1\n"
+                    "authoritative: true\n"
+                    "mode: requested\n"
+                    "required: true\n"
+                    "lineage_root: at-epic\n"
+                    "approval_status: approved\n"
+                    "approval_source: operator\n"
+                    "approved_by: planner-user\n"
+                    "approved_at: 2026-03-29T12:00:00Z\n"
+                    "plan_edit_rounds_max: 7\n"
+                    "post_impl_review_rounds_max: 9\n"
+                    "latest_verdict: REVISED\n"
+                ),
+            )
+
+        async def get_changeset(self, issue_id: str):
+            del issue_id
+            raise LookupError("not a changeset")
+
+        async def append_notes(self, request):
+            appended_notes.append(request.notes)
+            return SimpleNamespace(id=request.issue_id)
+
+    monkeypatch.setattr(module, "_resolve_context", lambda **_kwargs: (tmp_path, tmp_path, None))
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_refinement.py",
+            "--issue-id",
+            "at-epic",
+            "--initial-plan-path",
+            str(initial_plan_path),
+            "--output-dir",
+            str(output_dir),
+            "--max-rounds",
+            "11",
+            "--simulate-verdicts",
+            "READY",
+        ],
+    )
+
+    exit_code = module.main()
+
+    assert exit_code == 0
+    assert appended_notes
+    note = appended_notes[0][0]
+    assert "plan_edit_rounds_max: 11" in note
+    assert "post_impl_review_rounds_max: 9" in note
+
+
 def test_refine_plan_loop_artifacts_match_trycycle_snapshot_anchors() -> None:
     anchors = _load_anchor_fixture()["mechanics_anchors"]
     loop_snapshot = (_TRYCYCLE_FIXTURE_ROOT / "trycycle-planning-loop.snapshot.md").read_text(

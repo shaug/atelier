@@ -169,6 +169,74 @@ def test_split_tasks_leaves_unrefined_lineage_unmarked(
     assert created_requests[0].notes == ()
 
 
+def test_split_tasks_fails_closed_when_parent_required_refinement_is_malformed(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    created_requests: list[object] = []
+    parent_notes = (
+        "planning_refinement.v1\n"
+        "authoritative: true\n"
+        "required: true\n"
+        "approval_status: approved\n"
+        "approval_source: operator\n"
+        "approved_by: planner-user\n"
+        "approved_at: 2026-03-29T12:00:00Z\n"
+        "latest_verdict: NOT_READY\n"
+    )
+    context = SimpleNamespace(
+        project_dir=tmp_path / "project",
+        beads_root=tmp_path / ".beads",
+    )
+
+    monkeypatch.setattr(
+        module.auto_export,
+        "resolve_auto_export_context",
+        lambda **_kwargs: context,
+    )
+
+    class FakeStore:
+        async def get_changeset(self, issue_id):
+            return SimpleNamespace(id=issue_id, epic_id="at-epic", notes=parent_notes)
+
+        async def create_changeset(self, request):
+            created_requests.append(request)
+            return SimpleNamespace(id="at-epic.2")
+
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
+    monkeypatch.setattr(
+        module.auto_export,
+        "auto_export_issue",
+        lambda issue_id, *, context: module.auto_export.AutoExportResult(
+            status="skipped",
+            issue_id=issue_id,
+            provider=None,
+            message="auto-export disabled for test",
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "split_tasks.py",
+            "--parent-id",
+            "at-epic.1",
+            "--task",
+            "Split API contract::API surface is independently testable.",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.main()
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 1
+    assert "required parent refinement metadata is malformed" in captured.err
+    assert created_requests == []
+
+
 @pytest.mark.parametrize(
     ("parent_notes", "expect_inherited"),
     [
