@@ -215,6 +215,59 @@ def test_set_refinement_project_policy_mode_auto_records_approval_when_configure
     assert "post_impl_review_rounds_max: 21" in note
 
 
+def test_set_refinement_project_policy_mode_rejects_operator_approval_source(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_script_module()
+
+    class FakeStore:
+        async def get_epic(self, issue_id: str):
+            return SimpleNamespace(id=issue_id, lifecycle="open")
+
+        async def get_changeset(self, issue_id: str):
+            del issue_id
+            raise LookupError("not a changeset")
+
+        async def append_notes(self, request):  # pragma: no cover - defensive
+            raise AssertionError(request)
+
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
+    monkeypatch.setattr(
+        module, "_resolve_context", lambda **_kwargs: (Path("/tmp/.beads"), Path("/tmp"), None)
+    )
+    monkeypatch.setattr(
+        module,
+        "_resolve_refinement_policy",
+        lambda **_kwargs: SimpleNamespace(
+            required_by_default=True,
+            plan_edit_rounds_max=13,
+            post_impl_review_rounds_max=21,
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "set_refinement.py",
+            "--issue-id",
+            "at-123",
+            "--mode",
+            "project_policy",
+            "--required",
+            "--approval-source",
+            "operator",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.main()
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 1
+    assert "approval_source=project_policy" in captured.err
+
+
 def test_set_refinement_project_policy_mode_fails_when_policy_not_configured(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

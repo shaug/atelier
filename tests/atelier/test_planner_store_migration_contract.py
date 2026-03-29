@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import atelier.lib.beads as beads_lib
 from atelier import messages, planner_overview, planner_startup_check
 from atelier.lib.beads import (
     BeadsCommandRequest,
@@ -228,6 +229,8 @@ def test_planner_authoring_and_message_flows_have_dual_backend_parity(
             "beads_root": tmp_path / ".beads",
         },
     )()
+    context.project_dir.mkdir(parents=True, exist_ok=True)
+    context.beads_root.mkdir(parents=True, exist_ok=True)
 
     create_epic = _load_skill_script("plan-create-epic", "create_epic.py")
     create_changeset = _load_skill_script("plan-changesets", "create_changeset.py")
@@ -269,6 +272,7 @@ def test_planner_authoring_and_message_flows_have_dual_backend_parity(
     create_epic.main()
 
     monkeypatch.setattr(create_changeset, "_build_store", lambda **_kwargs: store)
+    monkeypatch.setattr(beads_lib, "SubprocessBeadsClient", lambda **_kwargs: client)
     monkeypatch.setattr(
         create_changeset.auto_export,
         "resolve_auto_export_context",

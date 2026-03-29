@@ -113,16 +113,24 @@ def _render_refinement_note(record: object) -> str:
 
 
 def _parent_notes(*, store, epic_id: str, beads_root: Path, repo_root: Path) -> str | None:
+    sentinel = object()
     if not hasattr(store, "get_epic"):
         return None
     parent = asyncio.run(store.get_epic(epic_id))
-    from_store = getattr(parent, "notes", None)
+    from_store = getattr(parent, "notes", sentinel)
+    if from_store is None:
+        return None
     if isinstance(from_store, str) and from_store.strip():
         return from_store
+    if isinstance(from_store, str):
+        return None
     if isinstance(from_store, (tuple, list)):
         joined = "\n".join(str(item).strip() for item in from_store if str(item).strip())
         if joined:
             return joined
+        return None
+    if from_store is not sentinel:
+        return None
 
     from atelier.lib.beads import ShowIssueRequest, SubprocessBeadsClient
 
@@ -133,8 +141,8 @@ def _parent_notes(*, store, epic_id: str, beads_root: Path, repo_root: Path) -> 
     )
     try:
         issue = asyncio.run(client.show(ShowIssueRequest(issue_id=epic_id)))
-    except Exception:
-        return None
+    except Exception as exc:
+        raise RuntimeError(f"failed to read parent refinement notes for {epic_id}: {exc}") from exc
     notes = getattr(issue, "notes", None)
     if isinstance(notes, str) and notes.strip():
         return notes

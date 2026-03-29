@@ -140,9 +140,11 @@ def _validate_approval_fields(
                 raise ValueError(
                     "project_policy mode requires configured policy (required_by_default=true)"
                 )
+            if approval_source not in {None, "project_policy"}:
+                raise ValueError("project_policy mode requires approval_source=project_policy")
             return (
                 "approved",
-                cast(ApprovalSource, approval_source or "project_policy"),
+                "project_policy",
                 approved_by or "project_policy",
                 approved_at or _utc_now_iso8601(),
             )
