@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import time
 
 from atelier import planning_refinement
@@ -223,6 +224,67 @@ def test_refinement_parser_ignores_trailing_key_value_note_text() -> None:
     assert gate.required is True
     assert gate.claimable is True
     assert gate.reason is None
+
+
+def test_refinement_parser_fails_closed_on_unknown_field_inside_block() -> None:
+    notes = "\n".join(
+        (
+            "planning_refinement.v1",
+            "authoritative: true",
+            "required: true",
+            "approval_status: approved",
+            "approval_source: operator",
+            "approved_by: planner-user",
+            "approved_at: 2026-03-29T12:00:00Z",
+            "latest_verdict: READY",
+            "owner: platform-team",
+        )
+    )
+
+    blocks = planning_refinement.parse_refinement_blocks(notes)
+    selected = planning_refinement.select_winning_refinement(blocks)
+    gate = planning_refinement.evaluate_refinement_claim_gate(notes)
+
+    assert selected is None
+    assert gate.required is True
+    assert gate.claimable is False
+    assert gate.reason == "refinement_metadata_missing_or_malformed"
+
+
+def test_refinement_winner_selection_deterministic_under_prefix_permutations() -> None:
+    fixed_winner = _block(
+        authoritative="true",
+        required="true",
+        approval_status="approved",
+        approval_source="operator",
+        approved_by="planner-user",
+        approved_at="2026-03-29T12:00:00Z",
+        latest_verdict="READY",
+        plan_edit_rounds_max="7",
+        post_impl_review_rounds_max="9",
+    )
+    prefix_blocks = (
+        _block(authoritative="false", required="false", approval_status="missing"),
+        _block(
+            authoritative="true",
+            required="true",
+            approval_status="approved",
+            approval_source="operator",
+            approved_by="planner-user",
+            approved_at="2026-03-29T12:00:00Z",
+            latest_verdict="REVISED",
+        ),
+        _block(authoritative="false", required="true", approval_status="missing"),
+    )
+
+    for prefix_permutation in itertools.permutations(prefix_blocks):
+        notes = "\n\n".join((*prefix_permutation, fixed_winner))
+        blocks = planning_refinement.parse_refinement_blocks(notes)
+        selected = planning_refinement.select_winning_refinement(blocks)
+        assert selected is not None
+        assert selected.latest_verdict == "READY"
+        assert selected.plan_edit_rounds_max == 7
+        assert selected.post_impl_review_rounds_max == 9
 
 
 def test_refinement_parser_handles_large_note_payload_performance() -> None:

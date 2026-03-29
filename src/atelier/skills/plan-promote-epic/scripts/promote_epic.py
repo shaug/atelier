@@ -268,11 +268,10 @@ def main() -> None:
             problems.append(
                 "incomplete child changesets remain deferred: " + ", ".join(incomplete_children)
             )
-        if not changesets:
-            epic_refinement_gate = evaluate_refinement_claim_gate(_issue_notes_text(epic_issue))
-            if epic_refinement_gate.required and not epic_refinement_gate.claimable:
-                reason = epic_refinement_gate.reason or "refinement_metadata_missing_or_malformed"
-                problems.append(f"{epic_id}: {reason}")
+        epic_refinement_gate = evaluate_refinement_claim_gate(_issue_notes_text(epic_issue))
+        if epic_refinement_gate.required and not epic_refinement_gate.claimable:
+            reason = epic_refinement_gate.reason or "refinement_metadata_missing_or_malformed"
+            problems.append(f"{epic_id}: {reason}")
         for record, issue in zip(changesets, child_issues, strict=True):
             if record.lifecycle is LifecycleStatus.CLOSED:
                 continue

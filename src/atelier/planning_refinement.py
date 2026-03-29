@@ -242,28 +242,30 @@ def parse_refinement_blocks(notes: str | None) -> tuple[ParsedRefinementBlock, .
         start = index
         index += 1
         field_lines: list[str] = []
+        parse_errors: list[str] = []
         while index < len(lines):
             stripped = lines[index].strip()
             if stripped == _REFINEMENT_MARKER:
                 break
             if not stripped:
+                # Treat blank lines as block boundaries so adjacent freeform notes
+                # are not absorbed into refinement parsing.
+                break
+            if _looks_like_key_value_line(lines[index]):
                 field_lines.append(lines[index])
+                if not _looks_like_refinement_field(lines[index]):
+                    parse_errors.append(f"unknown refinement field: {lines[index].strip()!r}")
                 index += 1
                 continue
-            if _looks_like_refinement_field(lines[index]):
-                field_lines.append(lines[index])
-                index += 1
-                continue
-            # Stop this block before freeform note text to preserve append-only
-            # notes behavior and avoid false malformed-state outcomes.
-            break
+            parse_errors.append(f"invalid line inside refinement block: {lines[index].strip()!r}")
+            index += 1
         raw_lines = lines[start:index]
         raw_text = "\n".join(raw_lines)
         field_map, syntax_errors = _parse_field_map(field_lines)
         authoritative_hint = _parse_bool_token(field_map.get("authoritative")) is True
         required_hint = _parse_bool_token(field_map.get("required")) is True
         record: PlanningRefinementRecord | None = None
-        errors = list(syntax_errors)
+        errors = [*parse_errors, *syntax_errors]
         if not errors:
             try:
                 record = PlanningRefinementRecord.model_validate(field_map)
@@ -399,6 +401,10 @@ def _looks_like_refinement_field(line: str) -> bool:
         return False
     key, _, _value = stripped.partition(":")
     return key.strip() in _REFINEMENT_FIELD_KEYS
+
+
+def _looks_like_key_value_line(line: str) -> bool:
+    return bool(_FIELD_LINE_RE.match(line.strip()))
 
 
 def _parse_bool_token(value: object) -> bool | None:
