@@ -5,300 +5,331 @@
 > tracking.
 
 **Goal:** Converge Atelier planning with trycycle by extracting both trycycle's
-iterative refinement mechanics and its planning prose/tone into Atelier-native
-`planning` + `refine-plan` skills, with persisted refinement evidence,
-lineage-based propagation, and fail-closed worker claim gates.
+planning doctrine and its iterative refinement loop into Atelier-native
+`planning` + `refine-plan` skills, with explicit activation, approval evidence,
+lineage propagation, and fail-closed worker claim gates.
 
-**Architecture:** Build a first-class planning doctrine skill (`planning`) from
-Atelier planner guidance plus trycycle planning language, then layer a separate
-`refine-plan` orchestration skill that adapts trycycle's stateless plan-edit
-loop into Atelier's bead persistence model. Treat refinement as explicit policy
-(`project` or `per-item`), persist it as structured bead-note artifacts, and
-enforce it at worker-claim boundaries so workers cannot execute refined work
-without approval and a converged plan verdict.
+**Architecture:** Build `planning` as the single planning doctrine skill for all
+planning flows (iterative and non-iterative), sourced from both Atelier planner
+contract language and trycycle planning prose. Build `refine-plan` as an
+opt-in wrapper that runs trycycle-style stateless planning rounds with explicit
+verdicts and bounded retries, then persists authoritative refinement evidence in
+bead notes. Add a dedicated refinement mutation path (`plan-set-refinement`) so
+refinement can be enabled on any epic/changeset at any lifecycle point.
 
-**Tech Stack:** Python 3.11+, Typer CLI/runtime modules, Atelier store/Beads
-APIs, projected skill runtime scripts, pytest, markdown docs and templates.
+**Tech Stack:** Python 3.11+, Typer/runtime modules, Atelier store/Beads APIs,
+projected skill scripts, pytest, markdown templates/docs.
 
 ---
 
 ## Locked requirements from user decisions
 
-1. Refinement is opt-in per epic/changeset and may be enabled at any lifecycle
-   point.
-1. Default budgets match trycycle (`plan-edit rounds=5`,
-   `post-implementation review/fix rounds=8`).
-1. Refinement is viral by lineage. Descendants of refined work are refined.
-1. Worker overscope breakdown uses refinement iff the source lineage is refined.
-1. Refinement requires explicit approval, either from project policy or
-   per-item request.
-1. Convergence must include trycycle planning prose/style, not just mechanics.
+1. Refinement is opt-in per epic/changeset and can be enabled later at any
+   lifecycle point.
+1. Default budgets match trycycle (`plan_edit_rounds=5`,
+   `post_impl_review_rounds=8`) with future project-level configurability.
+1. Refinement is viral by lineage. Descendants of refined work remain refined.
+1. Worker overscope breakdown uses refinement iff source lineage is refined.
+1. Refinement requires explicit approval evidence from project policy or an
+   explicit per-item operator request.
+1. Convergence includes trycycle planning tone/style and emphasis, not only
+   loop mechanics.
 
 ## User-visible behavior after cutover
 
-1. Planner has a reusable `planning` skill that defines planning doctrine for
-   all agents, not only planner template prose.
-1. When operator asks for a "refined" or "refinement" plan, planner runs
-   `refine-plan` iterative subagent evaluation before promotion/dispatch.
-1. Refined work beads carry auditable refinement artifacts in notes with round
-   counts, verdicts, approval evidence, and artifact pointers.
-1. Worker claim fails closed for refined work when required approval or
-   converged verdict evidence is missing.
-1. Split changesets created from refined lineage inherit refinement
-   requirements automatically.
-1. Unrefined work behavior remains unchanged.
+1. `planning` is the primary planning doctrine skill across planner workflows.
+1. Requests containing `refined` or `refinement` trigger `refine-plan` before
+   promotion/dispatch.
+1. Planner can enable refinement on an existing epic/changeset at any time via
+   `plan-set-refinement`.
+1. Refined beads persist auditable evidence: mode, approval source, budgets,
+   rounds used, verdict, and artifact links.
+1. Worker claim fails closed when refined work lacks approval evidence or a
+   `READY` verdict.
+1. Child/split changesets inherit required refinement from refined lineage.
+1. Unrefined flows remain behaviorally unchanged.
 
 ## Contracts and invariants
 
-### Refinement metadata contract (bead notes)
+### Trycycle convergence contract
 
-Refinement evidence is stored as note artifacts with deterministic parsing.
+The implementation must persist a source-backed mapping doc that includes:
+
+1. A complete inventory of trycycle planning inputs used for convergence
+   (planning prompts, planning/edit loop rules, strategy gate language,
+   decomposition guidance, convergence semantics).
+1. For each source, explicit mapping to:
+   - baseline `planning` doctrine (iterative-agnostic), or
+   - `refine-plan` orchestration mechanics (iterative).
+1. Rationale for each adaptation to Atelier persistence boundaries.
+1. Non-goals proving Atelier persistence model is preserved.
+
+### Refinement artifact contract (authoritative note block)
+
+Refinement evidence is stored as append-only note blocks, parsed by
+`planning_refinement.py`.
 
 ```text
-planning_refinement.<timestamp>:
+planning_refinement.v1
 authoritative: true
-1) mode: requested|inherited|project_policy
-2) required: true|false
-3) lineage_root: <epic-or-changeset-id>
-4) approval:
-- status: approved|missing
-- source: project_policy|operator
-- approved_by: <agent-or-user-id>
-- approved_at: <ISO-8601>
-5) budgets:
-- plan_edit_rounds_max: 5
-- post_impl_review_rounds_max: 8
-6) rounds_executed:
-- plan_edit_rounds_used: <int>
-7) latest_verdict: READY|REVISED|USER_DECISION_REQUIRED
-8) artifacts:
-- initial_plan_path: <abs-path-or-uri>
-- latest_plan_path: <abs-path-or-uri>
-- round_log_dir: <abs-path-or-uri>
+mode: requested|inherited|project_policy
+required: true|false
+lineage_root: <work-id>
+approval_status: approved|missing
+approval_source: project_policy|operator
+approved_by: <principal-id>
+approved_at: <ISO-8601>
+plan_edit_rounds_max: 5
+post_impl_review_rounds_max: 8
+plan_edit_rounds_used: <int>
+latest_verdict: READY|REVISED|USER_DECISION_REQUIRED
+initial_plan_path: <abs-path-or-uri>
+latest_plan_path: <abs-path-or-uri>
+round_log_dir: <abs-path-or-uri>
 ```
 
-Parser rules mirror north-star gate semantics:
-- latest `authoritative: true` block wins, else latest block wins.
-- malformed refined artifacts fail closed only when refinement is marked
-  required.
-- unrefined items (no refinement markers) are unaffected.
+Parser rules:
+- newest `authoritative: true` block wins;
+- if none are authoritative, newest valid block wins;
+- malformed blocks fail closed only when `required=true` is asserted by any
+  winning block in scope;
+- unrefined work (no winning refinement block) remains unaffected.
+
+### Activation and approval invariant
+
+Refinement activation must be explicit and durable:
+
+1. `plan-set-refinement` can mark any epic/changeset as refined at any
+   lifecycle stage (`deferred|open|in_progress|blocked`).
+1. `required=true` demands approval evidence (`approval_status=approved` and
+   source/principal/timestamp).
+1. `project_policy` mode can satisfy approval automatically only when policy is
+   configured and recorded in note evidence.
+1. Inherited descendant records copy budgets and mark `mode=inherited`.
 
 ### Claim gate invariant
 
-A top-level epic is not claimable when refinement is required and either:
-- approval status is not `approved`, or
+Top-level executable work is not claimable when refinement is required and
+either:
+- approval evidence is missing, or
 - latest verdict is not `READY`.
 
 ### Lineage invariant
 
-If parent executable work has `required: true`, new child changesets must be
-created with refinement `mode=inherited`, `required=true`, and copied budgets.
+If a parent executable item has required refinement, any newly created child or
+split changeset must carry required inherited refinement.
 
 ## Tricky boundaries and risk controls
 
-1. **Template vs skill source of truth:** Move planning doctrine into
-   `planning` skill. Planner template becomes orchestration/routing only.
-1. **Trycycle extraction fidelity:** Vendor/adapt trycycle orchestration helpers
-   with provenance comments (`adapted from ...`) and focused API surface.
-1. **Backwards compatibility:** Provide `plan-refined-deliberation` alias skill
-   delegating to `refine-plan` so older references do not break.
-1. **False-positive claim blocks:** Fail closed only when refined markers are
-   present; keep legacy unrefined flows unchanged.
-1. **Single-cutover safety:** Land parser + metadata writes + claim gate in one
-   PR slice so no intermediate state can produce silent bypass.
+1. **Doctrine drift risk:** Add contract tests for planning doctrine coverage so
+   trycycle tone/style extraction cannot regress to superficial wording.
+1. **"Any time" activation gap:** Add explicit mutation skill/script instead of
+   relying only on create-time flags.
+1. **Approval ambiguity:** Persist machine-readable approval evidence; do not
+   infer approval from prose.
+1. **Verdict token drift:** Canonical verdicts are
+   `READY|REVISED|USER_DECISION_REQUIRED` everywhere.
+1. **Backwards compatibility:** Keep `plan-refined-deliberation` as an alias to
+   `refine-plan` during migration.
+1. **Fail-closed scope:** Only refined markers activate claim blocking.
 
 ## File structure (locked decomposition)
 
 ### New files
 
-- `docs/plans/2026-03-28-trycycle-refinement-convergence.md`
-  - This execution plan.
 - `docs/trycycle-planning-convergence.md`
-  - Extraction map for trycycle mechanics + prose/tone and Atelier mapping.
+  - Source inventory and adaptation map (mechanics + doctrine).
 - `src/atelier/planning_refinement.py`
-  - Typed parser/renderer/validation for `planning_refinement.*` artifacts.
+  - Typed parsing/selection/evaluation of refinement note artifacts.
 - `src/atelier/skills/planning/SKILL.md`
-  - Base planning doctrine (Atelier + trycycle merged, iterative-agnostic).
+  - Baseline planning doctrine (Atelier + trycycle merged).
 - `src/atelier/skills/planning/references/planning-doctrine.md`
-  - Detailed doctrine language and quality rubric.
+  - Detailed quality rubric and doctrine excerpts.
 - `src/atelier/skills/refine-plan/SKILL.md`
-  - Iterative refinement wrapper skill.
+  - Iterative wrapper around `planning`.
 - `src/atelier/skills/refine-plan/subagents/prompt-planning-initial.md`
-  - Atelier-specific initial planning subagent prompt.
+  - Initial subagent prompt adapted from trycycle planning flow.
 - `src/atelier/skills/refine-plan/subagents/prompt-planning-edit.md`
-  - Atelier-specific stateless plan-edit subagent prompt.
+  - Stateless edit-round prompt with verdict contract.
 - `src/atelier/skills/refine-plan/scripts/run_refinement.py`
-  - Main refinement loop runner (Atelier-adapted trycycle flow).
-- `src/atelier/skills/refine-plan/scripts/prompt_builder/*.py`
-  - Adapted prompt builder internals from trycycle.
+  - Bounded iterative refinement runner.
+- `src/atelier/skills/refine-plan/scripts/prompt_builder/build.py`
+  - Prompt assembly helpers adapted from trycycle.
+- `src/atelier/skills/refine-plan/scripts/prompt_builder/template_ast.py`
+  - Prompt template parser/AST helpers.
+- `src/atelier/skills/refine-plan/scripts/prompt_builder/validate_rendered.py`
+  - Rendered prompt validation checks.
+- `src/atelier/skills/plan-set-refinement/SKILL.md`
+  - Explicit activation/update skill for refinement on existing work.
+- `src/atelier/skills/plan-set-refinement/scripts/set_refinement.py`
+  - Append authoritative refinement artifact notes.
 - `src/atelier/skills/plan-refined-deliberation/SKILL.md`
-  - Compatibility alias/deprecation shim to `refine-plan`.
+  - Compatibility alias to `refine-plan`.
 - `src/atelier/skills/plan-split-tasks/scripts/split_tasks.py`
-  - Deterministic split script that propagates refinement lineage.
+  - Split helper that propagates refinement lineage.
 - `tests/atelier/test_planning_refinement.py`
-  - Unit tests for refinement artifact parsing and gate predicates.
+  - Parser, winning-block, and gate predicate tests.
+- `tests/atelier/test_trycycle_planning_convergence.py`
+  - Convergence coverage tests for doctrine/mechanics mapping.
+- `tests/atelier/skills/test_planning_skill_contract.py`
+  - Guards for required baseline planning doctrine sections.
 - `tests/atelier/skills/test_refine_plan_script.py`
-  - Script-level tests for refinement orchestration behavior.
+  - Round-loop and verdict contract tests.
+- `tests/atelier/skills/test_plan_set_refinement_script.py`
+  - Any-time activation and approval evidence tests.
 - `tests/atelier/skills/test_plan_split_tasks_script.py`
-  - Split lineage propagation tests.
+  - Inherited refinement propagation tests.
 
 ### Modified files
 
 - `src/atelier/models.py`
-  - Add planning/refinement user config section and defaults.
+  - Add planning refinement policy/budget config models.
 - `src/atelier/config.py`
-  - Resolve planning refinement defaults and budgets.
+  - Resolve default refinement policy and budgets.
 - `src/atelier/lifecycle.py`
-  - Integrate refinement-required claim gate reasons.
+  - Integrate refinement claim gate evaluation.
 - `src/atelier/worker/selection.py`
-  - Pass issue payload details into claimability evaluation.
+  - Feed issue payload into refinement-aware claimability checks.
 - `src/atelier/templates/AGENTS.planner.md.tmpl`
-  - Route planning through `planning`; refined trigger routes to `refine-plan`.
+  - Make `planning` primary doctrine and route `refined/refinement` to
+    `refine-plan`; document `plan-set-refinement` usage.
 - `src/atelier/templates/AGENTS.worker.md.tmpl`
-  - Overscope split rule references lineage-aware split behavior.
+  - Codify lineage-preserving overscope split behavior.
 - `src/atelier/skills/plan-create-epic/SKILL.md`
-  - Add refinement mode inputs and authoring expectations.
+  - Document create-time refinement options and approval evidence expectations.
 - `src/atelier/skills/plan-create-epic/scripts/create_epic.py`
-  - Accept/write refinement contract fields.
+  - Optional create-time refinement note emission.
 - `src/atelier/skills/plan-changesets/SKILL.md`
-  - Add refinement inheritance/viral rules.
+  - Add refinement inheritance rules.
 - `src/atelier/skills/plan-changesets/scripts/create_changeset.py`
   - Inherit/write refinement fields from parent.
 - `src/atelier/skills/plan-split-tasks/SKILL.md`
-  - Replace raw `bd` calls with deterministic script flow.
+  - Switch to deterministic split script contract.
 - `src/atelier/skills/plan-promote-epic/SKILL.md`
-  - Include refinement approval preview checks.
+  - Include refinement readiness in preview/approval checks.
 - `src/atelier/skills/plan-promote-epic/scripts/promote_epic.py`
-  - Surface refinement contract readiness in preview.
+  - Surface refinement readiness diagnostics in preview output.
 - `src/atelier/skills/plan-changeset-guardrails/SKILL.md`
-  - Add refinement contract verification checks.
+  - Add refinement completeness checks.
 - `src/atelier/skills/plan-changeset-guardrails/scripts/check_guardrails.py`
-  - Validate refinement metadata completeness.
-- `src/atelier/skills.py`
-  - Package new skills/directories.
+  - Validate refinement contract completeness.
 - `docs/behavior.md`
-  - Document planning/refinement mode semantics.
+  - Document planning/refinement mode semantics and lineage behavior.
 - `tests/atelier/test_planner_agents_template.py`
-  - Assert new planner routing language.
+  - Assert planner routing and refinement activation guidance.
 - `tests/atelier/test_skills.py`
-  - Assert new packaged skills and scripts.
+  - Assert packaged skills/scripts for planning/refinement features.
 - `tests/atelier/test_models.py`
-  - Config normalization/validation tests for planning refinement settings.
+  - Config defaults/validation tests for refinement policy.
 - `tests/atelier/test_lifecycle.py`
   - Claimability tests for refinement gate.
+- `tests/atelier/worker/test_selection.py`
+  - Startup selection tests for refined claim filtering.
+- `tests/atelier/worker/test_session_startup.py`
+  - Session behavior tests around claim gate reasons.
+- `tests/atelier/test_worker_agents_template.py`
+  - Worker template tests for lineage-aware split behavior.
 - `tests/atelier/skills/test_plan_create_epic_script.py`
-  - Refinement metadata write tests.
+  - Create-time refinement metadata tests.
 - `tests/atelier/skills/test_plan_changesets_script.py`
-  - Refinement inheritance tests.
-- `tests/atelier/skills/test_plan_changeset_guardrails_script.py`
-  - Refinement guardrail tests.
+  - Inheritance tests for child creation.
 - `tests/atelier/skills/test_plan_promote_epic_script.py`
-  - Promotion preview includes refinement readiness.
+  - Promotion preview/refinement readiness tests.
+- `tests/atelier/skills/test_plan_changeset_guardrails_script.py`
+  - Guardrail checks for refinement contract validity.
 
 ## Strategy gate decisions
 
-1. Keep #719 gate semantics but anchor them in explicit refinement artifacts,
-   not prose-only checks.
-1. Use note-based metadata artifacts (existing Beads-compatible medium) instead
-   of introducing a new persistence backend.
-1. Vendor/adapt trycycle orchestration code into Atelier skills so behavior is
-   reproducible and versioned with Atelier.
-1. Route all planning doctrine through `planning`; `refine-plan` is a wrapper,
-   never the global planning doctrine.
+1. Keep #719 fail-closed gate intent, but ground it in structured refinement
+   evidence instead of prose-only checks.
+1. Preserve Atelier persistence model (beads + notes) and adapt trycycle
+   strategy to that contract.
+1. Split doctrine from mechanism: `planning` owns all planning intent;
+   `refine-plan` adds iterative evaluation.
+1. Add explicit activation path so "refine later" is first-class behavior.
 
-### Task 1: Author trycycle convergence contract and mapping
+### Task 1: Produce source-backed trycycle convergence map and tests
 
 **Files:**
 - Create: `docs/trycycle-planning-convergence.md`
+- Create: `tests/atelier/test_trycycle_planning_convergence.py`
 - Modify: `docs/behavior.md`
-- Test: `tests/atelier/test_dogfood_doc.py`
 
 - [ ] **Step 1: Identify or write the failing test**
 
-Add/extend a doc contract test to require explicit coverage of:
-- trycycle prose extraction,
-- trycycle iterative loop extraction,
-- Atelier mapping for persistence and gating.
+Add tests that require the convergence doc to include:
+- trycycle source inventory,
+- doctrine-vs-mechanics mapping,
+- Atelier adaptation rationale,
+- explicit non-goals.
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/atelier/test_dogfood_doc.py -k convergence -v`
-Expected: FAIL because new convergence doc/anchors are missing.
+Run: `uv run pytest tests/atelier/test_trycycle_planning_convergence.py -v`
+Expected: FAIL because the convergence doc/anchors do not exist yet.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Write `docs/trycycle-planning-convergence.md` with:
-- extracted trycycle sources and rationale,
-- prose/tone mapping into base `planning` doctrine,
-- iterative mechanics mapping into `refine-plan`,
-- explicit non-goals (no one-shot replacement of Atelier persistence).
-
-Update `docs/behavior.md` with refined planning mode semantics and lineage
-rules.
+Author the convergence doc with source-backed mappings and update
+`docs/behavior.md` with refined planning semantics and lineage policy.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/atelier/test_dogfood_doc.py -k convergence -v`
+Run: `uv run pytest tests/atelier/test_trycycle_planning_convergence.py -v`
 Expected: PASS.
 
 - [ ] **Step 5: Refactor and verify**
 
-Tighten wording, links, and inline reference definitions.
+Polish wording and link definitions.
 
-Run: `uv run pytest tests/atelier/test_dogfood_doc.py -v`
+Run: `uv run pytest tests/atelier/test_trycycle_planning_convergence.py -v`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add docs/trycycle-planning-convergence.md docs/behavior.md tests/atelier/test_dogfood_doc.py
-git commit -m "docs(planning): map trycycle convergence contract" -m "- Add a source-backed convergence map for trycycle prose and loop mechanics.
-- Document Atelier refined planning mode, lineage propagation, and gating boundaries.
-- Add regression checks so convergence intent cannot drift in future edits."
+git add docs/trycycle-planning-convergence.md docs/behavior.md tests/atelier/test_trycycle_planning_convergence.py
+git commit -m "docs(planning): add trycycle convergence source map" -m "- Add a source-backed mapping of trycycle doctrine and iterative mechanics.
+- Document Atelier adaptation boundaries and non-goals.
+- Add regression tests that prevent shallow convergence drift."
 ```
 
-### Task 2: Create base `planning` skill and reframe planner template
+### Task 2: Create baseline `planning` doctrine skill
 
 **Files:**
 - Create: `src/atelier/skills/planning/SKILL.md`
 - Create: `src/atelier/skills/planning/references/planning-doctrine.md`
+- Create: `tests/atelier/skills/test_planning_skill_contract.py`
 - Modify: `src/atelier/templates/AGENTS.planner.md.tmpl`
 - Modify: `tests/atelier/test_planner_agents_template.py`
 - Modify: `tests/atelier/test_skills.py`
 
 - [ ] **Step 1: Identify or write the failing test**
 
-Add tests asserting:
-- packaged skills include `planning`,
-- planner template routes all planning through `planning`,
-- `refine-plan` is invoked for refined/refinement requests.
+Add contract tests asserting the baseline planning doctrine includes:
+- explicit intent/rationale/non-goals framing,
+- strategy gate language,
+- low bar for replan / high bar for user interruption,
+- bite-sized execution-oriented decomposition guidance.
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run:
-`uv run pytest tests/atelier/test_skills.py tests/atelier/test_planner_agents_template.py -v`
-Expected: FAIL on missing skill/template assertions.
+`uv run pytest tests/atelier/skills/test_planning_skill_contract.py tests/atelier/test_planner_agents_template.py tests/atelier/test_skills.py -k planning -v`
+Expected: FAIL on missing skill/routing/contract assertions.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `planning` skill by merging:
-- Atelier planner contract sections (intent/rationale/non-goals/etc), and
-- trycycle planning doctrine style (explicit decomposition, strategy gate,
-  low bar for replan, high bar for user interruption, bite-sized executable
-  steps).
-
-Update planner template so `planning` is primary doctrine and template language
-is orchestration-focused.
+Create `planning` as the primary doctrine skill and update planner template so
+planning doctrine is skill-owned while template text stays orchestration-only.
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run:
-`uv run pytest tests/atelier/test_skills.py tests/atelier/test_planner_agents_template.py -v`
+`uv run pytest tests/atelier/skills/test_planning_skill_contract.py tests/atelier/test_planner_agents_template.py tests/atelier/test_skills.py -k planning -v`
 Expected: PASS.
 
 - [ ] **Step 5: Refactor and verify**
-
-Ensure markdown style and frontmatter validation remain compliant.
 
 Run: `uv run pytest tests/atelier/test_skill_frontmatter_validation.py -v`
 Expected: PASS.
@@ -306,13 +337,13 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/atelier/skills/planning src/atelier/templates/AGENTS.planner.md.tmpl tests/atelier/test_planner_agents_template.py tests/atelier/test_skills.py
-git commit -m "feat(planning): add base planning doctrine skill" -m "- Introduce reusable planning doctrine from Atelier + trycycle prose.
-- Reframe planner template to use skills for doctrine and routing.
-- Add tests for packaged skill discovery and planner template invariants."
+git add src/atelier/skills/planning src/atelier/templates/AGENTS.planner.md.tmpl tests/atelier/skills/test_planning_skill_contract.py tests/atelier/test_planner_agents_template.py tests/atelier/test_skills.py
+git commit -m "feat(planning): add baseline doctrine skill" -m "- Introduce a reusable planning doctrine skill from Atelier + trycycle guidance.
+- Route planner behavior through the doctrine skill instead of template-only prose.
+- Add contract tests to prevent doctrine drift."
 ```
 
-### Task 3: Add refinement artifact contract and config policy
+### Task 3: Add refinement artifact parser and policy config
 
 **Files:**
 - Create: `src/atelier/planning_refinement.py`
@@ -324,24 +355,21 @@ git commit -m "feat(planning): add base planning doctrine skill" -m "- Introduce
 - [ ] **Step 1: Identify or write the failing test**
 
 Add tests for:
-- parsing/selecting authoritative `planning_refinement.*` artifacts,
-- default budget values 5/8,
-- policy defaults and validation (`project-level required`, `per-item opt-in`).
+- artifact parse and winning-block selection,
+- canonical verdict tokens,
+- default 5/8 budgets,
+- project policy defaults and validation.
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run:
 `uv run pytest tests/atelier/test_planning_refinement.py tests/atelier/test_models.py -k refinement -v`
-Expected: FAIL because contract parser and config models do not exist yet.
+Expected: FAIL because parser/config contract is missing.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Implement typed refinement contract utilities:
-- parse note blocks,
-- select authoritative/latest block,
-- compute gate readiness (`required`, `approval`, `latest_verdict`).
-
-Add config models/resolvers for planning refinement defaults and budgets.
+Implement typed parser/evaluator helpers and config defaults for refinement
+policy and budgets.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -351,8 +379,6 @@ Expected: PASS.
 
 - [ ] **Step 5: Refactor and verify**
 
-Refactor parser helpers for deterministic failure diagnostics.
-
 Run:
 `uv run pytest tests/atelier/test_planning_refinement.py tests/atelier/test_models.py -v`
 Expected: PASS.
@@ -361,12 +387,59 @@ Expected: PASS.
 
 ```bash
 git add src/atelier/planning_refinement.py src/atelier/models.py src/atelier/config.py tests/atelier/test_planning_refinement.py tests/atelier/test_models.py
-git commit -m "feat(refinement): add planning refinement contract and config" -m "- Add authoritative note artifact parser/selector for planning refinement evidence.
-- Add project/user refinement policy defaults and trycycle-aligned round budgets.
-- Add regression tests for parser behavior and config normalization."
+git commit -m "feat(refinement): add artifact contract and policy defaults" -m "- Add typed refinement artifact parsing and gate-evaluation helpers.
+- Add project/user policy defaults with trycycle-aligned budgets.
+- Add tests for parsing, verdicts, and config validation."
 ```
 
-### Task 4: Build `refine-plan` skill by adapting trycycle orchestration
+### Task 4: Add any-time activation skill for refinement
+
+**Files:**
+- Create: `src/atelier/skills/plan-set-refinement/SKILL.md`
+- Create: `src/atelier/skills/plan-set-refinement/scripts/set_refinement.py`
+- Create: `tests/atelier/skills/test_plan_set_refinement_script.py`
+- Modify: `tests/atelier/test_skills.py`
+- Modify: `src/atelier/templates/AGENTS.planner.md.tmpl`
+
+- [ ] **Step 1: Identify or write the failing test**
+
+Add tests for:
+- enabling refinement on existing epic/changeset regardless of lifecycle state,
+- requiring approval evidence when `required=true`,
+- inheriting refinement metadata for lineage-derived activation.
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run:
+`uv run pytest tests/atelier/skills/test_plan_set_refinement_script.py tests/atelier/test_skills.py tests/atelier/test_planner_agents_template.py -k refinement -v`
+Expected: FAIL because activation skill/script is missing.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Implement `plan-set-refinement` and route planner guidance to use it whenever
+refinement is requested after initial bead creation.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run:
+`uv run pytest tests/atelier/skills/test_plan_set_refinement_script.py tests/atelier/test_skills.py tests/atelier/test_planner_agents_template.py -k refinement -v`
+Expected: PASS.
+
+- [ ] **Step 5: Refactor and verify**
+
+Run: `uv run pytest tests/atelier/skills/test_plan_set_refinement_script.py -v`
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/atelier/skills/plan-set-refinement src/atelier/templates/AGENTS.planner.md.tmpl tests/atelier/skills/test_plan_set_refinement_script.py tests/atelier/test_skills.py tests/atelier/test_planner_agents_template.py
+git commit -m "feat(planning): add any-time refinement activation skill" -m "- Add plan-set-refinement for explicit refinement activation on existing work.
+- Enforce approval evidence requirements for required refinement mode.
+- Update planner guidance and tests for activation routing."
+```
+
+### Task 5: Build `refine-plan` iterative wrapper from trycycle mechanics
 
 **Files:**
 - Create: `src/atelier/skills/refine-plan/SKILL.md`
@@ -380,24 +453,21 @@ git commit -m "feat(refinement): add planning refinement contract and config" -m
 
 - [ ] **Step 1: Identify or write the failing test**
 
-Add orchestration tests for:
-- bounded round loop (`max=5` default),
-- verdict protocol (`READY`, `REVISED`, `USER DECISION REQUIRED`),
-- artifact emission for each round,
-- deterministic failure when no convergence.
+Add tests for:
+- bounded loop defaults (`max_rounds=5`),
+- verdict parsing (`READY|REVISED|USER_DECISION_REQUIRED`),
+- per-round artifact emission,
+- fail-closed non-convergence behavior.
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/atelier/skills/test_refine_plan_script.py -v`
-Expected: FAIL because refine-plan runner does not exist.
+Expected: FAIL because runner and prompts do not exist.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Adapt trycycle `run_phase` and prompt-builder mechanics into
-`refine-plan/scripts` and wire them to Atelier placeholders and bead paths.
-
-Add provenance comments in adapted files referencing trycycle source paths and
-commit baseline.
+Adapt trycycle planning-loop helpers and prompts into `refine-plan` scripts,
+with provenance comments that identify source files and commit baseline.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -405,9 +475,6 @@ Run: `uv run pytest tests/atelier/skills/test_refine_plan_script.py -v`
 Expected: PASS.
 
 - [ ] **Step 5: Refactor and verify**
-
-Refactor runner interfaces to typed request/result dataclasses and deterministic
-JSON outputs for downstream scripts.
 
 Run:
 `uv run pytest tests/atelier/skills/test_refine_plan_script.py tests/atelier/test_skill_frontmatter_validation.py -v`
@@ -417,12 +484,12 @@ Expected: PASS.
 
 ```bash
 git add src/atelier/skills/refine-plan tests/atelier/skills/test_refine_plan_script.py
-git commit -m "feat(refine-plan): adapt trycycle planning loop for atelier" -m "- Add refine-plan skill with stateless initial/edit planning rounds.
-- Adapt trycycle prompt-builder orchestration for Atelier artifact persistence.
-- Add loop/verdict tests for convergence and non-convergence behavior."
+git commit -m "feat(refine-plan): add trycycle-style iterative planning loop" -m "- Add bounded stateless planning rounds with explicit verdict protocol.
+- Adapt trycycle prompt-builder mechanics with provenance comments.
+- Add convergence and non-convergence regression tests."
 ```
 
-### Task 5: Wire planner authoring scripts for refinement, lineage, and approval
+### Task 6: Wire create/split/promote/guardrail flows to refinement contract
 
 **Files:**
 - Modify: `src/atelier/skills/plan-create-epic/SKILL.md`
@@ -444,26 +511,21 @@ git commit -m "feat(refine-plan): adapt trycycle planning loop for atelier" -m "
 - [ ] **Step 1: Identify or write the failing test**
 
 Add tests for:
-- per-item refinement request flags,
-- lineage inheritance on child/split creation,
-- promotion preview requiring refinement readiness for refined work,
-- guardrails reporting missing refinement approvals/verdicts.
+- create-time refinement metadata writes,
+- lineage inheritance on create/split,
+- promotion preview exposing refinement readiness,
+- guardrails reporting missing approval/verdict evidence.
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run:
 `uv run pytest tests/atelier/skills/test_plan_create_epic_script.py tests/atelier/skills/test_plan_changesets_script.py tests/atelier/skills/test_plan_promote_epic_script.py tests/atelier/skills/test_plan_changeset_guardrails_script.py -k refinement -v`
-Expected: FAIL due missing refinement wiring.
+Expected: FAIL because flows are not refinement-aware yet.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Update scripts to write/read `planning_refinement.*` artifacts and enforce:
-- opt-in at any time,
-- viral inheritance,
-- explicit approval requirement before open-promotion for refined scope.
-
-Replace raw split instructions with deterministic split script using
-store-backed create flows.
+Implement refinement-aware behavior across planner authoring scripts, including
+lineage inheritance and deterministic split behavior.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -473,22 +535,19 @@ Expected: PASS.
 
 - [ ] **Step 5: Refactor and verify**
 
-Refactor duplicate refinement note-writing logic into shared helper usage.
-
-Run:
-`uv run pytest tests/atelier/skills/test_plan_* -v`
+Run: `uv run pytest tests/atelier/skills/test_plan_* -v`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add src/atelier/skills/plan-create-epic src/atelier/skills/plan-changesets src/atelier/skills/plan-split-tasks src/atelier/skills/plan-promote-epic src/atelier/skills/plan-changeset-guardrails tests/atelier/skills/test_plan_create_epic_script.py tests/atelier/skills/test_plan_changesets_script.py tests/atelier/skills/test_plan_split_tasks_script.py tests/atelier/skills/test_plan_promote_epic_script.py tests/atelier/skills/test_plan_changeset_guardrails_script.py
-git commit -m "feat(planning): propagate refinement lineage through authoring flows" -m "- Add refinement-aware create/split/promote/guardrail script behavior.
-- Enforce viral lineage and explicit approval evidence for refined work promotion.
-- Add script-level tests for inheritance, readiness previews, and guardrails."
+git commit -m "feat(planning): propagate refinement contract through authoring" -m "- Make create/split/promote/guardrail scripts refinement-aware.
+- Enforce lineage inheritance and approval/verdict readiness diagnostics.
+- Add script-level regression coverage for refinement flows."
 ```
 
-### Task 6: Enforce worker claim gate and overscope behavior
+### Task 7: Enforce worker claim gate and overscope lineage rules
 
 **Files:**
 - Modify: `src/atelier/lifecycle.py`
@@ -502,19 +561,21 @@ git commit -m "feat(planning): propagate refinement lineage through authoring fl
 
 - [ ] **Step 1: Identify or write the failing test**
 
-Add tests asserting claim rejection reason when refined work lacks approval or
-`READY` verdict, and template guidance for overscope split lineage behavior.
+Add tests asserting:
+- refined work claim rejection without approval or `READY`,
+- stable rejection reason tokens,
+- overscope split guidance preserves refinement lineage.
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run:
 `uv run pytest tests/atelier/test_lifecycle.py tests/atelier/worker/test_selection.py tests/atelier/worker/test_session_startup.py tests/atelier/test_worker_agents_template.py -k refinement -v`
-Expected: FAIL due missing gate and template updates.
+Expected: FAIL due missing gate wiring/template language.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Integrate refinement gate checks into epic claimability path and selection
-filtering. Update worker/planner templates to codify lineage-based split rules.
+Integrate gate checks in lifecycle/selection and update templates for
+lineage-preserving overscope behavior.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -523,8 +584,6 @@ Run:
 Expected: PASS.
 
 - [ ] **Step 5: Refactor and verify**
-
-Ensure rejection reasons are stable machine-readable strings for retry logic.
 
 Run:
 `uv run pytest tests/atelier/test_lifecycle.py tests/atelier/worker/test_selection.py tests/atelier/worker/test_session_startup.py -v`
@@ -534,43 +593,40 @@ Expected: PASS.
 
 ```bash
 git add src/atelier/lifecycle.py src/atelier/worker/selection.py src/atelier/templates/AGENTS.worker.md.tmpl src/atelier/templates/AGENTS.planner.md.tmpl tests/atelier/test_lifecycle.py tests/atelier/worker/test_selection.py tests/atelier/worker/test_session_startup.py tests/atelier/test_worker_agents_template.py
-git commit -m "feat(worker): fail closed on refined-work claim gate" -m "- Enforce refined-work approval and READY verdict at claimability boundaries.
+git commit -m "feat(worker): fail closed on refined claim requirements" -m "- Reject refined work claims without approval evidence and READY verdict.
 - Keep unrefined claim behavior unchanged.
-- Add template and selection tests for lineage-aware overscope handling."
+- Add selection/template tests for lineage-aware overscope handling."
 ```
 
-### Task 7: Add compatibility alias and package the new skills
+### Task 8: Add compatibility alias and package-level assertions
 
 **Files:**
 - Create: `src/atelier/skills/plan-refined-deliberation/SKILL.md`
-- Modify: `src/atelier/skills.py`
 - Modify: `tests/atelier/test_skills.py`
 
 - [ ] **Step 1: Identify or write the failing test**
 
-Add tests asserting packaged skill discovery includes:
+Add tests asserting packaged skills include:
 - `planning`,
 - `refine-plan`,
+- `plan-set-refinement`,
 - `plan-refined-deliberation` alias.
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/atelier/test_skills.py -k planning -v`
+Run: `uv run pytest tests/atelier/test_skills.py -k "planning or refinement" -v`
 Expected: FAIL on missing skills.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Add alias skill that explicitly routes operators to `refine-plan` and documents
-deprecation scope.
+Add alias skill that delegates to `refine-plan` and marks deprecation scope.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/atelier/test_skills.py -k planning -v`
+Run: `uv run pytest tests/atelier/test_skills.py -k "planning or refinement" -v`
 Expected: PASS.
 
 - [ ] **Step 5: Refactor and verify**
-
-Ensure frontmatter, naming, and package sync behavior are stable.
 
 Run:
 `uv run pytest tests/atelier/test_skills.py tests/atelier/test_skill_frontmatter_validation.py -v`
@@ -579,29 +635,29 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/atelier/skills/plan-refined-deliberation src/atelier/skills.py tests/atelier/test_skills.py
-git commit -m "feat(skills): add refine-plan compatibility alias" -m "- Add plan-refined-deliberation alias that delegates to refine-plan.
-- Ensure packaged skill discovery includes new planning/refinement skills.
-- Add tests to prevent future skill-packaging drift."
+git add src/atelier/skills/plan-refined-deliberation tests/atelier/test_skills.py
+git commit -m "feat(skills): add refinement compatibility alias" -m "- Add plan-refined-deliberation alias to preserve older entry points.
+- Keep refine-plan as the canonical iterative refinement skill.
+- Extend packaging tests for new planning/refinement skills."
 ```
 
-### Task 8: Final verification and repo gates
+### Task 9: Final verification and quality gates
 
 **Files:**
-- Modify: all changed files from Tasks 1-7 as needed.
+- Modify: changed files from Tasks 1-8 only when fixes are required.
 
 - [ ] **Step 1: Identify or write the failing test**
 
-No new tests. Use full-suite verification as the gate.
+No new tests; run full project gates.
 
-- [ ] **Step 2: Run test to verify it fails (if anything regressed)**
+- [ ] **Step 2: Run test to verify it fails (if regressions exist)**
 
 Run: `just test`
-Expected: Either PASS or actionable failing tests that must be fixed.
+Expected: PASS or actionable failures to fix.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Fix any regressions found by full-suite checks without weakening valid tests.
+Fix regressions without weakening valid tests.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -616,19 +672,21 @@ Expected: PASS for both.
 
 - [ ] **Step 6: Commit**
 
+Commit only if Task 9 produced code/doc changes:
+
 ```bash
 git add -A
-git commit -m "feat(planning): converge atelier planning with trycycle refinement" -m "- Introduce planning/refine-plan skill architecture with trycycle-derived mechanics and doctrine.
-- Persist refinement artifacts, enforce lineage propagation, and fail-closed claim gates.
-- Update planner/worker templates, scripts, docs, and tests for a single-cutover rollout."
+git commit -m "chore(planning): reconcile final verification fixes" -m "- Resolve full-suite regressions discovered during final gates.
+- Keep changes scoped to quality-gate fixes only."
 ```
 
 ## Completion checklist for this implementation
 
-- [ ] `planning` skill is the primary doctrine for planning quality.
-- [ ] `refine-plan` runs bounded stateless plan-edit rounds and persists evidence.
-- [ ] refinement trigger semantics are explicit and documented (`refined`/`refinement`).
+- [ ] `planning` is the primary doctrine for all planning quality.
+- [ ] doctrine convergence includes trycycle tone/style, not only loop mechanics.
+- [ ] `refine-plan` runs bounded stateless rounds with canonical verdict tokens.
+- [ ] `plan-set-refinement` enables refinement on existing items at any stage.
 - [ ] refinement is opt-in, viral by lineage, and approval-gated.
 - [ ] worker claim blocks refined work without approval + `READY` evidence.
-- [ ] trycycle prose/style has been merged into baseline planning doctrine.
-- [ ] all tests, formatting, and lint gates pass.
+- [ ] planner/worker templates codify refined trigger and lineage behavior.
+- [ ] all tests and repo gates (`just test`, `just format`, `just lint`) pass.
