@@ -698,6 +698,56 @@ def test_reconcile_stale_terminal_metadata_next_run_uses_closed_path_without_ref
     assert any("already closed" in line for line in logs)
 
 
+def test_reconcile_closed_path_reports_integrated_sha_conflict_without_aborting() -> None:
+    project = config.ProjectConfig(
+        project=config.ProjectSection(origin="https://github.com/org/repo"),
+        branch=config.BranchConfig(pr=False),
+    )
+    issue = {
+        "id": "at-1.16",
+        "status": "closed",
+        "labels": [],
+        "description": "changeset.integrated_sha: stored1234\n",
+    }
+    logs: list[str] = []
+
+    with (
+        patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[issue]),
+        patch("atelier.worker.reconcile.worker_store.show_issue", return_value=issue),
+        patch("atelier.worker.reconcile.beads.reconcile_closed_issue_exported_github_tickets"),
+        patch(
+            "atelier.worker.reconcile.worker_store.update_changeset_integrated_sha",
+            side_effect=SystemExit("changeset integrated sha already set; override not permitted"),
+        ),
+        patch("atelier.worker.reconcile.resolve_hook_agent_bead_for_epic", return_value=None),
+    ):
+        result = reconcile.reconcile_blocked_merged_changesets(
+            agent_id="worker/1",
+            agent_bead_id="at-agent",
+            project_config=project,
+            project_data_dir=Path("/project"),
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            dry_run=False,
+            log=logs.append,
+            resolve_epic_id_for_changeset=lambda *_args, **_kwargs: "at-1",
+            changeset_integration_signal=lambda *_args, **_kwargs: (True, "live5678"),
+            issue_dependency_ids=lambda _issue: tuple(),
+            issue_labels=lambda issue: {str(label) for label in issue.get("labels", [])},
+            finalize_changeset=lambda **_kwargs: (_ for _ in ()).throw(
+                AssertionError("closed path should not finalize")
+            ),
+            finalize_epic_if_complete=lambda **_kwargs: FinalizeResult(
+                continue_running=True, reason="changeset_complete"
+            ),
+        )
+
+    assert result.reconciled == 0
+    assert result.failed == 1
+    assert any("integrated-sha-conflict" in line for line in logs)
+    assert any("decision-required" in line for line in logs)
+
+
 def test_reconcile_blocked_merged_changesets_fails_closed_when_stale_terminal_finalize_stays_open() -> (
     None
 ):
@@ -761,6 +811,57 @@ def test_reconcile_blocked_merged_changesets_fails_closed_when_stale_terminal_fi
     assert result.reconciled == 0
     assert result.failed == 1
     assert any("stale-terminal-finalize-remained-non-terminal" in line for line in logs)
+
+
+def test_reconcile_finalize_path_reports_integrated_sha_conflict_without_aborting() -> None:
+    project = config.ProjectConfig(
+        project=config.ProjectSection(origin="https://github.com/org/repo"),
+        branch=config.BranchConfig(pr=False),
+    )
+    issue = {
+        "id": "at-1.2",
+        "status": "blocked",
+        "labels": [],
+        "description": "changeset.work_branch: feat/at-1.2\n",
+    }
+    logs: list[str] = []
+
+    def finalize_changeset(**_kwargs: object) -> FinalizeResult:
+        issue["status"] = "closed"
+        return FinalizeResult(continue_running=True, reason="changeset_complete")
+
+    with (
+        patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[issue]),
+        patch("atelier.worker.reconcile.worker_store.show_issue", return_value=issue),
+        patch(
+            "atelier.worker.reconcile.worker_store.update_changeset_integrated_sha",
+            side_effect=SystemExit("changeset integrated sha already set; override not permitted"),
+        ),
+        patch("atelier.worker.reconcile.resolve_hook_agent_bead_for_epic", return_value=None),
+    ):
+        result = reconcile.reconcile_blocked_merged_changesets(
+            agent_id="worker/1",
+            agent_bead_id="at-agent",
+            project_config=project,
+            project_data_dir=Path("/project"),
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            dry_run=False,
+            log=logs.append,
+            resolve_epic_id_for_changeset=lambda *_args, **_kwargs: "at-1",
+            changeset_integration_signal=lambda *_args, **_kwargs: (True, "live5678"),
+            issue_dependency_ids=lambda _issue: tuple(),
+            issue_labels=lambda issue: {str(label) for label in issue.get("labels", [])},
+            finalize_changeset=finalize_changeset,
+            finalize_epic_if_complete=lambda **_kwargs: FinalizeResult(
+                continue_running=True, reason="changeset_complete"
+            ),
+        )
+
+    assert result.reconciled == 0
+    assert result.failed == 1
+    assert any("integrated-sha-conflict" in line for line in logs)
+    assert any("decision-required" in line for line in logs)
 
 
 def test_reconcile_blocked_merged_changesets_reports_stale_terminal_lookup_anomaly() -> None:

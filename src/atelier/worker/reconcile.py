@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import agent_home, beads, changesets, config, git, lifecycle, prs
-from . import changeset_state as worker_changeset_state
 from . import stale_pr_lifecycle
 from . import store_adapter as worker_store
 from .models import FinalizeResult, ReconcileResult
@@ -212,6 +211,26 @@ def _converged_integrated_sha(updates: tuple[str, ...]) -> str | None:
     for update in updates:
         if update.startswith(prefix):
             return update.removeprefix(prefix)
+    return None
+
+
+def _persist_integrated_sha(
+    candidate: ReconcileCandidate,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> str | None:
+    if not candidate.integrated_sha:
+        return None
+    try:
+        worker_store.update_changeset_integrated_sha(
+            candidate.issue_id,
+            candidate.integrated_sha,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+    except (SystemExit, ValueError) as exc:
+        return _format_lookup_error(str(exc))
     return None
 
 
@@ -981,13 +1000,22 @@ def reconcile_blocked_merged_changesets(
                     beads_root=beads_root,
                     cwd=repo_root,
                 )
-                if candidate.integrated_sha:
-                    worker_store.update_changeset_integrated_sha(
-                        changeset_id,
-                        candidate.integrated_sha,
-                        beads_root=beads_root,
-                        repo_root=repo_root,
-                    )
+                sha_error = _persist_integrated_sha(
+                    candidate,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                )
+                if sha_error is not None:
+                    failed += 1
+                    failed_ids.add(changeset_id)
+                    if log:
+                        log(
+                            "reconcile anomaly: "
+                            f"{changeset_id} -> epic={candidate.epic_id} "
+                            "integrated-sha-conflict"
+                            f"(error={sha_error}) decision-required"
+                        )
+                    continue
                 if log:
                     log(
                         f"reconcile ok: {changeset_id} -> epic={candidate.epic_id} (already closed)"
@@ -1061,12 +1089,22 @@ def reconcile_blocked_merged_changesets(
                 and _converged_integrated_sha(converged_updates) is None
                 and _recorded_integrated_sha(refreshed_issue or {}) is None
             ):
-                worker_store.update_changeset_integrated_sha(
-                    changeset_id,
-                    candidate.integrated_sha,
+                sha_error = _persist_integrated_sha(
+                    candidate,
                     beads_root=beads_root,
                     repo_root=repo_root,
                 )
+                if sha_error is not None:
+                    failed += 1
+                    failed_ids.add(changeset_id)
+                    if log:
+                        log(
+                            "reconcile anomaly: "
+                            f"{changeset_id} -> epic={candidate.epic_id} "
+                            "integrated-sha-conflict"
+                            f"(error={sha_error}) decision-required"
+                        )
+                    continue
             if log:
                 log(
                     f"reconcile ok: {changeset_id} -> epic={candidate.epic_id} "
