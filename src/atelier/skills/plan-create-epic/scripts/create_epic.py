@@ -8,7 +8,6 @@ import asyncio
 import sys
 from dataclasses import replace
 from pathlib import Path
-from typing import cast
 
 _SHARED_SCRIPTS_ROOT = Path(__file__).resolve().parents[2] / "shared" / "scripts"
 if str(_SHARED_SCRIPTS_ROOT) not in sys.path:
@@ -30,13 +29,6 @@ from atelier.executable_work_validation import (  # noqa: E402
     compact_excerpt,
     validate_executable_work_payload,
 )
-from atelier.planning_refinement import (  # noqa: E402
-    DEFAULT_PLAN_EDIT_ROUNDS_MAX,
-    DEFAULT_POST_IMPL_REVIEW_ROUNDS_MAX,
-    ApprovalSource,
-    PlanningRefinementRecord,
-)
-from atelier.store import AppendNotesRequest  # noqa: E402
 
 
 def _description(scope: str, changeset_strategy: str | None) -> str:
@@ -91,8 +83,16 @@ def _build_store(*, beads_root: Path, repo_root: Path):
     return build_atelier_store(beads=client)
 
 
-def _render_refinement_note(record: PlanningRefinementRecord) -> str:
-    payload = record.model_dump(exclude_none=True)
+def _render_refinement_note(record: object) -> str:
+    from typing import cast
+
+    model_dump = getattr(record, "model_dump", None)
+    if not callable(model_dump):
+        raise RuntimeError("invalid refinement record payload")
+    raw_payload = model_dump(exclude_none=True)
+    if not isinstance(raw_payload, dict):
+        raise RuntimeError("invalid refinement record payload")
+    payload = cast(dict[str, object], raw_payload)
     ordered_keys = (
         "authoritative",
         "mode",
@@ -121,6 +121,37 @@ def _render_refinement_note(record: PlanningRefinementRecord) -> str:
             rendered = str(value)
         lines.append(f"{key}: {rendered}")
     return "\n".join(lines)
+
+
+def _required_refinement_note(
+    *,
+    issue_id: str,
+    approval_source: str,
+    approved_by: str,
+    approved_at: str,
+) -> str:
+    from typing import cast
+
+    from atelier.planning_refinement import (
+        DEFAULT_PLAN_EDIT_ROUNDS_MAX,
+        DEFAULT_POST_IMPL_REVIEW_ROUNDS_MAX,
+        ApprovalSource,
+        PlanningRefinementRecord,
+    )
+
+    record = PlanningRefinementRecord(
+        authoritative=True,
+        mode="requested",
+        required=True,
+        lineage_root=issue_id,
+        approval_status="approved",
+        approval_source=cast(ApprovalSource, approval_source),
+        approved_by=approved_by,
+        approved_at=approved_at,
+        plan_edit_rounds_max=DEFAULT_PLAN_EDIT_ROUNDS_MAX,
+        post_impl_review_rounds_max=DEFAULT_POST_IMPL_REVIEW_ROUNDS_MAX,
+    )
+    return _render_refinement_note(record)
 
 
 def main() -> None:
@@ -212,20 +243,14 @@ def main() -> None:
                     "refinement_approval_source, refinement_approved_by, and "
                     "refinement_approved_at"
                 )
-            note = _render_refinement_note(
-                PlanningRefinementRecord(
-                    authoritative=True,
-                    mode="requested",
-                    required=True,
-                    lineage_root=epic.id,
-                    approval_status="approved",
-                    approval_source=cast(ApprovalSource, approval_source),
-                    approved_by=approved_by,
-                    approved_at=approved_at,
-                    plan_edit_rounds_max=DEFAULT_PLAN_EDIT_ROUNDS_MAX,
-                    post_impl_review_rounds_max=DEFAULT_POST_IMPL_REVIEW_ROUNDS_MAX,
-                )
+            note = _required_refinement_note(
+                issue_id=epic.id,
+                approval_source=approval_source,
+                approved_by=approved_by,
+                approved_at=approved_at,
             )
+            from atelier.store import AppendNotesRequest
+
             asyncio.run(store.append_notes(AppendNotesRequest(issue_id=epic.id, notes=(note,))))
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)

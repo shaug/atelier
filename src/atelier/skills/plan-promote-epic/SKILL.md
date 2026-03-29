@@ -28,8 +28,8 @@ description: >-
   and related-context references for the epic and each child.
 - Missing required detail sections are surfaced explicitly before any
   confirmation prompt.
-- Refined executable paths are only promotable when required refinement
-  evidence is complete (`approval_status=approved`, `latest_verdict=READY`).
+- Refined executable paths are only promotable when required refinement evidence
+  is complete (`approval_status=approved`, `latest_verdict=READY`).
 - Any remaining ambiguity has an explicit clarification loop with the operator
   before promotion. That loop must cover unclear scope boundaries, edge cases,
   explicit non-goals ("what not to do"), and missing related-context links.

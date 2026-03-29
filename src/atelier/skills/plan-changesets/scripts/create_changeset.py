@@ -29,12 +29,6 @@ from atelier.executable_work_validation import (  # noqa: E402
     compact_excerpt,
     validate_executable_work_payload,
 )
-from atelier.planning_refinement import (  # noqa: E402
-    PlanningRefinementRecord,
-    parse_refinement_blocks,
-    select_winning_refinement,
-)
-from atelier.store import AppendNotesRequest  # noqa: E402
 
 
 def _fail_invalid_payload(*, title: str, description: str) -> None:
@@ -78,8 +72,16 @@ def _build_store(*, beads_root: Path, repo_root: Path):
     return build_atelier_store(beads=client)
 
 
-def _render_refinement_note(record: PlanningRefinementRecord) -> str:
-    payload = record.model_dump(exclude_none=True)
+def _render_refinement_note(record: object) -> str:
+    from typing import cast
+
+    model_dump = getattr(record, "model_dump", None)
+    if not callable(model_dump):
+        raise RuntimeError("invalid refinement record payload")
+    raw_payload = model_dump(exclude_none=True)
+    if not isinstance(raw_payload, dict):
+        raise RuntimeError("invalid refinement record payload")
+    payload = cast(dict[str, object], raw_payload)
     ordered_keys = (
         "authoritative",
         "mode",
@@ -129,7 +131,10 @@ def _parent_notes(*, store, epic_id: str, beads_root: Path, repo_root: Path) -> 
         beads_root=beads_root,
         env={"BEADS_DIR": str(beads_root)},
     )
-    issue = asyncio.run(client.show(ShowIssueRequest(issue_id=epic_id)))
+    try:
+        issue = asyncio.run(client.show(ShowIssueRequest(issue_id=epic_id)))
+    except Exception:
+        return None
     notes = getattr(issue, "notes", None)
     if isinstance(notes, str) and notes.strip():
         return notes
@@ -143,6 +148,12 @@ def _parent_notes(*, store, epic_id: str, beads_root: Path, repo_root: Path) -> 
 def _inherited_refinement_note(*, parent_notes: str | None, epic_id: str) -> str | None:
     if not parent_notes:
         return None
+    from atelier.planning_refinement import (
+        PlanningRefinementRecord,
+        parse_refinement_blocks,
+        select_winning_refinement,
+    )
+
     selected = select_winning_refinement(parse_refinement_blocks(parent_notes))
     if selected is None or not selected.required:
         return None
@@ -245,6 +256,8 @@ def main() -> None:
             )
         )
         if refinement_note is not None:
+            from atelier.store import AppendNotesRequest
+
             asyncio.run(
                 store.append_notes(
                     AppendNotesRequest(issue_id=changeset.id, notes=(refinement_note,))

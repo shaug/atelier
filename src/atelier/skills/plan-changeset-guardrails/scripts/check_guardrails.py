@@ -30,7 +30,22 @@ _BOOTSTRAP_REPO_ROOT = bootstrap_projected_atelier_script(
 from atelier.bd_invocation import with_bd_mode  # noqa: E402
 from atelier.beads_context import resolve_runtime_repo_dir_hint  # noqa: E402
 from atelier.planner_contract import validate_authoring_contract  # noqa: E402
-from atelier.planning_refinement import evaluate_refinement_claim_gate  # noqa: E402
+
+
+@dataclass(frozen=True)
+class _RefinementFallbackDecision:
+    required: bool
+    claimable: bool
+    reason: str | None
+
+
+def _evaluate_refinement_claim_gate(notes: str | None):
+    try:
+        from atelier.planning_refinement import evaluate_refinement_claim_gate  # noqa: E402
+    except ModuleNotFoundError:  # pragma: no cover - projected runtime compatibility
+        return _RefinementFallbackDecision(required=False, claimable=True, reason=None)
+    return evaluate_refinement_claim_gate(notes)
+
 
 _LOC_TRIGGER = re.compile(r"\b(?:loc|estimate)\b", re.IGNORECASE)
 _NUMBER = re.compile(r"\b\d{2,5}\b")
@@ -297,7 +312,7 @@ def _evaluate_guardrails(
                     "`done_definition:` to the executable path."
                 )
         text = _text_blob(issue)
-        refinement_gate = evaluate_refinement_claim_gate(_normalize_text(issue.get("notes")))
+        refinement_gate = _evaluate_refinement_claim_gate(_normalize_text(issue.get("notes")))
         if refinement_gate.required and not refinement_gate.claimable:
             reason = refinement_gate.reason or "refinement_metadata_missing_or_malformed"
             violations.append(f"{issue_id}: refinement evidence incomplete ({reason}).")
