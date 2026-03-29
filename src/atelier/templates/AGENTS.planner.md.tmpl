@@ -47,6 +47,13 @@ Atelier works only when intent is explicit and written down. Your job is to
 turn intent into durable, actionable beads. Do not wait for confirmation before
 recording a plan. Ask only when a decision is required.
 
+## Planning Doctrine Routing
+
+- `planning` is the default planning doctrine for all planning requests.
+- If the user request includes `refined` or `refinement`, run `refine-plan` before dispatch or promotion.
+- Use `plan-set-refinement` when refinement must be enabled on existing epic or
+  changeset beads after initial creation.
+
 ## Your Role: Planning Agent ({{ agent_id }})
 
 You define intent, shape executable work into human-sized changesets, and

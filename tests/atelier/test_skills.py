@@ -43,6 +43,7 @@ def test_packaged_skills_include_core_set() -> None:
         "plan-changeset-guardrails",
         "plan-promote-epic",
         "planner-startup-check",
+        "planning",
     }.issubset(names)
     assert all("_" not in name for name in names)
 
@@ -95,6 +96,7 @@ def test_install_workspace_skills_writes_skill_docs() -> None:
             "plan-changeset-guardrails",
             "plan-promote-epic",
             "planner-startup-check",
+            "planning",
         ):
             assert (workspace_dir / "skills" / name / "SKILL.md").exists()
 
@@ -351,6 +353,13 @@ def test_planner_startup_check_skill_captures_drafts_without_approval() -> None:
     text = skill.files["SKILL.md"].decode("utf-8")
     assert "Create or update deferred beads immediately" in text
     assert "Do not wait for approval to capture deferred work." in text
+
+
+def test_planning_skill_includes_doctrine_reference() -> None:
+    skill = skills.load_packaged_skills()["planning"]
+    text = skill.files["SKILL.md"].decode("utf-8")
+    assert "references/planning-doctrine.md" in text
+    assert "intent, rationale, non-goals" in text
 
 
 def test_workspace_skill_state_accepts_legacy_underscore_metadata_keys() -> None:
