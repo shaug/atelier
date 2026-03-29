@@ -4,6 +4,8 @@
 Provenance:
 - Adapted from trycycle planning loop mechanics:
   - `orchestrator/run_phase.py`
+  - `_prepare_phase`
+  - `_command_run`
   - `subagents/prompt-planning-initial.md`
   - `subagents/prompt-planning-edit.md`
 - Baseline import reference: trycycle base commit `8ea3981`.
@@ -136,6 +138,18 @@ def run_refinement(
             _write_result(output_dir=output_dir, result=result)
             return result
 
+        if verdict == "USER_DECISION_REQUIRED":
+            (output_dir / "latest-plan.md").write_text(plan_text, encoding="utf-8")
+            result = RefinementRunResult(
+                status="non_converged",
+                max_rounds=max_rounds,
+                rounds_used=rounds_used,
+                latest_verdict=verdict,
+                output_dir=output_dir,
+            )
+            _write_result(output_dir=output_dir, result=result)
+            return result
+
     (output_dir / "latest-plan.md").write_text(plan_text, encoding="utf-8")
     result = RefinementRunResult(
         status="non_converged",
@@ -148,8 +162,15 @@ def run_refinement(
     return result
 
 
-def _default_round_executor(_round_number: int, _plan_text: str) -> RoundResult:
-    raise RuntimeError("round execution backend not configured")
+def _default_round_executor(round_number: int, plan_text: str) -> RoundResult:
+    return RoundResult(
+        verdict="USER_DECISION_REQUIRED",
+        plan_text=plan_text,
+        summary=(
+            "no runtime round executor configured; "
+            f"stopped at round {round_number} with fail-closed verdict"
+        ),
+    )
 
 
 def _write_result(*, output_dir: Path, result: RefinementRunResult) -> None:
@@ -167,6 +188,8 @@ def _write_result(*, output_dir: Path, result: RefinementRunResult) -> None:
 
 
 def _simulate_round_executor(verdicts: list[str]) -> RoundExecutor:
+    if not verdicts:
+        raise ValueError("simulate verdict sequence must include at least one token")
     normalized_verdicts = [parse_verdict(verdict) for verdict in verdicts]
 
     def executor(round_number: int, plan_text: str) -> RoundResult:

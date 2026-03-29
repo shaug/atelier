@@ -425,3 +425,65 @@ def test_promote_epic_refinement_requires_ready_verdict(
 
     assert excinfo.value.code == 1
     assert "refinement_not_ready" in capsys.readouterr().err
+
+
+def test_promote_epic_refinement_requires_ready_verdict_for_epic_only_execution(
+    monkeypatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+
+    monkeypatch.setattr(
+        module,
+        "_resolve_context",
+        lambda **_kwargs: (tmp_path / ".beads", tmp_path / "repo", None),
+    )
+
+    epic_issue = _issue(
+        "at-epic",
+        title="Epic",
+        description=("changeset_strategy: Keep review scope small.\nrelated_context: at-context\n"),
+        notes=(
+            "planning_refinement.v1\n"
+            "authoritative: true\n"
+            "mode: requested\n"
+            "required: true\n"
+            "lineage_root: at-epic\n"
+            "approval_status: approved\n"
+            "approval_source: operator\n"
+            "approved_by: planner-user\n"
+            "approved_at: 2026-03-29T12:00:00Z\n"
+            "latest_verdict: REVISED\n"
+        ),
+    )
+
+    class FakeStore:
+        async def get_epic(self, epic_id):
+            assert epic_id == "at-epic"
+            from atelier.store import LifecycleStatus
+
+            return SimpleNamespace(id=epic_id, lifecycle=LifecycleStatus.DEFERRED)
+
+        async def list_changesets(self, query):
+            del query
+            return ()
+
+        async def transition_lifecycle(self, request):  # pragma: no cover - defensive
+            raise AssertionError(request)
+
+    class FakeClient:
+        async def show(self, request):
+            assert request.issue_id == "at-epic"
+            return epic_issue
+
+    monkeypatch.setattr(
+        module, "_build_store_and_client", lambda **_kwargs: (FakeStore(), FakeClient())
+    )
+    monkeypatch.setattr(sys, "argv", ["promote_epic.py", "--epic-id", "at-epic"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.main()
+
+    assert excinfo.value.code == 1
+    assert "at-epic: refinement_not_ready" in capsys.readouterr().err

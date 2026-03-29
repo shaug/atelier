@@ -312,7 +312,7 @@ def test_create_changeset_inherits_required_refinement_from_parent(
     tmp_path: Path,
 ) -> None:
     module = _load_script_module()
-    captured_notes: list[tuple[str, ...]] = []
+    captured_request: dict[str, object] = {}
     context = SimpleNamespace(
         project_dir=tmp_path / "project",
         beads_root=tmp_path / ".beads",
@@ -340,15 +340,14 @@ def test_create_changeset_inherits_required_refinement_from_parent(
 
     class FakeStore:
         async def create_changeset(self, request):
-            del request
+            captured_request["request"] = request
             return SimpleNamespace(id="at-epic.1")
 
         async def get_epic(self, epic_id):
             return SimpleNamespace(id=epic_id, notes=parent_notes)
 
-        async def append_notes(self, request):
-            captured_notes.append(request.notes)
-            return SimpleNamespace(id=request.issue_id)
+        async def append_notes(self, request):  # pragma: no cover - defensive
+            raise AssertionError(request)
 
     monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
     monkeypatch.setattr(
@@ -377,8 +376,9 @@ def test_create_changeset_inherits_required_refinement_from_parent(
 
     module.main()
 
-    assert captured_notes
-    note = captured_notes[0][0]
+    request = captured_request["request"]
+    assert request.notes
+    note = request.notes[0]
     assert note.startswith("planning_refinement.v1")
     assert "authoritative: true" in note
     assert "mode: inherited" in note
@@ -386,3 +386,72 @@ def test_create_changeset_inherits_required_refinement_from_parent(
     assert "lineage_root: at-epic" in note
     assert "plan_edit_rounds_max: 7" in note
     assert "post_impl_review_rounds_max: 9" in note
+
+
+def test_create_changeset_unrefined_control_keeps_notes_unchanged(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    captured_request: dict[str, object] = {}
+    context = SimpleNamespace(
+        project_dir=tmp_path / "project",
+        beads_root=tmp_path / ".beads",
+    )
+    parent_notes = (
+        "planning_refinement.v1\n"
+        "authoritative: true\n"
+        "mode: requested\n"
+        "required: false\n"
+        "approval_status: missing\n"
+        "latest_verdict: REVISED\n"
+    )
+
+    monkeypatch.setattr(
+        module.auto_export,
+        "resolve_auto_export_context",
+        lambda **_kwargs: context,
+    )
+
+    class FakeStore:
+        async def create_changeset(self, request):
+            captured_request["request"] = request
+            return SimpleNamespace(id="at-epic.2")
+
+        async def get_epic(self, epic_id):
+            return SimpleNamespace(id=epic_id, notes=parent_notes)
+
+        async def append_notes(self, request):  # pragma: no cover - defensive
+            raise AssertionError(request)
+
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
+    monkeypatch.setattr(
+        module.auto_export,
+        "auto_export_issue",
+        lambda issue_id, *, context: module.auto_export.AutoExportResult(
+            status="skipped",
+            issue_id=issue_id,
+            provider=None,
+            message="auto-export disabled for test",
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "create_changeset.py",
+            "--epic-id",
+            "at-epic",
+            "--title",
+            "Unrefined control changeset",
+            "--acceptance",
+            "Unrefined parents do not add inherited refinement notes.",
+            "--notes",
+            "preserve original operator note",
+        ],
+    )
+
+    module.main()
+
+    request = captured_request["request"]
+    assert request.notes == ("preserve original operator note",)

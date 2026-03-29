@@ -8,5 +8,6 @@ Task:
 - Diagnose any remaining execution risk in the current plan.
 - Keep edits proportional: only revise what is necessary for successful
   execution.
-- Return one verdict token: `READY`, `REVISED`, or `USER_DECISION_REQUIRED`.
+- Return `## Plan verdict` with one token: `READY`, `REVISED`, or
+  `USER_DECISION_REQUIRED`.
 - If revised, return the full updated plan.

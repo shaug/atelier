@@ -7,6 +7,9 @@ from pathlib import Path
 
 import pytest
 
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_TRYCYCLE_FIXTURE_ROOT = _REPO_ROOT / "tests" / "atelier" / "fixtures" / "trycycle_refinement"
+
 
 def _load_script_module():
     script_path = (
@@ -24,6 +27,11 @@ def _load_script_module():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _load_anchor_fixture() -> dict[str, list[str]]:
+    fixture_path = _TRYCYCLE_FIXTURE_ROOT / "reference_anchors.json"
+    return json.loads(fixture_path.read_text(encoding="utf-8"))
 
 
 def test_refine_plan_verdict_parser_accepts_only_canonical_tokens() -> None:
@@ -106,3 +114,84 @@ def test_refine_plan_fails_closed_on_non_convergence(tmp_path: Path) -> None:
     assert result.status == "non_converged"
     assert result.latest_verdict == "REVISED"
     assert result.rounds_used == 3
+
+
+def test_refine_plan_main_without_simulation_is_runnable_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    initial_plan_path = tmp_path / "initial.md"
+    output_dir = tmp_path / "artifacts"
+    initial_plan_path.write_text("initial\n", encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_refinement.py",
+            "--initial-plan-path",
+            str(initial_plan_path),
+            "--output-dir",
+            str(output_dir),
+        ],
+    )
+
+    exit_code = module.main()
+
+    assert exit_code == 1
+    payload = json.loads((output_dir / "result.json").read_text(encoding="utf-8"))
+    assert payload["status"] == "non_converged"
+    assert payload["latest_verdict"] == "USER_DECISION_REQUIRED"
+
+
+def test_refine_plan_loop_artifacts_match_trycycle_snapshot_anchors() -> None:
+    anchors = _load_anchor_fixture()["mechanics_anchors"]
+    loop_snapshot = (_TRYCYCLE_FIXTURE_ROOT / "trycycle-planning-loop.snapshot.md").read_text(
+        encoding="utf-8"
+    )
+    live_material = "\n".join(
+        (
+            (
+                _REPO_ROOT
+                / "src"
+                / "atelier"
+                / "skills"
+                / "refine-plan"
+                / "subagents"
+                / "prompt-planning-initial.md"
+            ).read_text(encoding="utf-8"),
+            (
+                _REPO_ROOT
+                / "src"
+                / "atelier"
+                / "skills"
+                / "refine-plan"
+                / "subagents"
+                / "prompt-planning-edit.md"
+            ).read_text(encoding="utf-8"),
+            (
+                _REPO_ROOT
+                / "src"
+                / "atelier"
+                / "skills"
+                / "refine-plan"
+                / "scripts"
+                / "run_refinement.py"
+            ).read_text(encoding="utf-8"),
+            (
+                _REPO_ROOT
+                / "src"
+                / "atelier"
+                / "skills"
+                / "refine-plan"
+                / "scripts"
+                / "prompt_builder"
+                / "build.py"
+            ).read_text(encoding="utf-8"),
+        )
+    )
+    missing_in_snapshot = [anchor for anchor in anchors if anchor not in loop_snapshot]
+    missing_in_live = [anchor for anchor in anchors if anchor not in live_material]
+
+    assert not missing_in_snapshot, f"snapshot anchors missing: {missing_in_snapshot}"
+    assert not missing_in_live, f"live refine-plan anchors missing: {missing_in_live}"

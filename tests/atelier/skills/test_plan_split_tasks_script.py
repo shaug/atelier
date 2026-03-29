@@ -29,7 +29,7 @@ def test_split_tasks_propagates_inherited_refinement_from_parent(
     tmp_path: Path,
 ) -> None:
     module = _load_script_module()
-    appended_notes: list[tuple[str, ...]] = []
+    created_requests: list[object] = []
     parent_notes = (
         "planning_refinement.v1\n"
         "authoritative: true\n"
@@ -60,12 +60,12 @@ def test_split_tasks_propagates_inherited_refinement_from_parent(
             return SimpleNamespace(id=issue_id, epic_id="at-epic", notes=parent_notes)
 
         async def create_changeset(self, request):
-            child_index = len(appended_notes) + 1
+            created_requests.append(request)
+            child_index = len(created_requests)
             return SimpleNamespace(id=f"at-epic.{child_index + 1}")
 
-        async def append_notes(self, request):
-            appended_notes.append(request.notes)
-            return SimpleNamespace(id=request.issue_id)
+        async def append_notes(self, request):  # pragma: no cover - defensive
+            raise AssertionError(request)
 
     monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
     monkeypatch.setattr(
@@ -94,9 +94,9 @@ def test_split_tasks_propagates_inherited_refinement_from_parent(
 
     module.main()
 
-    assert len(appended_notes) == 2
-    for notes in appended_notes:
-        note = notes[0]
+    assert len(created_requests) == 2
+    for request in created_requests:
+        note = request.notes[0]
         assert note.startswith("planning_refinement.v1")
         assert "mode: inherited" in note
         assert "required: true" in note
@@ -110,7 +110,7 @@ def test_split_tasks_leaves_unrefined_lineage_unmarked(
     tmp_path: Path,
 ) -> None:
     module = _load_script_module()
-    appended_notes: list[tuple[str, ...]] = []
+    created_requests: list[object] = []
     context = SimpleNamespace(
         project_dir=tmp_path / "project",
         beads_root=tmp_path / ".beads",
@@ -127,12 +127,11 @@ def test_split_tasks_leaves_unrefined_lineage_unmarked(
             return SimpleNamespace(id=issue_id, epic_id="at-epic", notes="")
 
         async def create_changeset(self, request):
-            del request
+            created_requests.append(request)
             return SimpleNamespace(id="at-epic.2")
 
-        async def append_notes(self, request):
-            appended_notes.append(request.notes)
-            return SimpleNamespace(id=request.issue_id)
+        async def append_notes(self, request):  # pragma: no cover - defensive
+            raise AssertionError(request)
 
     monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
     monkeypatch.setattr(
@@ -159,4 +158,5 @@ def test_split_tasks_leaves_unrefined_lineage_unmarked(
 
     module.main()
 
-    assert appended_notes == []
+    assert len(created_requests) == 1
+    assert created_requests[0].notes == ()

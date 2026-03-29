@@ -30,7 +30,6 @@ from atelier.planning_refinement import (  # noqa: E402
     parse_refinement_blocks,
     select_winning_refinement,
 )
-from atelier.store import AppendNotesRequest  # noqa: E402
 
 
 def _build_store(*, beads_root: Path, repo_root: Path):
@@ -248,18 +247,13 @@ def main() -> None:
                         epic_id=epic_id,
                         title=title,
                         acceptance_criteria=acceptance,
+                        notes=(refinement_note,) if refinement_note is not None else (),
                         labels=("ext:no-export",) if args.no_export else (),
                         initial_status=LifecycleStatus(args.status),
                     )
                 )
             )
             created_ids.append(created.id)
-            if refinement_note is not None:
-                asyncio.run(
-                    store.append_notes(
-                        AppendNotesRequest(issue_id=created.id, notes=(refinement_note,))
-                    )
-                )
             export_result = auto_export.auto_export_issue(
                 created.id,
                 context=context,

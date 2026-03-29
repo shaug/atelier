@@ -242,6 +242,7 @@ def main() -> None:
             parent_notes=parent_notes,
             epic_id=args.epic_id,
         )
+        persisted_notes = notes + ((refinement_note,) if refinement_note is not None else ())
         changeset = asyncio.run(
             store.create_changeset(
                 CreateChangesetRequest(
@@ -249,20 +250,12 @@ def main() -> None:
                     title=args.title,
                     acceptance_criteria=args.acceptance,
                     description=description or None,
-                    notes=notes,
+                    notes=persisted_notes,
                     labels=("ext:no-export",) if args.no_export else (),
                     initial_status=initial_status,
                 )
             )
         )
-        if refinement_note is not None:
-            from atelier.store import AppendNotesRequest
-
-            asyncio.run(
-                store.append_notes(
-                    AppendNotesRequest(issue_id=changeset.id, notes=(refinement_note,))
-                )
-            )
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
