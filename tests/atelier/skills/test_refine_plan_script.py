@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+
+def _load_script_module():
+    script_path = (
+        Path(__file__).resolve().parents[3]
+        / "src"
+        / "atelier"
+        / "skills"
+        / "refine-plan"
+        / "scripts"
+        / "run_refinement.py"
+    )
+    spec = importlib.util.spec_from_file_location("refine_plan_script", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_refine_plan_verdict_parser_accepts_only_canonical_tokens() -> None:
+    module = _load_script_module()
+
+    assert module.parse_verdict("ready") == "READY"
+    assert module.parse_verdict("revised") == "REVISED"
+    assert module.parse_verdict("USER_DECISION_REQUIRED") == "USER_DECISION_REQUIRED"
+    with pytest.raises(ValueError, match="unknown refinement verdict"):
+        module.parse_verdict("NOT_READY")
+
+
+def test_refine_plan_loop_defaults_to_max_rounds_five(tmp_path: Path) -> None:
+    module = _load_script_module()
+    initial_plan_path = tmp_path / "initial.md"
+    initial_plan_path.write_text("initial\n", encoding="utf-8")
+
+    def fake_round_executor(round_number: int, plan_text: str):
+        del round_number
+        return module.RoundResult(verdict="READY", plan_text=plan_text + "done\n")
+
+    result = module.run_refinement(
+        initial_plan_path=initial_plan_path,
+        output_dir=tmp_path / "artifacts",
+        round_executor=fake_round_executor,
+    )
+
+    assert result.max_rounds == 5
+    assert result.rounds_used == 1
+    assert result.latest_verdict == "READY"
+
+
+def test_refine_plan_emits_round_artifacts_per_iteration(tmp_path: Path) -> None:
+    module = _load_script_module()
+    initial_plan_path = tmp_path / "initial.md"
+    initial_plan_path.write_text("initial\n", encoding="utf-8")
+
+    verdicts = iter(("REVISED", "READY"))
+
+    def fake_round_executor(round_number: int, plan_text: str):
+        verdict = next(verdicts)
+        return module.RoundResult(
+            verdict=verdict,
+            plan_text=f"{plan_text}round-{round_number}\n",
+            summary=f"summary-{round_number}",
+        )
+
+    output_dir = tmp_path / "artifacts"
+    result = module.run_refinement(
+        initial_plan_path=initial_plan_path,
+        output_dir=output_dir,
+        round_executor=fake_round_executor,
+    )
+
+    assert result.rounds_used == 2
+    round_one = json.loads((output_dir / "rounds" / "round-01.json").read_text(encoding="utf-8"))
+    round_two = json.loads((output_dir / "rounds" / "round-02.json").read_text(encoding="utf-8"))
+    assert round_one["verdict"] == "REVISED"
+    assert round_two["verdict"] == "READY"
+
+
+def test_refine_plan_fails_closed_on_non_convergence(tmp_path: Path) -> None:
+    module = _load_script_module()
+    initial_plan_path = tmp_path / "initial.md"
+    initial_plan_path.write_text("initial\n", encoding="utf-8")
+
+    def fake_round_executor(round_number: int, plan_text: str):
+        return module.RoundResult(
+            verdict="REVISED",
+            plan_text=f"{plan_text}round-{round_number}\n",
+        )
+
+    result = module.run_refinement(
+        initial_plan_path=initial_plan_path,
+        output_dir=tmp_path / "artifacts",
+        round_executor=fake_round_executor,
+        max_rounds=3,
+    )
+
+    assert result.status == "non_converged"
+    assert result.latest_verdict == "REVISED"
+    assert result.rounds_used == 3
