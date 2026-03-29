@@ -44,6 +44,7 @@ def test_packaged_skills_include_core_set() -> None:
         "plan-promote-epic",
         "planner-startup-check",
         "planning",
+        "plan-set-refinement",
     }.issubset(names)
     assert all("_" not in name for name in names)
 
@@ -97,6 +98,7 @@ def test_install_workspace_skills_writes_skill_docs() -> None:
             "plan-promote-epic",
             "planner-startup-check",
             "planning",
+            "plan-set-refinement",
         ):
             assert (workspace_dir / "skills" / name / "SKILL.md").exists()
 
@@ -360,6 +362,13 @@ def test_planning_skill_includes_doctrine_reference() -> None:
     text = skill.files["SKILL.md"].decode("utf-8")
     assert "references/planning-doctrine.md" in text
     assert "intent, rationale, non-goals" in text
+
+
+def test_plan_set_refinement_skill_mentions_activation_script() -> None:
+    skill = skills.load_packaged_skills()["plan-set-refinement"]
+    text = skill.files["SKILL.md"].decode("utf-8")
+    assert "scripts/set_refinement.py" in text
+    assert "required=true" in text
 
 
 def test_workspace_skill_state_accepts_legacy_underscore_metadata_keys() -> None:

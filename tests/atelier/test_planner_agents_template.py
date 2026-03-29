@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def test_planner_agents_template_contains_core_sections() -> None:
+def _planner_template_text() -> str:
     template_path = (
         Path(__file__).resolve().parents[2]
         / "src"
@@ -11,7 +11,11 @@ def test_planner_agents_template_contains_core_sections() -> None:
         / "templates"
         / "AGENTS.planner.md.tmpl"
     )
-    content = template_path.read_text(encoding="utf-8")
+    return template_path.read_text(encoding="utf-8")
+
+
+def test_planner_agents_template_contains_core_sections() -> None:
+    content = _planner_template_text()
     assert "No Approval Step" in content
     assert "Skill Precedence" in content
     assert "Startup Behavior" in content
@@ -64,3 +68,11 @@ def test_planner_agents_template_contains_core_sections() -> None:
     assert "If the user request includes `refined` or `refinement`" in content
     assert "run `refine-plan` before dispatch or promotion" in content
     assert "Use `plan-set-refinement`" in content
+
+
+def test_planner_agents_template_refinement_routing_contract() -> None:
+    content = _planner_template_text()
+    assert "`planning` is the default planning doctrine" in content
+    assert "If the user request includes `refined` or `refinement`" in content
+    assert "run `refine-plan` before dispatch or promotion" in content
+    assert "Use `plan-set-refinement` when refinement must be enabled" in content
