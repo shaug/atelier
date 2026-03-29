@@ -367,6 +367,14 @@ def _normalize_notes_text(value: object) -> str | None:
     return None
 
 
+def _notes_from_issue_model(issue: object) -> tuple[bool, str | None]:
+    sentinel = object()
+    raw_notes = getattr(issue, "notes", sentinel)
+    if raw_notes is sentinel:
+        return False, None
+    return True, _normalize_notes_text(raw_notes)
+
+
 async def _resolve_work_item(store, issue_id: str):
     try:
         return await store.get_epic(issue_id)
@@ -382,6 +390,24 @@ def _required_hint_from_scope(blocks: tuple[object, ...]) -> bool:
     authoritative = tuple(block for block in blocks if getattr(block, "authoritative_hint", False))
     scope = authoritative or blocks
     return any(bool(getattr(block, "required_hint", False)) for block in scope)
+
+
+def _load_existing_notes(*, store, issue_id: str, beads_root: Path, repo_root: Path) -> str | None:
+    issue = asyncio.run(_resolve_work_item(store, issue_id))
+    notes_present, notes_text = _notes_from_issue_model(issue)
+    if notes_present:
+        return notes_text
+
+    from atelier.lib.beads import ShowIssueRequest, SubprocessBeadsClient
+
+    client = SubprocessBeadsClient(
+        cwd=repo_root,
+        beads_root=beads_root,
+        env={"BEADS_DIR": str(beads_root)},
+    )
+    shown_issue = asyncio.run(client.show(ShowIssueRequest(issue_id=issue_id)))
+    _present, shown_notes = _notes_from_issue_model(shown_issue)
+    return shown_notes
 
 
 def _render_refinement_note(record) -> str:
@@ -420,6 +446,8 @@ def _persist_refinement_evidence(
     *,
     store,
     issue_id: str,
+    beads_root: Path,
+    repo_root: Path,
     result: RefinementRunResult,
     initial_plan_path: Path,
     output_dir: Path,
@@ -433,8 +461,12 @@ def _persist_refinement_evidence(
     )
     from atelier.store import AppendNotesRequest
 
-    issue = asyncio.run(_resolve_work_item(store, issue_id))
-    existing_notes = _normalize_notes_text(getattr(issue, "notes", None))
+    existing_notes = _load_existing_notes(
+        store=store,
+        issue_id=issue_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
     blocks = parse_refinement_blocks(existing_notes)
     selected = select_winning_refinement(blocks)
     required_hint = _required_hint_from_scope(blocks)
@@ -496,11 +528,17 @@ def _simulate_round_executor(verdicts: list[str]) -> RoundExecutor:
     return executor
 
 
-def _selected_refinement_round_limit(*, store, issue_id: str) -> int | None:
+def _selected_refinement_round_limit(
+    *, store, issue_id: str, beads_root: Path, repo_root: Path
+) -> int | None:
     from atelier.planning_refinement import parse_refinement_blocks, select_winning_refinement
 
-    issue = asyncio.run(_resolve_work_item(store, issue_id))
-    notes = _normalize_notes_text(getattr(issue, "notes", None))
+    notes = _load_existing_notes(
+        store=store,
+        issue_id=issue_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
     selected = select_winning_refinement(parse_refinement_blocks(notes))
     if selected is None:
         return None
@@ -534,11 +572,17 @@ def _resolve_max_rounds(
     cli_max_rounds: int | None,
     store,
     issue_id: str,
+    beads_root: Path,
     repo_root: Path,
 ) -> int:
     if cli_max_rounds is not None:
         return int(cli_max_rounds)
-    selected_limit = _selected_refinement_round_limit(store=store, issue_id=issue_id)
+    selected_limit = _selected_refinement_round_limit(
+        store=store,
+        issue_id=issue_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
     if selected_limit is not None:
         return selected_limit
     policy_limit = _resolve_policy_round_limit(repo_root=repo_root)
@@ -582,6 +626,7 @@ def main() -> int:
             cli_max_rounds=args.max_rounds,
             store=store,
             issue_id=issue_id,
+            beads_root=beads_root,
             repo_root=repo_root,
         )
 
@@ -599,6 +644,8 @@ def main() -> int:
         _persist_refinement_evidence(
             store=store,
             issue_id=issue_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
             result=result,
             initial_plan_path=initial_plan_path,
             output_dir=output_dir,

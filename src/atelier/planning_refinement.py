@@ -20,6 +20,25 @@ _REFINEMENT_MARKER: Final[str] = "planning_refinement.v1"
 _TRUE_TOKENS: Final[frozenset[str]] = frozenset({"true", "1", "yes"})
 _FALSE_TOKENS: Final[frozenset[str]] = frozenset({"false", "0", "no"})
 _FIELD_LINE_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z_][a-z0-9_]*\s*:")
+_REFINEMENT_FIELD_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "authoritative",
+        "mode",
+        "required",
+        "lineage_root",
+        "approval_status",
+        "approval_source",
+        "approved_by",
+        "approved_at",
+        "plan_edit_rounds_max",
+        "post_impl_review_rounds_max",
+        "plan_edit_rounds_used",
+        "latest_verdict",
+        "initial_plan_path",
+        "latest_plan_path",
+        "round_log_dir",
+    }
+)
 
 RefinementMode = Literal["requested", "inherited", "project_policy"]
 ApprovalStatus = Literal["approved", "missing"]
@@ -375,7 +394,11 @@ def _parse_field_map(lines: list[str]) -> tuple[dict[str, str], tuple[str, ...]]
 
 
 def _looks_like_refinement_field(line: str) -> bool:
-    return bool(_FIELD_LINE_RE.match(line.strip()))
+    stripped = line.strip()
+    if not _FIELD_LINE_RE.match(stripped):
+        return False
+    key, _, _value = stripped.partition(":")
+    return key.strip() in _REFINEMENT_FIELD_KEYS
 
 
 def _parse_bool_token(value: object) -> bool | None:

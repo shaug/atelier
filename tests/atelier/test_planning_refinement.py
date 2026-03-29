@@ -199,6 +199,32 @@ def test_refinement_parser_ignores_trailing_non_refinement_note_text() -> None:
     assert gate.reason is None
 
 
+def test_refinement_parser_ignores_trailing_key_value_note_text() -> None:
+    notes = (
+        _block(
+            authoritative="true",
+            required="true",
+            approval_status="approved",
+            approval_source="operator",
+            approved_by="planner-user",
+            approved_at="2026-03-29T12:00:00Z",
+            latest_verdict="READY",
+        )
+        + "\n\n"
+        + "owner: platform-team"
+    )
+
+    blocks = planning_refinement.parse_refinement_blocks(notes)
+    selected = planning_refinement.select_winning_refinement(blocks)
+    gate = planning_refinement.evaluate_refinement_claim_gate(notes)
+
+    assert selected is not None
+    assert selected.latest_verdict == "READY"
+    assert gate.required is True
+    assert gate.claimable is True
+    assert gate.reason is None
+
+
 def test_refinement_parser_handles_large_note_payload_performance() -> None:
     notes = "\n\n".join(
         _block(
