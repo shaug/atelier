@@ -180,7 +180,7 @@ def test_refine_plan_main_without_simulation_is_runnable_fail_closed(
     assert payload["latest_verdict"] == "USER_DECISION_REQUIRED"
 
 
-def test_refine_plan_main_without_simulation_can_reach_ready_for_executable_plan(
+def test_refine_plan_main_without_simulation_without_runner_fails_closed_even_for_executable_plan(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -235,11 +235,11 @@ def test_refine_plan_main_without_simulation_can_reach_ready_for_executable_plan
 
     exit_code = module.main()
 
-    assert exit_code == 0
+    assert exit_code == 1
     assert appended_notes
     payload = json.loads((output_dir / "result.json").read_text(encoding="utf-8"))
-    assert payload["status"] == "ready"
-    assert payload["latest_verdict"] == "READY"
+    assert payload["status"] == "non_converged"
+    assert payload["latest_verdict"] == "USER_DECISION_REQUIRED"
 
 
 def test_refine_plan_main_persists_authoritative_refinement_evidence(

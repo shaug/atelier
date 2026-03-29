@@ -8,6 +8,7 @@ readiness for refined work.
 from __future__ import annotations
 
 import datetime as dt
+import re
 from dataclasses import dataclass
 from typing import Final, Literal
 
@@ -18,6 +19,7 @@ DEFAULT_POST_IMPL_REVIEW_ROUNDS_MAX: Final[int] = 8
 _REFINEMENT_MARKER: Final[str] = "planning_refinement.v1"
 _TRUE_TOKENS: Final[frozenset[str]] = frozenset({"true", "1", "yes"})
 _FALSE_TOKENS: Final[frozenset[str]] = frozenset({"false", "0", "no"})
+_FIELD_LINE_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z_][a-z0-9_]*\s*:")
 
 RefinementMode = Literal["requested", "inherited", "project_policy"]
 ApprovalStatus = Literal["approved", "missing"]
@@ -220,11 +222,25 @@ def parse_refinement_blocks(notes: str | None) -> tuple[ParsedRefinementBlock, .
             continue
         start = index
         index += 1
-        while index < len(lines) and lines[index].strip() != _REFINEMENT_MARKER:
-            index += 1
+        field_lines: list[str] = []
+        while index < len(lines):
+            stripped = lines[index].strip()
+            if stripped == _REFINEMENT_MARKER:
+                break
+            if not stripped:
+                field_lines.append(lines[index])
+                index += 1
+                continue
+            if _looks_like_refinement_field(lines[index]):
+                field_lines.append(lines[index])
+                index += 1
+                continue
+            # Stop this block before freeform note text to preserve append-only
+            # notes behavior and avoid false malformed-state outcomes.
+            break
         raw_lines = lines[start:index]
         raw_text = "\n".join(raw_lines)
-        field_map, syntax_errors = _parse_field_map(raw_lines[1:])
+        field_map, syntax_errors = _parse_field_map(field_lines)
         authoritative_hint = _parse_bool_token(field_map.get("authoritative")) is True
         required_hint = _parse_bool_token(field_map.get("required")) is True
         record: PlanningRefinementRecord | None = None
@@ -350,6 +366,10 @@ def _parse_field_map(lines: list[str]) -> tuple[dict[str, str], tuple[str, ...]]
         key, value = line.split(":", 1)
         field_map[key.strip()] = value.strip()
     return field_map, tuple(errors)
+
+
+def _looks_like_refinement_field(line: str) -> bool:
+    return bool(_FIELD_LINE_RE.match(line.strip()))
 
 
 def _parse_bool_token(value: object) -> bool | None:

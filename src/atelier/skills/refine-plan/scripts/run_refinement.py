@@ -70,8 +70,6 @@ class RefinementRunResult:
 
 
 RoundExecutor = Callable[[int, str], RoundResult]
-_UNCHECKED_CHECKLIST_RE: Final[re.Pattern[str]] = re.compile(r"^\s*[-*]\s+\[\s\]\s+\S")
-_NUMBERED_STEP_RE: Final[re.Pattern[str]] = re.compile(r"^\s*\d+\.\s+\S")
 _ROUND_RUNNER_ENV: Final[str] = "ATELIER_REFINEMENT_ROUND_RUNNER"
 _VERDICT_HEADER_RE: Final[re.Pattern[str]] = re.compile(r"^\s*##\s*Plan verdict\s*$", re.IGNORECASE)
 
@@ -187,15 +185,6 @@ def run_refinement(
 
 
 def _default_round_executor(round_number: int, plan_text: str) -> RoundResult:
-    if _looks_executable_plan(plan_text):
-        return RoundResult(
-            verdict="READY",
-            plan_text=plan_text,
-            summary=(
-                "default local executor marked plan ready from executable task structure "
-                f"at round {round_number}"
-            ),
-        )
     return RoundResult(
         verdict="USER_DECISION_REQUIRED",
         plan_text=plan_text,
@@ -204,16 +193,6 @@ def _default_round_executor(round_number: int, plan_text: str) -> RoundResult:
             f"stopped at round {round_number} with fail-closed verdict"
         ),
     )
-
-
-def _looks_executable_plan(plan_text: str) -> bool:
-    """Return whether plan text has deterministic executable-task structure."""
-    for line in plan_text.splitlines():
-        if _UNCHECKED_CHECKLIST_RE.match(line):
-            return True
-        if _NUMBERED_STEP_RE.match(line):
-            return True
-    return False
 
 
 def _run_prompt_builder(*, template_path: Path, bindings: dict[str, str]) -> str:
