@@ -4235,6 +4235,43 @@ def test_claim_epic_rejects_deferred_executable_work() -> None:
     )
 
 
+def test_claim_epic_rejects_required_refinement_without_ready_verdict() -> None:
+    issue = {
+        "id": "at-legacy",
+        "status": "open",
+        "labels": ["at:epic"],
+        "assignee": None,
+        "notes": (
+            "planning_refinement.v1\n"
+            "authoritative: true\n"
+            "mode: requested\n"
+            "required: true\n"
+            "lineage_root: at-legacy\n"
+            "approval_status: approved\n"
+            "approval_source: operator\n"
+            "approved_by: planner-user\n"
+            "approved_at: 2026-03-29T12:00:00Z\n"
+            "latest_verdict: REVISED\n"
+        ),
+    }
+
+    with (
+        patch("atelier.beads.run_bd_json", return_value=[issue]),
+        patch("atelier.beads.die", side_effect=RuntimeError("die called")) as die_fn,
+    ):
+        with pytest.raises(RuntimeError, match="die called"):
+            beads.claim_epic(
+                "at-legacy",
+                "agent",
+                beads_root=Path("/beads"),
+                cwd=Path("/repo"),
+            )
+
+    assert "not claimable under lifecycle contract (refinement_not_ready)" in str(
+        die_fn.call_args.args[0]
+    )
+
+
 def test_set_agent_hook_updates_description() -> None:
     state = {"description": "role: worker\n"}
     captured: dict[str, str] = {}

@@ -265,6 +265,7 @@ def _classify_claim_failure(
         labels=lifecycle.normalized_labels(issue.get("labels")),
         issue_type=lifecycle.issue_payload_type(issue),
         parent_id=parent_id,
+        notes=issue.get("notes"),
     )
     if claimability.role.is_epic and not claimability.claimable:
         return ClaimFailure(

@@ -16,7 +16,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import re
+import shlex
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -69,6 +72,8 @@ class RefinementRunResult:
 RoundExecutor = Callable[[int, str], RoundResult]
 _UNCHECKED_CHECKLIST_RE: Final[re.Pattern[str]] = re.compile(r"^\s*[-*]\s+\[\s\]\s+\S")
 _NUMBERED_STEP_RE: Final[re.Pattern[str]] = re.compile(r"^\s*\d+\.\s+\S")
+_ROUND_RUNNER_ENV: Final[str] = "ATELIER_REFINEMENT_ROUND_RUNNER"
+_VERDICT_HEADER_RE: Final[re.Pattern[str]] = re.compile(r"^\s*##\s*Plan verdict\s*$", re.IGNORECASE)
 
 
 def parse_verdict(raw: str) -> RefinementVerdict:
@@ -209,6 +214,138 @@ def _looks_executable_plan(plan_text: str) -> bool:
         if _NUMBERED_STEP_RE.match(line):
             return True
     return False
+
+
+def _run_prompt_builder(*, template_path: Path, bindings: dict[str, str]) -> str:
+    builder_root = Path(__file__).resolve().parent / "prompt_builder"
+    if str(builder_root) not in sys.path:
+        sys.path.insert(0, str(builder_root))
+
+    from template_ast import (  # pyright: ignore[reportMissingImports]
+        parse_template_text,
+        render_nodes,
+    )
+    from validate_rendered import validate_rendered_prompt  # pyright: ignore[reportMissingImports]
+
+    template_text = template_path.read_text(encoding="utf-8")
+    full_template = (
+        f"{template_text}\n\n"
+        "<round-context>\n"
+        "round: {ROUND_NUMBER}\n"
+        "max_rounds: {MAX_ROUNDS}\n"
+        "</round-context>\n\n"
+        "<current-plan>\n"
+        "{PLAN_TEXT}\n"
+        "</current-plan>\n"
+    )
+    nodes = parse_template_text(full_template)
+    prompt_text = render_nodes(nodes, bindings)
+    validate_rendered_prompt(prompt_text)
+    return prompt_text
+
+
+def _runner_command_tokens() -> list[str] | None:
+    raw = _clean(os.environ.get(_ROUND_RUNNER_ENV, ""))
+    if raw is None:
+        return None
+    tokens = shlex.split(raw)
+    if not tokens:
+        return None
+    return tokens
+
+
+def _extract_verdict_and_plan(
+    *, raw_output: str, fallback_plan: str
+) -> tuple[RefinementVerdict, str]:
+    lines = raw_output.splitlines()
+    verdict_line_index: int | None = None
+    for index, line in enumerate(lines):
+        if _VERDICT_HEADER_RE.match(line):
+            verdict_line_index = index
+            break
+    if verdict_line_index is None:
+        raise ValueError("round output is missing '## Plan verdict' section")
+
+    token_index = verdict_line_index + 1
+    while token_index < len(lines) and not lines[token_index].strip():
+        token_index += 1
+    if token_index >= len(lines):
+        raise ValueError("round output is missing verdict token")
+
+    verdict_token = lines[token_index].strip().split()[0]
+    verdict = parse_verdict(verdict_token)
+    plan_tail = "\n".join(lines[token_index + 1 :]).strip()
+    if not plan_tail:
+        return verdict, fallback_plan
+    return verdict, plan_tail + "\n"
+
+
+def _run_round_runner(*, command: list[str], prompt_text: str) -> str:
+    completed = subprocess.run(
+        command,
+        input=prompt_text,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "").strip() or "no output"
+        raise RuntimeError(f"round runner failed (exit {completed.returncode}): {detail}")
+    return completed.stdout or ""
+
+
+def _build_runtime_round_executor(*, max_rounds: int) -> RoundExecutor:
+    runner_command = _runner_command_tokens()
+    skill_root = Path(__file__).resolve().parent.parent
+    initial_template = skill_root / "subagents" / "prompt-planning-initial.md"
+    edit_template = skill_root / "subagents" / "prompt-planning-edit.md"
+
+    def executor(round_number: int, plan_text: str) -> RoundResult:
+        template_path = initial_template if round_number == 1 else edit_template
+        try:
+            prompt_text = _run_prompt_builder(
+                template_path=template_path,
+                bindings={
+                    "PLAN_TEXT": plan_text,
+                    "ROUND_NUMBER": str(round_number),
+                    "MAX_ROUNDS": str(max_rounds),
+                },
+            )
+        except Exception as exc:
+            return RoundResult(
+                verdict="USER_DECISION_REQUIRED",
+                plan_text=plan_text,
+                summary=f"prompt render failed at round {round_number}: {exc}",
+            )
+
+        if runner_command is None:
+            fallback = _default_round_executor(round_number, plan_text)
+            summary = fallback.summary or "runtime round runner not configured"
+            return RoundResult(
+                verdict=fallback.verdict,
+                plan_text=fallback.plan_text,
+                summary=f"runtime orchestration fallback: {summary}",
+            )
+
+        try:
+            raw_output = _run_round_runner(command=runner_command, prompt_text=prompt_text)
+            verdict, revised_plan = _extract_verdict_and_plan(
+                raw_output=raw_output,
+                fallback_plan=plan_text,
+            )
+            return RoundResult(
+                verdict=verdict,
+                plan_text=revised_plan,
+                summary=f"runtime round {round_number} via {' '.join(runner_command)}",
+            )
+        except Exception as exc:
+            return RoundResult(
+                verdict="USER_DECISION_REQUIRED",
+                plan_text=plan_text,
+                summary=f"round execution failed at round {round_number}: {exc}",
+            )
+
+    return executor
 
 
 def _build_store(*, beads_root: Path, repo_root: Path):
@@ -380,12 +517,63 @@ def _simulate_round_executor(verdicts: list[str]) -> RoundExecutor:
     return executor
 
 
+def _selected_refinement_round_limit(*, store, issue_id: str) -> int | None:
+    from atelier.planning_refinement import parse_refinement_blocks, select_winning_refinement
+
+    issue = asyncio.run(_resolve_work_item(store, issue_id))
+    notes = _normalize_notes_text(getattr(issue, "notes", None))
+    selected = select_winning_refinement(parse_refinement_blocks(notes))
+    if selected is None:
+        return None
+    return int(selected.plan_edit_rounds_max)
+
+
+def _resolve_policy_round_limit(*, repo_root: Path) -> int | None:
+    from atelier import config as atelier_config
+    from atelier import git, paths
+    from atelier.commands.resolve import resolve_project_for_enlistment
+
+    try:
+        _repo_root, enlistment_path, _origin_raw, origin = git.resolve_repo_enlistment(repo_root)
+        project_root, _project_config, _resolved_enlistment = resolve_project_for_enlistment(
+            enlistment_path, origin
+        )
+        config_path = paths.project_config_path(project_root)
+        project_config = atelier_config.load_project_config(config_path)
+    except (Exception, SystemExit):
+        return None
+    if project_config is None:
+        return None
+    policy = atelier_config.resolve_refinement_policy(project_config)
+    if policy is None:
+        return None
+    return int(policy.plan_edit_rounds_max)
+
+
+def _resolve_max_rounds(
+    *,
+    cli_max_rounds: int | None,
+    store,
+    issue_id: str,
+    repo_root: Path,
+) -> int:
+    if cli_max_rounds is not None:
+        return int(cli_max_rounds)
+    selected_limit = _selected_refinement_round_limit(store=store, issue_id=issue_id)
+    if selected_limit is not None:
+        return selected_limit
+    policy_limit = _resolve_policy_round_limit(repo_root=repo_root)
+    if policy_limit is not None:
+        return policy_limit
+    return REFINEMENT_MAX_ROUNDS_DEFAULT
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--issue-id", required=True, help="Epic or changeset issue id")
     parser.add_argument("--initial-plan-path", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--max-rounds", type=int, default=REFINEMENT_MAX_ROUNDS_DEFAULT)
+    parser.add_argument("--max-rounds", type=int, default=None)
     parser.add_argument("--beads-dir", default="", help="Beads directory override")
     parser.add_argument("--repo-dir", default="", help="Repo root override")
     parser.add_argument(
@@ -402,19 +590,8 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        if args.simulate_verdicts:
-            verdicts = [item.strip() for item in args.simulate_verdicts.split(",") if item.strip()]
-            round_executor = _simulate_round_executor(verdicts)
-        else:
-            round_executor = _default_round_executor
-
+        issue_id = args.issue_id.strip()
         initial_plan_path = args.initial_plan_path.resolve()
-        result = run_refinement(
-            initial_plan_path=initial_plan_path,
-            output_dir=output_dir,
-            round_executor=round_executor,
-            max_rounds=args.max_rounds,
-        )
         beads_root, repo_root, runtime_warning = _resolve_context(
             beads_dir=_clean(args.beads_dir),
             repo_dir=_clean(args.repo_dir),
@@ -422,9 +599,27 @@ def main() -> int:
         if runtime_warning:
             print(runtime_warning, file=sys.stderr)
         store = _build_store(beads_root=beads_root, repo_root=repo_root)
+        max_rounds = _resolve_max_rounds(
+            cli_max_rounds=args.max_rounds,
+            store=store,
+            issue_id=issue_id,
+            repo_root=repo_root,
+        )
+
+        if args.simulate_verdicts:
+            verdicts = [item.strip() for item in args.simulate_verdicts.split(",") if item.strip()]
+            round_executor = _simulate_round_executor(verdicts)
+        else:
+            round_executor = _build_runtime_round_executor(max_rounds=max_rounds)
+        result = run_refinement(
+            initial_plan_path=initial_plan_path,
+            output_dir=output_dir,
+            round_executor=round_executor,
+            max_rounds=max_rounds,
+        )
         _persist_refinement_evidence(
             store=store,
-            issue_id=args.issue_id.strip(),
+            issue_id=issue_id,
             result=result,
             initial_plan_path=initial_plan_path,
             output_dir=output_dir,

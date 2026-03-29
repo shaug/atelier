@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -364,3 +365,219 @@ def test_refine_plan_loop_artifacts_match_trycycle_snapshot_anchors() -> None:
 
     assert not missing_in_snapshot, f"snapshot anchors missing: {missing_in_snapshot}"
     assert not missing_in_live, f"live refine-plan anchors missing: {missing_in_live}"
+
+
+def test_refine_plan_non_simulated_mode_uses_runtime_executor(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    initial_plan_path = tmp_path / "initial.md"
+    output_dir = tmp_path / "artifacts"
+    initial_plan_path.write_text("- [ ] Step 1\n", encoding="utf-8")
+    calls: list[tuple[int, str]] = []
+
+    class FakeStore:
+        async def get_epic(self, issue_id: str):
+            return SimpleNamespace(id=issue_id, notes="")
+
+        async def get_changeset(self, issue_id: str):
+            del issue_id
+            raise LookupError("not a changeset")
+
+        async def append_notes(self, request):
+            return SimpleNamespace(id=request.issue_id)
+
+    def fake_runtime_executor(*, max_rounds: int):
+        assert max_rounds == 5
+
+        def executor(round_number: int, plan_text: str):
+            calls.append((round_number, plan_text))
+            return module.RoundResult(verdict="READY", plan_text=plan_text, summary="runtime")
+
+        return executor
+
+    monkeypatch.setattr(module, "_resolve_context", lambda **_kwargs: (tmp_path, tmp_path, None))
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
+    monkeypatch.setattr(module, "_build_runtime_round_executor", fake_runtime_executor)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_refinement.py",
+            "--issue-id",
+            "at-123",
+            "--initial-plan-path",
+            str(initial_plan_path),
+            "--output-dir",
+            str(output_dir),
+        ],
+    )
+
+    exit_code = module.main()
+
+    assert exit_code == 0
+    assert calls == [(1, "- [ ] Step 1\n")]
+
+
+def test_refine_plan_non_simulated_uses_existing_refinement_round_budget(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    initial_plan_path = tmp_path / "initial.md"
+    output_dir = tmp_path / "artifacts"
+    initial_plan_path.write_text("- [ ] Step 1\n", encoding="utf-8")
+    captured_max_rounds: list[int] = []
+
+    class FakeStore:
+        async def get_epic(self, issue_id: str):
+            return SimpleNamespace(
+                id=issue_id,
+                notes=(
+                    "planning_refinement.v1\n"
+                    "authoritative: true\n"
+                    "mode: requested\n"
+                    "required: true\n"
+                    "approval_status: approved\n"
+                    "approval_source: operator\n"
+                    "approved_by: planner-user\n"
+                    "approved_at: 2026-03-29T12:00:00Z\n"
+                    "plan_edit_rounds_max: 9\n"
+                    "latest_verdict: REVISED\n"
+                ),
+            )
+
+        async def get_changeset(self, issue_id: str):
+            del issue_id
+            raise LookupError("not a changeset")
+
+        async def append_notes(self, request):
+            return SimpleNamespace(id=request.issue_id)
+
+    def fake_runtime_executor(*, max_rounds: int):
+        captured_max_rounds.append(max_rounds)
+
+        def executor(round_number: int, plan_text: str):
+            del round_number
+            return module.RoundResult(verdict="READY", plan_text=plan_text, summary="runtime")
+
+        return executor
+
+    monkeypatch.setattr(module, "_resolve_context", lambda **_kwargs: (tmp_path, tmp_path, None))
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
+    monkeypatch.setattr(module, "_build_runtime_round_executor", fake_runtime_executor)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_refinement.py",
+            "--issue-id",
+            "at-123",
+            "--initial-plan-path",
+            str(initial_plan_path),
+            "--output-dir",
+            str(output_dir),
+        ],
+    )
+
+    exit_code = module.main()
+
+    assert exit_code == 0
+    assert captured_max_rounds == [9]
+
+
+def test_refine_plan_non_simulated_uses_policy_round_budget_when_no_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    initial_plan_path = tmp_path / "initial.md"
+    output_dir = tmp_path / "artifacts"
+    initial_plan_path.write_text("- [ ] Step 1\n", encoding="utf-8")
+    captured_max_rounds: list[int] = []
+
+    class FakeStore:
+        async def get_epic(self, issue_id: str):
+            return SimpleNamespace(id=issue_id, notes="")
+
+        async def get_changeset(self, issue_id: str):
+            del issue_id
+            raise LookupError("not a changeset")
+
+        async def append_notes(self, request):
+            return SimpleNamespace(id=request.issue_id)
+
+    def fake_runtime_executor(*, max_rounds: int):
+        captured_max_rounds.append(max_rounds)
+
+        def executor(round_number: int, plan_text: str):
+            del round_number
+            return module.RoundResult(verdict="READY", plan_text=plan_text, summary="runtime")
+
+        return executor
+
+    monkeypatch.setattr(module, "_resolve_context", lambda **_kwargs: (tmp_path, tmp_path, None))
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
+    monkeypatch.setattr(module, "_build_runtime_round_executor", fake_runtime_executor)
+    monkeypatch.setattr(module, "_resolve_policy_round_limit", lambda **_kwargs: 11)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_refinement.py",
+            "--issue-id",
+            "at-123",
+            "--initial-plan-path",
+            str(initial_plan_path),
+            "--output-dir",
+            str(output_dir),
+        ],
+    )
+
+    exit_code = module.main()
+
+    assert exit_code == 0
+    assert captured_max_rounds == [11]
+
+
+def test_runtime_round_executor_renders_prompt_and_parses_runner_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script_module()
+    prompt_builder_calls: list[dict[str, object]] = []
+    executed_commands: list[list[str]] = []
+
+    def fake_run_prompt_builder(*, template_path: Path, bindings: dict[str, str]) -> str:
+        prompt_builder_calls.append({"template_path": template_path, "bindings": bindings})
+        return "rendered prompt"
+
+    def fake_run(
+        args: list[str],
+        *,
+        input: str,
+        text: bool,
+        capture_output: bool,
+        check: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        del text, capture_output, check
+        executed_commands.append(args)
+        assert input == "rendered prompt"
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout="## Plan verdict\nREADY\n\n# Updated plan\n- [ ] Step\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(module, "_run_prompt_builder", fake_run_prompt_builder)
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    monkeypatch.setenv("ATELIER_REFINEMENT_ROUND_RUNNER", "echo-runner --round")
+
+    executor = module._build_runtime_round_executor(max_rounds=5)
+    result = executor(1, "- [ ] Step\n")
+
+    assert result.verdict == "READY"
+    assert result.plan_text == "# Updated plan\n- [ ] Step\n"
+    assert prompt_builder_calls
+    assert executed_commands == [["echo-runner", "--round"]]

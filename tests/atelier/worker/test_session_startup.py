@@ -719,6 +719,41 @@ def test_run_startup_contract_explicit_epic_refinement_not_ready_exits_cleanly()
     ]
 
 
+def test_run_startup_contract_explicit_epic_refinement_missing_approval_exits_cleanly() -> None:
+    emitted: list[str] = []
+
+    def next_changeset(**_kwargs: Any) -> dict[str, object] | None:
+        raise AssertionError("next_changeset should not run for non-claimable explicit epic")
+
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        show_issue=lambda _issue_id: {
+            "id": "at-explicit",
+            "status": "open",
+            "labels": ["at:epic"],
+            "notes": (
+                "planning_refinement.v1\n"
+                "authoritative: true\n"
+                "mode: requested\n"
+                "required: true\n"
+                "lineage_root: at-explicit\n"
+                "approval_status: missing\n"
+                "latest_verdict: READY\n"
+            ),
+        },
+        next_changeset=next_changeset,
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.should_exit is True
+    assert result.reason == "explicit_epic_not_claimable"
+    assert result.epic_id == "at-explicit"
+    assert emitted == [
+        "Explicit epic at-explicit is not claimable under lifecycle contract "
+        "(refinement_approval_missing); move it to open/in_progress and rerun without an epic id."
+    ]
+
+
 def test_run_startup_contract_explicit_epic_malformed_unrefined_metadata_stays_claimable() -> None:
     emitted: list[str] = []
 
