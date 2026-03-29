@@ -152,3 +152,111 @@ def test_set_refinement_records_inherited_lineage_metadata(
     assert "lineage_root: at-123" in note
     assert "plan_edit_rounds_max: 7" in note
     assert "post_impl_review_rounds_max: 9" in note
+
+
+def test_set_refinement_project_policy_mode_auto_records_approval_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script_module()
+    captured: list[str] = []
+
+    class FakeStore:
+        async def get_epic(self, issue_id: str):
+            return SimpleNamespace(id=issue_id, lifecycle="open")
+
+        async def get_changeset(self, issue_id: str):
+            del issue_id
+            raise LookupError("not a changeset")
+
+        async def append_notes(self, request):
+            captured.extend(request.notes)
+            return SimpleNamespace(id=request.issue_id)
+
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
+    monkeypatch.setattr(
+        module, "_resolve_context", lambda **_kwargs: (Path("/tmp/.beads"), Path("/tmp"), None)
+    )
+    monkeypatch.setattr(
+        module,
+        "_resolve_refinement_policy",
+        lambda **_kwargs: SimpleNamespace(
+            required_by_default=True,
+            plan_edit_rounds_max=13,
+            post_impl_review_rounds_max=21,
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "set_refinement.py",
+            "--issue-id",
+            "at-123",
+            "--mode",
+            "project_policy",
+            "--required",
+        ],
+    )
+
+    module.main()
+
+    assert captured
+    note = captured[0]
+    assert "mode: project_policy" in note
+    assert "approval_status: approved" in note
+    assert "approval_source: project_policy" in note
+    assert "approved_by: project_policy" in note
+    assert "approved_at:" in note
+    assert "plan_edit_rounds_max: 13" in note
+    assert "post_impl_review_rounds_max: 21" in note
+
+
+def test_set_refinement_project_policy_mode_fails_when_policy_not_configured(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_script_module()
+
+    class FakeStore:
+        async def get_epic(self, issue_id: str):
+            return SimpleNamespace(id=issue_id, lifecycle="open")
+
+        async def get_changeset(self, issue_id: str):
+            del issue_id
+            raise LookupError("not a changeset")
+
+        async def append_notes(self, request):  # pragma: no cover - defensive
+            raise AssertionError(request)
+
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
+    monkeypatch.setattr(
+        module, "_resolve_context", lambda **_kwargs: (Path("/tmp/.beads"), Path("/tmp"), None)
+    )
+    monkeypatch.setattr(
+        module,
+        "_resolve_refinement_policy",
+        lambda **_kwargs: SimpleNamespace(
+            required_by_default=False,
+            plan_edit_rounds_max=5,
+            post_impl_review_rounds_max=8,
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "set_refinement.py",
+            "--issue-id",
+            "at-123",
+            "--mode",
+            "project_policy",
+            "--required",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.main()
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 1
+    assert "project_policy mode requires configured policy" in captured.err

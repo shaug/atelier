@@ -261,8 +261,11 @@ def evaluate_refinement_claim_gate(notes: str | None) -> RefinementClaimGateDeci
     """
     blocks = parse_refinement_blocks(notes)
     scope = _select_scope(blocks)
-    required = any(block.required_hint for block in scope)
     selected = select_winning_refinement(blocks)
+    if selected is None:
+        required = any(block.required_hint for block in scope)
+    else:
+        required = selected.required
     if not required:
         return RefinementClaimGateDecision(
             required=False,
@@ -278,6 +281,13 @@ def evaluate_refinement_claim_gate(notes: str | None) -> RefinementClaimGateDeci
             selected=None,
         )
     if selected.approval_status != "approved":
+        return RefinementClaimGateDecision(
+            required=True,
+            claimable=False,
+            reason="refinement_approval_missing",
+            selected=selected,
+        )
+    if not selected.approval_source or not selected.approved_by or not selected.approved_at:
         return RefinementClaimGateDecision(
             required=True,
             claimable=False,

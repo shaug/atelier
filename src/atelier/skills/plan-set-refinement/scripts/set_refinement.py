@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import datetime as dt
 import sys
 from pathlib import Path
 from typing import cast
@@ -123,6 +124,8 @@ def _render_note(record: PlanningRefinementRecord) -> str:
 
 def _validate_approval_fields(
     args: argparse.Namespace,
+    *,
+    policy: object | None,
 ) -> tuple[ApprovalStatus, ApprovalSource | None, str | None, str | None]:
     approval_source = _clean(args.approval_source)
     approved_by = _clean(args.approved_by)
@@ -132,6 +135,17 @@ def _validate_approval_fields(
     if args.required:
         if approval_status not in {None, "approved"}:
             raise ValueError("required refinement must set approval_status=approved")
+        if args.mode == "project_policy":
+            if policy is None or not bool(getattr(policy, "required_by_default", False)):
+                raise ValueError(
+                    "project_policy mode requires configured policy (required_by_default=true)"
+                )
+            return (
+                "approved",
+                cast(ApprovalSource, approval_source or "project_policy"),
+                approved_by or "project_policy",
+                approved_at or _utc_now_iso8601(),
+            )
         if not approval_source or not approved_by or not approved_at:
             raise ValueError(
                 "required refinement must include approval evidence: "
@@ -154,6 +168,53 @@ def _validate_approval_fields(
         approved_by,
         approved_at,
     )
+
+
+def _utc_now_iso8601() -> str:
+    now = dt.datetime.now(tz=dt.timezone.utc).replace(microsecond=0)
+    return now.isoformat().replace("+00:00", "Z")
+
+
+def _resolve_refinement_policy(*, repo_root: Path) -> object | None:
+    from atelier import config as atelier_config
+    from atelier import git, paths
+    from atelier.commands.resolve import resolve_project_for_enlistment
+
+    _repo_root, enlistment_path, _origin_raw, origin = git.resolve_repo_enlistment(repo_root)
+    project_root, _project_config, _resolved_enlistment = resolve_project_for_enlistment(
+        enlistment_path, origin
+    )
+    config_path = paths.project_config_path(project_root)
+    project_config = atelier_config.load_project_config(config_path)
+    if project_config is None:
+        return None
+    return atelier_config.resolve_refinement_policy(project_config)
+
+
+def _resolve_round_limits(
+    args: argparse.Namespace,
+    *,
+    policy: object | None,
+) -> tuple[int, int]:
+    policy_plan_rounds = (
+        int(getattr(policy, "plan_edit_rounds_max"))
+        if policy is not None
+        else DEFAULT_PLAN_EDIT_ROUNDS_MAX
+    )
+    policy_post_impl_rounds = (
+        int(getattr(policy, "post_impl_review_rounds_max"))
+        if policy is not None
+        else DEFAULT_POST_IMPL_REVIEW_ROUNDS_MAX
+    )
+    plan_edit_rounds_max = (
+        args.plan_edit_rounds_max if args.plan_edit_rounds_max is not None else policy_plan_rounds
+    )
+    post_impl_review_rounds_max = (
+        args.post_impl_review_rounds_max
+        if args.post_impl_review_rounds_max is not None
+        else policy_post_impl_rounds
+    )
+    return int(plan_edit_rounds_max), int(post_impl_review_rounds_max)
 
 
 def main() -> None:
@@ -188,13 +249,13 @@ def main() -> None:
     parser.add_argument(
         "--plan-edit-rounds-max",
         type=int,
-        default=DEFAULT_PLAN_EDIT_ROUNDS_MAX,
+        default=None,
         help="Maximum planning edit rounds",
     )
     parser.add_argument(
         "--post-impl-review-rounds-max",
         type=int,
-        default=DEFAULT_POST_IMPL_REVIEW_ROUNDS_MAX,
+        default=None,
         help="Maximum post-implementation review rounds",
     )
     parser.add_argument(
@@ -214,14 +275,26 @@ def main() -> None:
         if args.mode == "inherited" and not _clean(args.lineage_root):
             raise ValueError("inherited mode requires --lineage-root")
 
-        approval_status, approval_source, approved_by, approved_at = _validate_approval_fields(args)
-
         beads_root, repo_root, runtime_warning = _resolve_context(
             beads_dir=_clean(args.beads_dir),
             repo_dir=_clean(args.repo_dir),
         )
         if runtime_warning:
             print(runtime_warning, file=sys.stderr)
+
+        policy = (
+            _resolve_refinement_policy(repo_root=repo_root)
+            if args.mode == "project_policy"
+            else None
+        )
+        approval_status, approval_source, approved_by, approved_at = _validate_approval_fields(
+            args,
+            policy=policy,
+        )
+        plan_edit_rounds_max, post_impl_review_rounds_max = _resolve_round_limits(
+            args,
+            policy=policy,
+        )
 
         store = _build_store(beads_root=beads_root, repo_root=repo_root)
         issue_id = args.issue_id.strip()
@@ -244,8 +317,8 @@ def main() -> None:
             approval_source=approval_source,
             approved_by=approved_by,
             approved_at=approved_at,
-            plan_edit_rounds_max=args.plan_edit_rounds_max,
-            post_impl_review_rounds_max=args.post_impl_review_rounds_max,
+            plan_edit_rounds_max=plan_edit_rounds_max,
+            post_impl_review_rounds_max=post_impl_review_rounds_max,
             latest_verdict=latest_verdict,
             initial_plan_path=_clean(args.initial_plan_path),
             latest_plan_path=_clean(args.latest_plan_path),
