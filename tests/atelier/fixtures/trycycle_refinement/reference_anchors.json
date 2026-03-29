@@ -1,0 +1,27 @@
+{
+  "inventory_sources": [
+    "subskills/trycycle-planning/SKILL.md",
+    "subagents/prompt-planning-initial.md",
+    "subagents/prompt-planning-edit.md",
+    "orchestrator/run_phase.py",
+    "orchestrator/prompt_builder/build.py",
+    "orchestrator/prompt_builder/template_ast.py",
+    "orchestrator/prompt_builder/validate_rendered.py"
+  ],
+  "doctrine_anchors": [
+    "Strategy Gate (before task breakdown)",
+    "Low bar for changing direction.",
+    "High bar for stopping to ask the user.",
+    "Bite-Sized Task Granularity",
+    "Completion Standard"
+  ],
+  "mechanics_anchors": [
+    "Review the `trycycle-planning` skill",
+    "## Plan verdict",
+    "REVISED",
+    "READY",
+    "_prepare_phase",
+    "_command_run",
+    "prompt_builder"
+  ]
+}

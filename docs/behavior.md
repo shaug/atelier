@@ -55,6 +55,18 @@ side effects inside the user's repo.
 - **External tickets**: Linked via `external_tickets` in bead descriptions with
   provider labels like `ext:github`.
 
+## Planning and refinement
+
+- `planning` is the default planning doctrine across planner workflows.
+- `refine-plan` runs bounded iterative refinement with canonical verdicts:
+  `READY`, `REVISED`, and `USER_DECISION_REQUIRED`.
+- `plan-set-refinement` can enable refinement on an existing epic or changeset
+  in lifecycle states `deferred`, `open`, `in_progress`, and `blocked`.
+- Refinement metadata is inherited by lineage descendants so child/split work
+  stays refinement-aware once a lineage root is required.
+- Worker claim fails closed when required refinement evidence is missing
+  approval details or a latest `READY` verdict.
+
 ## Filesystem layout
 
 Project directory (under the Atelier data dir):
