@@ -257,8 +257,9 @@ def parse_refinement_blocks(notes: str | None) -> tuple[ParsedRefinementBlock, .
                     parse_errors.append(f"unknown refinement field: {lines[index].strip()!r}")
                 index += 1
                 continue
-            parse_errors.append(f"invalid line inside refinement block: {lines[index].strip()!r}")
-            index += 1
+            # Stop this refinement block at freeform note text. Notes are
+            # append-only and may be joined with single newlines.
+            break
         raw_lines = lines[start:index]
         raw_text = "\n".join(raw_lines)
         field_map, syntax_errors = _parse_field_map(field_lines)

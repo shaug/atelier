@@ -110,6 +110,7 @@ def test_split_tasks_propagates_inherited_refinement_from_parent(
         assert "lineage_root: at-epic" in note
         assert "plan_edit_rounds_max: 6" in note
         assert "post_impl_review_rounds_max: 10" in note
+        assert "latest_verdict:" not in note
 
 
 def test_split_tasks_leaves_unrefined_lineage_unmarked(

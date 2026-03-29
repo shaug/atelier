@@ -391,6 +391,7 @@ def test_create_changeset_inherits_required_refinement_from_parent(
     assert "lineage_root: at-epic" in note
     assert "plan_edit_rounds_max: 7" in note
     assert "post_impl_review_rounds_max: 9" in note
+    assert "latest_verdict:" not in note
 
 
 def test_create_changeset_unrefined_control_keeps_notes_unchanged(

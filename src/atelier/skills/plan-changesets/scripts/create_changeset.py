@@ -183,7 +183,6 @@ def _inherited_refinement_note(*, parent_notes: str | None, epic_id: str) -> str
         approved_at=selected.approved_at,
         plan_edit_rounds_max=selected.plan_edit_rounds_max,
         post_impl_review_rounds_max=selected.post_impl_review_rounds_max,
-        latest_verdict=selected.latest_verdict,
     )
     return _render_refinement_note(inherited)
 
