@@ -295,6 +295,32 @@ def test_public_store_module_exports_single_store_surface() -> None:
     assert not hasattr(public_store, "AsyncAtelierStore")
 
 
+def test_append_notes_accepts_multiline_note_blocks() -> None:
+    store = _store_for(BUILDER.issue("at-epic", issue_type="epic", labels=("at:epic",)))
+    note = (
+        "planning_refinement.v1\n"
+        "authoritative: true\n"
+        "required: true\n"
+        "approval_status: approved\n"
+        "latest_verdict: READY\n"
+    )
+
+    appended = _RUN(
+        store.append_notes(
+            AppendNotesRequest(
+                issue_id="at-epic",
+                notes=(note,),
+            )
+        )
+    )
+
+    assert appended.id == "at-epic"
+    refreshed = _RUN(store._show_issue("at-epic"))
+    assert refreshed.description is not None
+    assert "planning_refinement.v1" in refreshed.description
+    assert "latest_verdict: READY" in refreshed.description
+
+
 def test_store_contract_docs_record_invariants_and_deferred_work() -> None:
     store_doc = STORE_CONTRACT_DOC_PATH.read_text(encoding="utf-8")
     beads_doc = BEADS_CONTRACT_DOC_PATH.read_text(encoding="utf-8")

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .planning_refinement import evaluate_refinement_claim_gate
+
 ACTIVE_REVIEW_STATES = {"draft-pr", "pr-open", "in-review", "approved"}
 ACTIVE_PR_LIFECYCLE_STATES = {"pushed", *ACTIVE_REVIEW_STATES}
 INTEGRATED_REVIEW_STATES = {"merged"}
@@ -87,6 +89,16 @@ def _clean_text(value: object) -> str | None:
         return None
     cleaned = value.strip()
     return cleaned or None
+
+
+def _notes_text(value: object) -> str | None:
+    if isinstance(value, str):
+        return _clean_text(value)
+    if isinstance(value, (tuple, list)):
+        lines = tuple(cleaned for item in value if (cleaned := _clean_text(item)) is not None)
+        if lines:
+            return "\n".join(lines)
+    return None
 
 
 def normalize_review_state(value: object) -> str | None:
@@ -458,6 +470,7 @@ def evaluate_epic_claimability(
     labels: set[str],
     issue_type: object,
     parent_id: object,
+    notes: object | None = None,
 ) -> EpicClaimEvaluation:
     """Evaluate whether an issue is claimable as top-level executable work.
 
@@ -466,6 +479,7 @@ def evaluate_epic_claimability(
         labels: Normalized issue labels.
         issue_type: Raw issue type value.
         parent_id: Raw parent issue identifier.
+        notes: Raw notes payload for refinement claim-gate evaluation.
 
     Returns:
         Claimability evaluation with canonical status and diagnostics.
@@ -486,6 +500,9 @@ def evaluate_epic_claimability(
         reasons.append("missing-at:epic-label")
     if canonical_status not in ACTIVE_LIFECYCLE_STATUSES:
         reasons.append(f"status={canonical_status or 'missing'}")
+    refinement_gate = evaluate_refinement_claim_gate(_notes_text(notes))
+    if refinement_gate.required and not refinement_gate.claimable:
+        reasons.append(refinement_gate.reason or "refinement_metadata_missing_or_malformed")
     return EpicClaimEvaluation(
         claimable=not reasons,
         status=canonical_status,

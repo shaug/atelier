@@ -3791,6 +3791,7 @@ def _evaluate_epic_claimability(
         labels=_issue_labels(issue),
         issue_type=lifecycle.issue_payload_type(issue),
         parent_id=_issue_parent_id(issue),
+        notes=issue.get("notes"),
     )
 
 

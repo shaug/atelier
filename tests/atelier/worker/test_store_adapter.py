@@ -2,6 +2,8 @@ import datetime as dt
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from atelier.lib.beads import IssueRecord, SyncBeadsClient
 from atelier.messages import render_message
 from atelier.store import HookRecord, StartupMessageRecord, build_atelier_store
@@ -71,6 +73,51 @@ def test_claim_epic_marks_in_progress_and_hooked(monkeypatch) -> None:
     assert claimed["assignee"] == agent_id
     assert claimed["status"] == "in_progress"
     assert "at:hooked" in claimed["labels"]
+    worker_store.clear_bundle_cache()
+
+
+def test_claim_epic_rejects_required_refinement_without_ready_verdict(monkeypatch) -> None:
+    builder = IssueFixtureBuilder()
+    _patch_bundle(
+        monkeypatch,
+        issues=(
+            builder.issue(
+                "at-epic",
+                issue_type="epic",
+                labels=("at:epic",),
+                status="open",
+                extra_fields={
+                    "notes": (
+                        "planning_refinement.v1\n"
+                        "authoritative: true\n"
+                        "mode: requested\n"
+                        "required: true\n"
+                        "lineage_root: at-epic\n"
+                        "approval_status: approved\n"
+                        "approval_source: operator\n"
+                        "approved_by: planner-user\n"
+                        "approved_at: 2026-03-29T12:00:00Z\n"
+                        "latest_verdict: REVISED\n"
+                    )
+                },
+            ),
+        ),
+    )
+
+    with patch(
+        "atelier.worker.store_adapter.die", side_effect=RuntimeError("die called")
+    ) as die_fn:
+        with pytest.raises(RuntimeError, match="die called"):
+            worker_store.claim_epic(
+                "at-epic",
+                "atelier/worker/codex/p100",
+                beads_root=Path("/beads"),
+                repo_root=Path("/repo"),
+            )
+
+    assert "not claimable under lifecycle contract (refinement_not_ready)" in str(
+        die_fn.call_args.args[0]
+    )
     worker_store.clear_bundle_cache()
 
 

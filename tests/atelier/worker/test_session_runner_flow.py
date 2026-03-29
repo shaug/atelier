@@ -764,6 +764,47 @@ def test_classify_claim_failure_fails_closed_when_hook_lookup_fails() -> None:
     assert failure.detail == "hook_lookup_failed"
 
 
+def test_classify_claim_failure_reports_refinement_not_ready_non_claimable() -> None:
+    beads = SimpleNamespace(
+        run_bd_json=Mock(
+            return_value=[
+                {
+                    "id": "at-refined",
+                    "status": "open",
+                    "labels": ["at:epic"],
+                    "assignee": None,
+                    "notes": (
+                        "planning_refinement.v1\n"
+                        "authoritative: true\n"
+                        "mode: requested\n"
+                        "required: true\n"
+                        "lineage_root: at-refined\n"
+                        "approval_status: approved\n"
+                        "approval_source: operator\n"
+                        "approved_by: planner-user\n"
+                        "approved_at: 2026-03-29T12:00:00Z\n"
+                        "latest_verdict: REVISED\n"
+                    ),
+                }
+            ]
+        ),
+        find_agent_bead=Mock(),
+        run_bd_command=Mock(),
+    )
+
+    failure = runner._classify_claim_failure(  # pyright: ignore[reportPrivateUsage]
+        beads=beads,
+        epic_id="at-refined",
+        agent_id="atelier/worker/codex/p3c",
+        allow_takeover_from=None,
+        beads_root=Path("/project/.atelier/.beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert failure.kind == "non_claimable"
+    assert failure.detail == "refinement_not_ready"
+
+
 def test_run_worker_once_reclaims_stale_explicit_assignment_and_clears_old_hook() -> None:
     agent = AgentHome(
         name="worker",

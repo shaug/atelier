@@ -1,8 +1,8 @@
 ---
 name: plan-split-tasks
 description: >-
-  Split an epic into changeset beads with dependency-safe statuses when
-  decomposition is needed.
+  Split an epic or changeset into child changesets with deterministic
+  refinement-lineage propagation.
 ---
 
 # Plan split tasks
@@ -12,10 +12,11 @@ review-sized unit, keep it as the executable changeset.
 
 ## Inputs
 
-- epic_id: Parent epic bead id.
-- tasks: List of changeset titles and acceptance criteria.
-- subtasks: Optional nested changesets mapped to a parent changeset.
+- parent_id: Parent epic or changeset bead id to split.
+- tasks: List of `"<title>::<acceptance>"` entries (`--task` repeatable).
+- status: Optional initial status for created children (`deferred|open`).
 - beads_dir: Optional Beads store path.
+- repo_dir: Optional repo root override. Defaults to `./worktree` then cwd.
 
 ## Steps
 
@@ -24,15 +25,16 @@ review-sized unit, keep it as the executable changeset.
 1. If decomposition would create exactly one child changeset, keep the epic as
    the executable changeset unless explicit decomposition rationale is recorded
    in notes/description.
-1. Create changeset beads under the epic:
-   - `bd create --parent <epic_id> --type task --title <title> --acceptance <acceptance>`
-   - `bd update <new_changeset_id> --status deferred`
-1. Create nested changesets under a parent changeset when needed:
-   - `bd create --parent <changeset_id> --type task --title <title> --acceptance <acceptance>`
-   - `bd update <new_changeset_id> --status deferred`
-1. Use `--notes` for follow-up details instead of editing descriptions.
+1. Create split changesets with the script:
+   - `python skills/plan-split-tasks/scripts/split_tasks.py --parent-id "<parent_id>" --task "<title>::<acceptance>" [--task "<title>::<acceptance>"] [--status deferred|open] [--beads-dir "<beads_dir>"] [--repo-dir "<repo_dir>"]`
+1. Keep child split units scoped and reviewable.
+1. If parent lineage has required refinement metadata, each created child gets
+   authoritative inherited `planning_refinement.v1` metadata.
+1. Use `--notes` or `--append-notes` for follow-up details instead of editing
+   descriptions.
 
 ## Verification
 
 - All executable work items are leaf work beads (changesets by graph inference).
 - One-child decompositions include explicit rationale.
+- Refined parent lineage remains refined across all split descendants.

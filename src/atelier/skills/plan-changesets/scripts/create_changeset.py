@@ -72,6 +72,121 @@ def _build_store(*, beads_root: Path, repo_root: Path):
     return build_atelier_store(beads=client)
 
 
+def _render_refinement_note(record: object) -> str:
+    from typing import cast
+
+    model_dump = getattr(record, "model_dump", None)
+    if not callable(model_dump):
+        raise RuntimeError("invalid refinement record payload")
+    raw_payload = model_dump(exclude_none=True)
+    if not isinstance(raw_payload, dict):
+        raise RuntimeError("invalid refinement record payload")
+    payload = cast(dict[str, object], raw_payload)
+    ordered_keys = (
+        "authoritative",
+        "mode",
+        "required",
+        "lineage_root",
+        "approval_status",
+        "approval_source",
+        "approved_by",
+        "approved_at",
+        "plan_edit_rounds_max",
+        "post_impl_review_rounds_max",
+        "plan_edit_rounds_used",
+        "latest_verdict",
+        "initial_plan_path",
+        "latest_plan_path",
+        "round_log_dir",
+    )
+    lines = ["planning_refinement.v1"]
+    for key in ordered_keys:
+        if key not in payload:
+            continue
+        value = payload[key]
+        if isinstance(value, bool):
+            rendered = "true" if value else "false"
+        else:
+            rendered = str(value)
+        lines.append(f"{key}: {rendered}")
+    return "\n".join(lines)
+
+
+def _parent_notes(*, store, epic_id: str, beads_root: Path, repo_root: Path) -> str | None:
+    sentinel = object()
+    if not hasattr(store, "get_epic"):
+        return None
+    parent = asyncio.run(store.get_epic(epic_id))
+    from_store = getattr(parent, "notes", sentinel)
+    if from_store is None:
+        return None
+    if isinstance(from_store, str) and from_store.strip():
+        return from_store
+    if isinstance(from_store, str):
+        return None
+    if isinstance(from_store, (tuple, list)):
+        joined = "\n".join(str(item).strip() for item in from_store if str(item).strip())
+        if joined:
+            return joined
+        return None
+    if from_store is not sentinel:
+        return None
+
+    from atelier.lib.beads import ShowIssueRequest, SubprocessBeadsClient
+
+    client = SubprocessBeadsClient(
+        cwd=repo_root,
+        beads_root=beads_root,
+        env={"BEADS_DIR": str(beads_root)},
+    )
+    try:
+        issue = asyncio.run(client.show(ShowIssueRequest(issue_id=epic_id)))
+    except Exception as exc:
+        raise RuntimeError(f"failed to read parent refinement notes for {epic_id}: {exc}") from exc
+    notes = getattr(issue, "notes", None)
+    if isinstance(notes, str) and notes.strip():
+        return notes
+    if isinstance(notes, (tuple, list)):
+        joined = "\n".join(str(item).strip() for item in notes if str(item).strip())
+        if joined:
+            return joined
+    return None
+
+
+def _inherited_refinement_note(*, parent_notes: str | None, epic_id: str) -> str | None:
+    if not parent_notes:
+        return None
+    from atelier.planning_refinement import (
+        PlanningRefinementRecord,
+        parse_refinement_blocks,
+        select_winning_refinement,
+    )
+
+    parsed_blocks = parse_refinement_blocks(parent_notes)
+    selected = select_winning_refinement(parsed_blocks)
+    if selected is None:
+        authoritative_scope = tuple(block for block in parsed_blocks if block.authoritative_hint)
+        scope = authoritative_scope or parsed_blocks
+        if any(block.required_hint for block in scope):
+            raise RuntimeError("required parent refinement metadata is malformed")
+        return None
+    if not selected.required:
+        return None
+    inherited = PlanningRefinementRecord(
+        authoritative=True,
+        mode="inherited",
+        required=True,
+        lineage_root=selected.lineage_root or epic_id,
+        approval_status=selected.approval_status,
+        approval_source=selected.approval_source,
+        approved_by=selected.approved_by,
+        approved_at=selected.approved_at,
+        plan_edit_rounds_max=selected.plan_edit_rounds_max,
+        post_impl_review_rounds_max=selected.post_impl_review_rounds_max,
+    )
+    return _render_refinement_note(inherited)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--epic-id", required=True, help="Parent epic bead id")
@@ -131,6 +246,17 @@ def main() -> None:
     initial_status = LifecycleStatus(args.status)
     notes = (str(args.notes).strip(),) if str(args.notes).strip() else ()
     try:
+        parent_notes = _parent_notes(
+            store=store,
+            epic_id=args.epic_id,
+            beads_root=context.beads_root,
+            repo_root=context.project_dir,
+        )
+        refinement_note = _inherited_refinement_note(
+            parent_notes=parent_notes,
+            epic_id=args.epic_id,
+        )
+        persisted_notes = notes + ((refinement_note,) if refinement_note is not None else ())
         changeset = asyncio.run(
             store.create_changeset(
                 CreateChangesetRequest(
@@ -138,7 +264,7 @@ def main() -> None:
                     title=args.title,
                     acceptance_criteria=args.acceptance,
                     description=description or None,
-                    notes=notes,
+                    notes=persisted_notes,
                     labels=("ext:no-export",) if args.no_export else (),
                     initial_status=initial_status,
                 )

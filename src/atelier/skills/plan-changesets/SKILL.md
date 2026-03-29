@@ -57,6 +57,8 @@ create/edit deferred work.
 - If review feedback expands scope, capture that work immediately as deferred
   follow-on changesets (or stack extensions) rather than accreting it into the
   active changeset.
+- If the parent epic has required refinement metadata, each child changeset
+  inherits required refinement with `mode=inherited` and copied budgets.
 
 ## Steps
 
@@ -83,6 +85,8 @@ create/edit deferred work.
 1. Record guardrails in the changeset description or notes.
 1. The script creates the bead, applies auto-export when enabled by project
    config, and prints non-fatal retry instructions if export fails.
+1. When parent lineage is refinement-required, inherited
+   `planning_refinement.v1` metadata is appended automatically to each child.
 1. See [Planner Store Migration Contract] for the exact planner-side store
    boundary and the remaining deferred preview gap.
 
@@ -112,6 +116,8 @@ Scenario: `Prevent premature close of active-PR changesets`.
   description.
 - Every executable path includes explicit worker-facing context fields plus
   acceptance criteria or `done_definition`.
+- Refined parent lineages produce refined child lineages with inherited
+  requirement and budgets.
 - When auto-export is enabled and not opted out, each changeset gets its own
   exported external ticket link.
 

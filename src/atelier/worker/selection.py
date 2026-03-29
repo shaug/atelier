@@ -232,6 +232,7 @@ def evaluate_epic_claimability(issue: dict[str, object]) -> lifecycle.EpicClaimE
         labels=issue_labels(issue),
         issue_type=issue_type(issue),
         parent_id=issue_parent_id(issue),
+        notes=issue.get("notes"),
     )
 
 

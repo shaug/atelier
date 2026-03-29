@@ -848,6 +848,7 @@ def claim_epic(
         labels=lifecycle.normalized_labels(issue.get("labels")),
         issue_type=lifecycle.issue_payload_type(issue),
         parent_id=worker_selection.issue_parent_id(issue),
+        notes=issue.get("notes"),
     )
     is_executable = lifecycle.is_executable_epic_identity(
         labels=lifecycle.normalized_labels(issue.get("labels")),

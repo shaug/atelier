@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 from . import agents
 
@@ -26,6 +26,8 @@ BeadsLocation = Literal["repo", "project"]
 BEADS_RUNTIME_MODE_VALUES = ("dolt-server",)
 BeadsRuntimeMode = Literal["dolt-server"]
 BEADS_PREFIX_PATTERN = re.compile(r"^[a-z][a-z0-9]{0,15}$")
+DEFAULT_REFINEMENT_PLAN_EDIT_ROUNDS_MAX = 5
+DEFAULT_REFINEMENT_POST_IMPL_REVIEW_ROUNDS_MAX = 8
 
 
 class BranchConfig(BaseModel):
@@ -151,6 +153,51 @@ class WorkerConfig(BaseModel):
         if normalized in WORKER_SELECT_VALUES:
             return normalized
         raise ValueError("select must be one of: " + ", ".join(WORKER_SELECT_VALUES))
+
+
+class PlanningRefinementConfig(BaseModel):
+    """Planning refinement policy and round budgets.
+
+    Attributes:
+        required_by_default: Whether project policy marks new work refined by
+            default.
+        plan_edit_rounds_max: Maximum planning-edit rounds for refinement.
+        post_impl_review_rounds_max: Maximum post-implementation review rounds.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    required_by_default: bool = False
+    plan_edit_rounds_max: int = DEFAULT_REFINEMENT_PLAN_EDIT_ROUNDS_MAX
+    post_impl_review_rounds_max: int = DEFAULT_REFINEMENT_POST_IMPL_REVIEW_ROUNDS_MAX
+
+    @field_validator(
+        "plan_edit_rounds_max",
+        "post_impl_review_rounds_max",
+        mode="before",
+    )
+    @classmethod
+    def normalize_round_limits(cls, value: object) -> object:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped.isdigit():
+                return int(stripped)
+        return value
+
+    @field_validator("plan_edit_rounds_max", "post_impl_review_rounds_max")
+    @classmethod
+    def validate_round_limits(cls, value: int, info: ValidationInfo) -> int:
+        if value < 1 or value > 64:
+            raise ValueError(f"{info.field_name} must be between 1 and 64")
+        return value
+
+
+class PlanningSection(BaseModel):
+    """Planning-specific configuration for a project."""
+
+    model_config = ConfigDict(extra="allow")
+
+    refinement: PlanningRefinementConfig = Field(default_factory=PlanningRefinementConfig)
 
 
 class GitSection(BaseModel):
@@ -627,6 +674,7 @@ class ProjectConfig(BaseModel):
     git: GitSection = Field(default_factory=GitSection)
     branch: BranchConfig = Field(default_factory=BranchConfig)
     worker: WorkerConfig = Field(default_factory=WorkerConfig)
+    planning: PlanningSection = Field(default_factory=PlanningSection)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     editor: EditorConfig = Field(default_factory=EditorConfig)
     beads: BeadsSection = Field(default_factory=BeadsSection)
@@ -652,6 +700,7 @@ class ProjectUserConfig(BaseModel):
     git: GitSection = Field(default_factory=GitSection)
     branch: BranchConfig = Field(default_factory=BranchConfig)
     worker: WorkerConfig = Field(default_factory=WorkerConfig)
+    planning: PlanningSection = Field(default_factory=PlanningSection)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     editor: EditorConfig = Field(default_factory=EditorConfig)
     atelier: AtelierUserSection = Field(default_factory=AtelierUserSection)

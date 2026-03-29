@@ -132,6 +132,56 @@ def test_select_epic_auto_prefers_ready_before_assigned() -> None:
     assert selected == "at-ready"
 
 
+def test_filter_epics_skips_required_refinement_without_ready_verdict() -> None:
+    issues = [
+        {
+            "id": "at-ready",
+            "status": "open",
+            "labels": ["at:epic"],
+            "assignee": None,
+            "notes": (
+                "planning_refinement.v1\n"
+                "authoritative: true\n"
+                "mode: requested\n"
+                "required: true\n"
+                "lineage_root: at-ready\n"
+                "approval_status: approved\n"
+                "approval_source: operator\n"
+                "approved_by: planner-user\n"
+                "approved_at: 2026-03-29T12:00:00Z\n"
+                "latest_verdict: READY\n"
+            ),
+        },
+        {
+            "id": "at-revised",
+            "status": "open",
+            "labels": ["at:epic"],
+            "assignee": None,
+            "notes": (
+                "planning_refinement.v1\n"
+                "authoritative: true\n"
+                "mode: requested\n"
+                "required: true\n"
+                "lineage_root: at-revised\n"
+                "approval_status: approved\n"
+                "approval_source: operator\n"
+                "approved_by: planner-user\n"
+                "approved_at: 2026-03-29T12:00:00Z\n"
+                "latest_verdict: REVISED\n"
+            ),
+        },
+    ]
+
+    ready = selection.filter_epics(
+        issues,
+        require_unassigned=True,
+        allow_hooked=False,
+        skip_draft=True,
+    )
+
+    assert [item["id"] for item in ready] == ["at-ready"]
+
+
 def test_select_epic_prompt_supports_assume_yes() -> None:
     issues = [
         {

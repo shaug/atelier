@@ -191,3 +191,206 @@ def test_create_epic_rejects_low_information_payload(
     assert "- title: [placeholder_value]" in captured.err
     assert "- scope: [placeholder_value]" in captured.err
     assert "planner-context: NEEDS-DECISION" in captured.err
+
+
+def test_create_epic_appends_required_refinement_metadata(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    captured_notes: list[tuple[str, ...]] = []
+    context = SimpleNamespace(
+        project_dir=tmp_path / "project",
+        beads_root=tmp_path / ".beads",
+    )
+
+    monkeypatch.setattr(
+        module.auto_export,
+        "resolve_auto_export_context",
+        lambda **_kwargs: context,
+    )
+
+    class FakeStore:
+        async def create_epic(self, request):
+            del request
+            return SimpleNamespace(id="at-epic-1")
+
+        async def append_notes(self, request):
+            captured_notes.append(request.notes)
+            return SimpleNamespace(id=request.issue_id)
+
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
+    monkeypatch.setattr(
+        module.auto_export,
+        "auto_export_issue",
+        lambda issue_id, *, context: module.auto_export.AutoExportResult(
+            status="skipped",
+            issue_id=issue_id,
+            provider=None,
+            message="auto-export disabled for test",
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "create_epic.py",
+            "--title",
+            "Lifecycle migration",
+            "--scope",
+            "Move readiness semantics to deferred/open statuses.",
+            "--acceptance",
+            "Planner transitions use status-only lifecycle.",
+            "--required-refinement",
+            "--refinement-approval-source",
+            "operator",
+            "--refinement-approved-by",
+            "planner-user",
+            "--refinement-approved-at",
+            "2026-03-29T12:00:00Z",
+        ],
+    )
+
+    module.main()
+
+    assert captured_notes
+    note = captured_notes[0][0]
+    assert note.startswith("planning_refinement.v1")
+    assert "required: true" in note
+    assert "approval_status: approved" in note
+
+
+def test_create_epic_required_refinement_validates_before_epic_create(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    context = SimpleNamespace(
+        project_dir=tmp_path / "project",
+        beads_root=tmp_path / ".beads",
+    )
+    create_calls: list[object] = []
+
+    monkeypatch.setattr(
+        module.auto_export,
+        "resolve_auto_export_context",
+        lambda **_kwargs: context,
+    )
+
+    class FakeStore:
+        async def create_epic(self, request):
+            create_calls.append(request)
+            return SimpleNamespace(id="at-epic-1")
+
+        async def append_notes(self, request):  # pragma: no cover - defensive
+            raise AssertionError(request)
+
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
+    monkeypatch.setattr(
+        module.auto_export,
+        "auto_export_issue",
+        lambda issue_id, *, context: module.auto_export.AutoExportResult(
+            status="skipped",
+            issue_id=issue_id,
+            provider=None,
+            message="auto-export disabled for test",
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "create_epic.py",
+            "--title",
+            "Lifecycle migration",
+            "--scope",
+            "Move readiness semantics to deferred/open statuses.",
+            "--acceptance",
+            "Planner transitions use status-only lifecycle.",
+            "--required-refinement",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.main()
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 1
+    assert "required refinement must include approval evidence" in captured.err
+    assert create_calls == []
+
+
+def test_create_epic_required_refinement_uses_policy_budget_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    captured_notes: list[tuple[str, ...]] = []
+    context = SimpleNamespace(
+        project_dir=tmp_path / "project",
+        beads_root=tmp_path / ".beads",
+    )
+
+    monkeypatch.setattr(
+        module.auto_export,
+        "resolve_auto_export_context",
+        lambda **_kwargs: context,
+    )
+    monkeypatch.setattr(
+        module,
+        "_resolve_refinement_policy",
+        lambda **_kwargs: SimpleNamespace(
+            plan_edit_rounds_max=13,
+            post_impl_review_rounds_max=21,
+            required_by_default=True,
+        ),
+    )
+
+    class FakeStore:
+        async def create_epic(self, request):
+            del request
+            return SimpleNamespace(id="at-epic-1")
+
+        async def append_notes(self, request):
+            captured_notes.append(request.notes)
+            return SimpleNamespace(id=request.issue_id)
+
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
+    monkeypatch.setattr(
+        module.auto_export,
+        "auto_export_issue",
+        lambda issue_id, *, context: module.auto_export.AutoExportResult(
+            status="skipped",
+            issue_id=issue_id,
+            provider=None,
+            message="auto-export disabled for test",
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "create_epic.py",
+            "--title",
+            "Lifecycle migration",
+            "--scope",
+            "Move readiness semantics to deferred/open statuses.",
+            "--acceptance",
+            "Planner transitions use status-only lifecycle.",
+            "--required-refinement",
+            "--refinement-approval-source",
+            "operator",
+            "--refinement-approved-by",
+            "planner-user",
+            "--refinement-approved-at",
+            "2026-03-29T12:00:00Z",
+        ],
+    )
+
+    module.main()
+
+    assert captured_notes
+    note = captured_notes[0][0]
+    assert "plan_edit_rounds_max: 13" in note
+    assert "post_impl_review_rounds_max: 21" in note

@@ -8,6 +8,7 @@ import asyncio
 import sys
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 _SHARED_SCRIPTS_ROOT = Path(__file__).resolve().parents[2] / "shared" / "scripts"
 if str(_SHARED_SCRIPTS_ROOT) not in sys.path:
@@ -83,6 +84,88 @@ def _build_store(*, beads_root: Path, repo_root: Path):
     return build_atelier_store(beads=client)
 
 
+def _clean(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _resolve_refinement_policy(*, repo_root: Path):
+    from atelier.refinement_invariants import resolve_refinement_policy_for_repo
+
+    return resolve_refinement_policy_for_repo(repo_root=repo_root)
+
+
+def _render_refinement_note(record: object) -> str:
+    from typing import cast
+
+    model_dump = getattr(record, "model_dump", None)
+    if not callable(model_dump):
+        raise RuntimeError("invalid refinement record payload")
+    raw_payload = model_dump(exclude_none=True)
+    if not isinstance(raw_payload, dict):
+        raise RuntimeError("invalid refinement record payload")
+    payload = cast(dict[str, object], raw_payload)
+    ordered_keys = (
+        "authoritative",
+        "mode",
+        "required",
+        "lineage_root",
+        "approval_status",
+        "approval_source",
+        "approved_by",
+        "approved_at",
+        "plan_edit_rounds_max",
+        "post_impl_review_rounds_max",
+        "plan_edit_rounds_used",
+        "latest_verdict",
+        "initial_plan_path",
+        "latest_plan_path",
+        "round_log_dir",
+    )
+    lines = ["planning_refinement.v1"]
+    for key in ordered_keys:
+        if key not in payload:
+            continue
+        value = payload[key]
+        if isinstance(value, bool):
+            rendered = "true" if value else "false"
+        else:
+            rendered = str(value)
+        lines.append(f"{key}: {rendered}")
+    return "\n".join(lines)
+
+
+def _required_refinement_note(
+    *,
+    issue_id: str,
+    approval_source: str,
+    approved_by: str,
+    approved_at: str,
+    plan_edit_rounds_max: int,
+    post_impl_review_rounds_max: int,
+) -> str:
+    from atelier.planning_refinement import (
+        ApprovalSource,
+        PlanningRefinementRecord,
+    )
+
+    record = PlanningRefinementRecord(
+        authoritative=True,
+        mode="requested",
+        required=True,
+        lineage_root=issue_id,
+        approval_status="approved",
+        approval_source=cast(ApprovalSource, approval_source),
+        approved_by=approved_by,
+        approved_at=approved_at,
+        plan_edit_rounds_max=plan_edit_rounds_max,
+        post_impl_review_rounds_max=post_impl_review_rounds_max,
+    )
+    return _render_refinement_note(record)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--title", required=True, help="Epic title")
@@ -93,6 +176,39 @@ def main() -> None:
         help="Optional guardrail/decomposition strategy text",
     )
     parser.add_argument("--design", help="Optional design notes")
+    parser.add_argument(
+        "--required-refinement",
+        action="store_true",
+        help="Require refinement for this epic and persist approval evidence",
+    )
+    parser.add_argument(
+        "--refinement-approval-source",
+        choices=("project_policy", "operator"),
+        default="",
+        help="Approval source for required refinement",
+    )
+    parser.add_argument(
+        "--refinement-approved-by",
+        default="",
+        help="Approver principal id for required refinement",
+    )
+    parser.add_argument(
+        "--refinement-approved-at",
+        default="",
+        help="Approval timestamp for required refinement",
+    )
+    parser.add_argument(
+        "--refinement-plan-edit-rounds-max",
+        type=int,
+        default=None,
+        help="Optional plan-edit round budget override for required refinement",
+    )
+    parser.add_argument(
+        "--refinement-post-impl-review-rounds-max",
+        type=int,
+        default=None,
+        help="Optional post-implementation round budget override for required refinement",
+    )
     parser.add_argument(
         "--no-export",
         action="store_true",
@@ -126,9 +242,41 @@ def main() -> None:
 
     description = _description(args.scope, args.changeset_strategy)
     store = _build_store(beads_root=context.beads_root, repo_root=context.project_dir)
+    policy = _resolve_refinement_policy(repo_root=context.project_dir)
     from atelier.store import CreateEpicRequest, LifecycleStatus
 
     try:
+        required_refinement: tuple[str, str, str, int, int] | None = None
+        if args.required_refinement:
+            from atelier.refinement_invariants import (
+                resolve_refinement_round_limits,
+                validate_required_refinement_approval,
+            )
+
+            _status, approval_source, approved_by, approved_at = (
+                validate_required_refinement_approval(
+                    mode="requested",
+                    approval_status=None,
+                    approval_source=_clean(args.refinement_approval_source),
+                    approved_by=_clean(args.refinement_approved_by),
+                    approved_at=_clean(args.refinement_approved_at),
+                    policy=policy,
+                )
+            )
+            plan_edit_rounds_max, post_impl_review_rounds_max = resolve_refinement_round_limits(
+                cli_plan_edit_rounds_max=args.refinement_plan_edit_rounds_max,
+                cli_post_impl_review_rounds_max=args.refinement_post_impl_review_rounds_max,
+                item_plan_edit_rounds_max=None,
+                item_post_impl_review_rounds_max=None,
+                policy=policy,
+            )
+            required_refinement = (
+                approval_source,
+                approved_by,
+                approved_at,
+                plan_edit_rounds_max,
+                post_impl_review_rounds_max,
+            )
         epic = asyncio.run(
             store.create_epic(
                 CreateEpicRequest(
@@ -141,6 +289,25 @@ def main() -> None:
                 )
             )
         )
+        if required_refinement is not None:
+            (
+                approval_source,
+                approved_by,
+                approved_at,
+                plan_edit_rounds_max,
+                post_impl_review_rounds_max,
+            ) = required_refinement
+            note = _required_refinement_note(
+                issue_id=epic.id,
+                approval_source=approval_source,
+                approved_by=approved_by,
+                approved_at=approved_at,
+                plan_edit_rounds_max=plan_edit_rounds_max,
+                post_impl_review_rounds_max=post_impl_review_rounds_max,
+            )
+            from atelier.store import AppendNotesRequest
+
+            asyncio.run(store.append_notes(AppendNotesRequest(issue_id=epic.id, notes=(note,))))
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

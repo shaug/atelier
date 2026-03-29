@@ -346,3 +346,47 @@ def test_evaluate_epic_claimability_requires_epic_label() -> None:
         parent_id=None,
     )
     assert labeled.claimable is True
+
+
+def test_evaluate_epic_claimability_rejects_required_refinement_without_approval() -> None:
+    blocked = lifecycle.evaluate_epic_claimability(
+        status="open",
+        labels={"at:epic"},
+        issue_type="epic",
+        parent_id=None,
+        notes=(
+            "planning_refinement.v1\n"
+            "authoritative: true\n"
+            "mode: requested\n"
+            "required: true\n"
+            "lineage_root: at-epic\n"
+            "approval_status: missing\n"
+        ),
+    )
+
+    assert blocked.claimable is False
+    assert "refinement_approval_missing" in blocked.reasons
+
+
+def test_evaluate_epic_claimability_rejects_required_refinement_without_ready_verdict() -> None:
+    blocked = lifecycle.evaluate_epic_claimability(
+        status="open",
+        labels={"at:epic"},
+        issue_type="epic",
+        parent_id=None,
+        notes=(
+            "planning_refinement.v1\n"
+            "authoritative: true\n"
+            "mode: requested\n"
+            "required: true\n"
+            "lineage_root: at-epic\n"
+            "approval_status: approved\n"
+            "approval_source: operator\n"
+            "approved_by: planner-user\n"
+            "approved_at: 2026-03-29T12:00:00Z\n"
+            "latest_verdict: REVISED\n"
+        ),
+    )
+
+    assert blocked.claimable is False
+    assert "refinement_not_ready" in blocked.reasons
