@@ -534,3 +534,29 @@ def test_evaluate_guardrails_accepts_complete_required_refinement_contract() -> 
     )
 
     assert not any("refinement evidence incomplete" in item for item in report.violations)
+
+
+def test_evaluate_guardrails_checks_required_refinement_when_notes_are_tuple() -> None:
+    module = _load_script_module()
+    child = {
+        "id": "at-epic.1",
+        "labels": [],
+        "description": _planner_contract_text() + "\nLOC estimate: 220",
+        "acceptance_criteria": "Done when tuple-backed notes are checked.",
+        "notes": (
+            "planning_refinement.v1",
+            "authoritative: true",
+            "mode: requested",
+            "required: true",
+            "lineage_root: at-epic",
+            "approval_status: missing",
+        ),
+    }
+
+    report = module._evaluate_guardrails(
+        epic_issue=None,
+        child_changesets=[],
+        target_changesets=[child],
+    )
+
+    assert any("refinement evidence incomplete" in item for item in report.violations)

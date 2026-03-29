@@ -169,7 +169,7 @@ def _labels(issue: dict[str, object]) -> set[str]:
 def _normalize_text(value: object) -> str:
     if isinstance(value, str):
         return value
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return "\n".join(str(item) for item in value if item is not None)
     return ""
 

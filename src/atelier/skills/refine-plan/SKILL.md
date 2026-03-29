@@ -19,7 +19,7 @@ behavior before dispatch or promotion.
 ## Steps
 
 1. Run refinement loop:
-   - `python skills/refine-plan/scripts/run_refinement.py --initial-plan-path "<abs-path>" --output-dir "<abs-dir>" [--max-rounds 5]`
+   - `python skills/refine-plan/scripts/run_refinement.py --issue-id "<epic-or-changeset-id>" --initial-plan-path "<abs-path>" --output-dir "<abs-dir>" [--max-rounds 5]`
 1. Use prompt templates:
    - `subagents/prompt-planning-initial.md` for initial-quality framing.
    - `subagents/prompt-planning-edit.md` for iterative edit rounds.
@@ -31,5 +31,7 @@ behavior before dispatch or promotion.
 
 - Round artifacts exist under `<output_dir>/rounds/round-XX.json`.
 - `latest-plan.md` is written to `<output_dir>`.
+- Authoritative `planning_refinement.v1` evidence is appended to issue notes,
+  including rounds used, latest verdict, and artifact links.
 - Result status is `ready` only when verdict is `READY`.
 - Non-converged runs return `non_converged` and must not be treated as ready.

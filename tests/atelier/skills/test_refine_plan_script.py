@@ -4,6 +4,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -123,12 +124,45 @@ def test_refine_plan_main_without_simulation_is_runnable_fail_closed(
     module = _load_script_module()
     initial_plan_path = tmp_path / "initial.md"
     output_dir = tmp_path / "artifacts"
+    appended_notes: list[tuple[str, ...]] = []
     initial_plan_path.write_text("initial\n", encoding="utf-8")
+
+    class FakeStore:
+        async def get_epic(self, issue_id: str):
+            return SimpleNamespace(
+                id=issue_id,
+                notes=(
+                    "planning_refinement.v1\n"
+                    "authoritative: true\n"
+                    "mode: requested\n"
+                    "required: true\n"
+                    "approval_status: approved\n"
+                    "approval_source: operator\n"
+                    "approved_by: planner-user\n"
+                    "approved_at: 2026-03-29T12:00:00Z\n"
+                    "plan_edit_rounds_max: 5\n"
+                    "post_impl_review_rounds_max: 8\n"
+                    "latest_verdict: REVISED\n"
+                ),
+            )
+
+        async def get_changeset(self, issue_id: str):
+            del issue_id
+            raise LookupError("not a changeset")
+
+        async def append_notes(self, request):
+            appended_notes.append(request.notes)
+            return SimpleNamespace(id=request.issue_id)
+
+    monkeypatch.setattr(module, "_resolve_context", lambda **_kwargs: (tmp_path, tmp_path, None))
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
     monkeypatch.setattr(
         sys,
         "argv",
         [
             "run_refinement.py",
+            "--issue-id",
+            "at-123",
             "--initial-plan-path",
             str(initial_plan_path),
             "--output-dir",
@@ -139,9 +173,82 @@ def test_refine_plan_main_without_simulation_is_runnable_fail_closed(
     exit_code = module.main()
 
     assert exit_code == 1
+    assert appended_notes
     payload = json.loads((output_dir / "result.json").read_text(encoding="utf-8"))
     assert payload["status"] == "non_converged"
     assert payload["latest_verdict"] == "USER_DECISION_REQUIRED"
+
+
+def test_refine_plan_main_persists_authoritative_refinement_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    initial_plan_path = tmp_path / "initial.md"
+    output_dir = tmp_path / "artifacts"
+    appended_notes: list[tuple[str, ...]] = []
+    initial_plan_path.write_text("initial\n", encoding="utf-8")
+
+    class FakeStore:
+        async def get_epic(self, issue_id: str):
+            return SimpleNamespace(
+                id=issue_id,
+                notes=(
+                    "planning_refinement.v1\n"
+                    "authoritative: true\n"
+                    "mode: requested\n"
+                    "required: true\n"
+                    "lineage_root: at-epic\n"
+                    "approval_status: approved\n"
+                    "approval_source: operator\n"
+                    "approved_by: planner-user\n"
+                    "approved_at: 2026-03-29T12:00:00Z\n"
+                    "plan_edit_rounds_max: 7\n"
+                    "post_impl_review_rounds_max: 9\n"
+                    "latest_verdict: REVISED\n"
+                ),
+            )
+
+        async def get_changeset(self, issue_id: str):
+            del issue_id
+            raise LookupError("not a changeset")
+
+        async def append_notes(self, request):
+            appended_notes.append(request.notes)
+            return SimpleNamespace(id=request.issue_id)
+
+    monkeypatch.setattr(module, "_resolve_context", lambda **_kwargs: (tmp_path, tmp_path, None))
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_refinement.py",
+            "--issue-id",
+            "at-epic",
+            "--initial-plan-path",
+            str(initial_plan_path),
+            "--output-dir",
+            str(output_dir),
+            "--simulate-verdicts",
+            "READY",
+        ],
+    )
+
+    exit_code = module.main()
+
+    assert exit_code == 0
+    assert appended_notes
+    note = appended_notes[0][0]
+    assert note.startswith("planning_refinement.v1")
+    assert "authoritative: true" in note
+    assert "required: true" in note
+    assert "approval_status: approved" in note
+    assert "latest_verdict: READY" in note
+    assert "plan_edit_rounds_used: 1" in note
+    assert f"initial_plan_path: {initial_plan_path.resolve()}" in note
+    assert f"latest_plan_path: {(output_dir / 'latest-plan.md').resolve()}" in note
+    assert f"round_log_dir: {(output_dir / 'rounds').resolve()}" in note
 
 
 def test_refine_plan_loop_artifacts_match_trycycle_snapshot_anchors() -> None:

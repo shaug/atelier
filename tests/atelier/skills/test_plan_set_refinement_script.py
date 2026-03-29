@@ -260,3 +260,52 @@ def test_set_refinement_project_policy_mode_fails_when_policy_not_configured(
     captured = capsys.readouterr()
     assert excinfo.value.code == 1
     assert "project_policy mode requires configured policy" in captured.err
+
+
+def test_set_refinement_rejects_non_iso_approval_timestamp(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_script_module()
+
+    class FakeStore:
+        async def get_epic(self, issue_id: str):
+            return SimpleNamespace(id=issue_id, lifecycle="open")
+
+        async def get_changeset(self, issue_id: str):
+            del issue_id
+            raise LookupError("not a changeset")
+
+        async def append_notes(self, request):  # pragma: no cover - defensive
+            raise AssertionError(request)
+
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
+    monkeypatch.setattr(
+        module, "_resolve_context", lambda **_kwargs: (Path("/tmp/.beads"), Path("/tmp"), None)
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "set_refinement.py",
+            "--issue-id",
+            "at-123",
+            "--required",
+            "--approval-source",
+            "operator",
+            "--approved-by",
+            "planner-user",
+            "--approved-at",
+            "tomorrow-ish",
+            "--latest-verdict",
+            "READY",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.main()
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 1
+    assert "approved_at" in captured.err
+    assert "ISO-8601" in captured.err

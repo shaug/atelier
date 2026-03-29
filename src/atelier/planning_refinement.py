@@ -7,6 +7,7 @@ readiness for refined work.
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass
 from typing import Final, Literal
 
@@ -93,6 +94,14 @@ class PlanningRefinementRecord(BaseModel):
             return normalized or None
         return value
 
+    @field_validator("approved_at", mode="before")
+    @classmethod
+    def _normalize_approved_at(cls, value: object) -> object:
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        return value
+
     @field_validator("latest_verdict", mode="before")
     @classmethod
     def _normalize_latest_verdict(cls, value: object) -> object:
@@ -129,6 +138,18 @@ class PlanningRefinementRecord(BaseModel):
             return None
         if value < 0:
             raise ValueError("plan_edit_rounds_used must be >= 0")
+        return value
+
+    @field_validator("approved_at")
+    @classmethod
+    def _validate_approved_at_iso8601(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.replace("Z", "+00:00")
+        try:
+            dt.datetime.fromisoformat(normalized)
+        except ValueError as exc:
+            raise ValueError("approved_at must be ISO-8601 timestamp") from exc
         return value
 
 
