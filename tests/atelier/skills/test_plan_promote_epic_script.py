@@ -7,6 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.atelier.skills.h1_store_harness import issue_builder, make_store_for_backend
+
 
 def _load_script_module():
     script_path = (
@@ -480,6 +482,59 @@ def test_promote_epic_refinement_requires_ready_verdict_for_epic_only_execution(
     monkeypatch.setattr(
         module, "_build_store_and_client", lambda **_kwargs: (FakeStore(), FakeClient())
     )
+    monkeypatch.setattr(sys, "argv", ["promote_epic.py", "--epic-id", "at-epic"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.main()
+
+    assert excinfo.value.code == 1
+    assert "at-epic: refinement_not_ready" in capsys.readouterr().err
+
+
+def test_promote_epic_h1_integration_blocks_refined_epic_only_path(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    refinement_notes = (
+        "planning_refinement.v1\n"
+        "authoritative: true\n"
+        "mode: requested\n"
+        "required: true\n"
+        "lineage_root: at-epic\n"
+        "approval_status: approved\n"
+        "approval_source: operator\n"
+        "approved_by: planner-user\n"
+        "approved_at: 2026-03-29T12:00:00Z\n"
+        "latest_verdict: REVISED\n"
+    )
+    client, store = make_store_for_backend(
+        "in-memory",
+        issues=(
+            issue_builder.issue(
+                "at-epic",
+                title="Epic",
+                issue_type="epic",
+                status="deferred",
+                labels=("at:epic",),
+                description=(
+                    "changeset_strategy: Keep review scope small.\n"
+                    "related_context: at-context\n"
+                    "promotion_note: ready for confirmation\n"
+                ),
+                acceptance_criteria="Acceptance text",
+                extra_fields={"notes": refinement_notes},
+            ),
+        ),
+    )
+
+    monkeypatch.setattr(
+        module,
+        "_resolve_context",
+        lambda **_kwargs: (tmp_path / ".beads", tmp_path / "repo", None),
+    )
+    monkeypatch.setattr(module, "_build_store_and_client", lambda **_kwargs: (store, client))
     monkeypatch.setattr(sys, "argv", ["promote_epic.py", "--epic-id", "at-epic"])
 
     with pytest.raises(SystemExit) as excinfo:

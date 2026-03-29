@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+from atelier.lib.beads import ShowIssueRequest
+from tests.atelier.skills.h1_store_harness import issue_builder, make_store_for_backend
 
 
 def _load_script_module():
@@ -309,3 +313,54 @@ def test_set_refinement_rejects_non_iso_approval_timestamp(
     assert excinfo.value.code == 1
     assert "approved_at" in captured.err
     assert "ISO-8601" in captured.err
+
+
+@pytest.mark.parametrize("backend", ["in-memory", "subprocess"])
+def test_set_refinement_h1_integration_persists_note_to_real_store(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    backend: str,
+) -> None:
+    module = _load_script_module()
+    client, store = make_store_for_backend(
+        backend,
+        issues=(
+            issue_builder.issue(
+                "at-123",
+                title="Refinement target",
+                issue_type="epic",
+                status="open",
+                labels=("at:epic",),
+            ),
+        ),
+    )
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: store)
+    monkeypatch.setattr(
+        module, "_resolve_context", lambda **_kwargs: (tmp_path / ".beads", tmp_path / "repo", None)
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "set_refinement.py",
+            "--issue-id",
+            "at-123",
+            "--required",
+            "--approval-source",
+            "operator",
+            "--approved-by",
+            "planner-user",
+            "--approved-at",
+            "2026-03-29T12:00:00Z",
+            "--latest-verdict",
+            "READY",
+        ],
+    )
+
+    module.main()
+
+    issue = asyncio.run(client.show(ShowIssueRequest(issue_id="at-123")))
+    description = str(getattr(issue, "description", "") or "")
+    assert "planning_refinement.v1" in description
+    assert "required: true" in description
+    assert "latest_verdict: READY" in description

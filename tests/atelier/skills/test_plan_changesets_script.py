@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+from atelier.lib.beads import ShowIssueRequest
+from atelier.store import ChangesetQuery
+from tests.atelier.skills.h1_store_harness import issue_builder, make_store_for_backend
 
 
 def _load_script_module():
@@ -455,3 +460,97 @@ def test_create_changeset_unrefined_control_keeps_notes_unchanged(
 
     request = captured_request["request"]
     assert request.notes == ("preserve original operator note",)
+
+
+@pytest.mark.parametrize(
+    ("parent_notes", "expect_inherited"),
+    [
+        (
+            (
+                "planning_refinement.v1\n"
+                "authoritative: true\n"
+                "mode: requested\n"
+                "required: true\n"
+                "lineage_root: at-epic\n"
+                "approval_status: approved\n"
+                "approval_source: operator\n"
+                "approved_by: planner-user\n"
+                "approved_at: 2026-03-29T12:00:00Z\n"
+                "plan_edit_rounds_max: 7\n"
+                "post_impl_review_rounds_max: 9\n"
+                "latest_verdict: READY\n"
+            ),
+            True,
+        ),
+        ("", False),
+    ],
+)
+def test_create_changeset_h1_integration_refinement_inheritance(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    parent_notes: str,
+    expect_inherited: bool,
+) -> None:
+    import atelier.lib.beads as beads_lib
+
+    module = _load_script_module()
+    context = SimpleNamespace(project_dir=tmp_path / "repo", beads_root=tmp_path / ".beads")
+    context.project_dir.mkdir(parents=True, exist_ok=True)
+    context.beads_root.mkdir(parents=True, exist_ok=True)
+    _client, store = make_store_for_backend(
+        "in-memory",
+        issues=(
+            issue_builder.issue(
+                "at-epic",
+                title="Parent epic",
+                issue_type="epic",
+                status="open",
+                labels=("at:epic",),
+                extra_fields={"notes": parent_notes} if parent_notes else None,
+            ),
+        ),
+    )
+
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: store)
+    monkeypatch.setattr(beads_lib, "SubprocessBeadsClient", lambda **_kwargs: _client)
+    monkeypatch.setattr(
+        module.auto_export, "resolve_auto_export_context", lambda **_kwargs: context
+    )
+    monkeypatch.setattr(
+        module.auto_export,
+        "auto_export_issue",
+        lambda issue_id, *, context: module.auto_export.AutoExportResult(
+            status="skipped",
+            issue_id=issue_id,
+            provider=None,
+            message="auto-export disabled for test",
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "create_changeset.py",
+            "--epic-id",
+            "at-epic",
+            "--title",
+            "Integration inheritance check",
+            "--acceptance",
+            "Child changesets preserve lineage semantics.",
+        ],
+    )
+
+    module.main()
+
+    created = asyncio.run(store.list_changesets(ChangesetQuery(epic_id="at-epic")))
+    assert len(created) == 1
+    created_changeset = asyncio.run(store.get_changeset(created[0].id))
+    created_issue = asyncio.run(_client.show(ShowIssueRequest(issue_id=created_changeset.id)))
+    notes_blob = str(getattr(created_issue, "description", "") or "")
+
+    if expect_inherited:
+        assert "planning_refinement.v1" in notes_blob
+        assert "mode: inherited" in notes_blob
+        assert "required: true" in notes_blob
+    else:
+        assert "planning_refinement.v1" not in notes_blob

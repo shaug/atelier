@@ -179,6 +179,68 @@ def test_refine_plan_main_without_simulation_is_runnable_fail_closed(
     assert payload["latest_verdict"] == "USER_DECISION_REQUIRED"
 
 
+def test_refine_plan_main_without_simulation_can_reach_ready_for_executable_plan(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    initial_plan_path = tmp_path / "initial.md"
+    output_dir = tmp_path / "artifacts"
+    appended_notes: list[tuple[str, ...]] = []
+    initial_plan_path.write_text("- [ ] Step 1\n- [ ] Step 2\n", encoding="utf-8")
+
+    class FakeStore:
+        async def get_epic(self, issue_id: str):
+            return SimpleNamespace(
+                id=issue_id,
+                notes=(
+                    "planning_refinement.v1\n"
+                    "authoritative: true\n"
+                    "mode: requested\n"
+                    "required: true\n"
+                    "approval_status: approved\n"
+                    "approval_source: operator\n"
+                    "approved_by: planner-user\n"
+                    "approved_at: 2026-03-29T12:00:00Z\n"
+                    "plan_edit_rounds_max: 5\n"
+                    "post_impl_review_rounds_max: 8\n"
+                    "latest_verdict: REVISED\n"
+                ),
+            )
+
+        async def get_changeset(self, issue_id: str):
+            del issue_id
+            raise LookupError("not a changeset")
+
+        async def append_notes(self, request):
+            appended_notes.append(request.notes)
+            return SimpleNamespace(id=request.issue_id)
+
+    monkeypatch.setattr(module, "_resolve_context", lambda **_kwargs: (tmp_path, tmp_path, None))
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_refinement.py",
+            "--issue-id",
+            "at-123",
+            "--initial-plan-path",
+            str(initial_plan_path),
+            "--output-dir",
+            str(output_dir),
+        ],
+    )
+
+    exit_code = module.main()
+
+    assert exit_code == 0
+    assert appended_notes
+    payload = json.loads((output_dir / "result.json").read_text(encoding="utf-8"))
+    assert payload["status"] == "ready"
+    assert payload["latest_verdict"] == "READY"
+
+
 def test_refine_plan_main_persists_authoritative_refinement_evidence(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

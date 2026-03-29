@@ -719,6 +719,34 @@ def test_run_startup_contract_explicit_epic_refinement_not_ready_exits_cleanly()
     ]
 
 
+def test_run_startup_contract_explicit_epic_malformed_unrefined_metadata_stays_claimable() -> None:
+    emitted: list[str] = []
+
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        show_issue=lambda _issue_id: {
+            "id": "at-explicit",
+            "status": "open",
+            "labels": ["at:epic"],
+            "notes": (
+                "planning_refinement.v1\n"
+                "authoritative: true\n"
+                "mode: requested\n"
+                "required: false\n"
+                "latest_verdict: NOT_READY\n"
+            ),
+        },
+        next_changeset=lambda **_kwargs: {"id": "at-explicit.1"},
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.should_exit is False
+    assert result.reason == "explicit_epic"
+    assert result.epic_id == "at-explicit"
+    assert result.changeset_id is None
+    assert emitted == []
+
+
 def test_run_startup_contract_explicit_epic_assigned_exits_cleanly() -> None:
     emitted: list[str] = []
     stale_probe: list[tuple[str, str]] = []

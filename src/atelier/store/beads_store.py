@@ -281,10 +281,15 @@ def _append_issue_notes(description: str, *, notes: tuple[str, ...]) -> str:
 def _description_ends_with_notes(description: str, *, notes: tuple[str, ...]) -> bool:
     if not notes:
         return True
+    expected_lines: list[str] = []
+    for note in notes:
+        expected_lines.extend(note.rstrip("\n").splitlines())
+    if not expected_lines:
+        return True
     lines = (description or "").rstrip("\n").splitlines()
-    if len(lines) < len(notes):
+    if len(lines) < len(expected_lines):
         return False
-    return tuple(lines[-len(notes) :]) == notes
+    return tuple(lines[-len(expected_lines) :]) == tuple(expected_lines)
 
 
 @dataclass
