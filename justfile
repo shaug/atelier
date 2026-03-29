@@ -7,6 +7,7 @@ install:
   uv build
   bash -c 'wheel="$(ls -t dist/atelier-*.whl | head -n1)"; version="${wheel##*/atelier-}"; version="${version%-py3-none-any.whl}"; uv tool install --find-links dist --prerelease=allow --reinstall "atelier==${version}"'
   uv tool update-shell
+  python3 scripts/repair_tool_install.py atelier atelier.cli
 
 # Install globally from a built wheel (not tied to the working tree)
 install-global:
@@ -14,11 +15,13 @@ install-global:
   uv build
   bash -c 'wheel="$(ls -t dist/atelier-*.whl | head -n1)"; version="${wheel##*/atelier-}"; version="${version%-py3-none-any.whl}"; uv tool install --find-links dist --prerelease=allow --reinstall "atelier==${version}"'
   uv tool update-shell
+  python3 scripts/repair_tool_install.py atelier atelier.cli
 
 # Install globally for day-to-day use (editable)
 install-editable:
   uv tool install --editable . --upgrade --reinstall
   uv tool update-shell
+  python3 scripts/repair_tool_install.py atelier atelier.cli
 
 # Editable install in a local venv
 install-dev:
