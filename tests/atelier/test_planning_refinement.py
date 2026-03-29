@@ -121,6 +121,37 @@ def test_refinement_requiredness_follows_selected_winning_record() -> None:
     assert gate.reason is None
 
 
+def test_refinement_malformed_newest_authoritative_fails_closed_when_required() -> None:
+    notes = "\n\n".join(
+        (
+            _block(
+                authoritative="true",
+                required="false",
+                approval_status="missing",
+                latest_verdict="REVISED",
+            ),
+            _block(
+                authoritative="true",
+                required="true",
+                approval_status="approved",
+                approval_source="operator",
+                approved_by="planner-user",
+                approved_at="2026-03-29T12:00:00Z",
+                latest_verdict="NOT_READY",
+            ),
+        )
+    )
+
+    blocks = planning_refinement.parse_refinement_blocks(notes)
+    selected = planning_refinement.select_winning_refinement(blocks)
+    gate = planning_refinement.evaluate_refinement_claim_gate(notes)
+
+    assert selected is None
+    assert gate.required is True
+    assert gate.claimable is False
+    assert gate.reason == "refinement_metadata_missing_or_malformed"
+
+
 def test_refinement_rejects_non_iso_approval_timestamp() -> None:
     notes = _block(
         authoritative="true",

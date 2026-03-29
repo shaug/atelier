@@ -8,6 +8,7 @@ import asyncio
 import sys
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 _SHARED_SCRIPTS_ROOT = Path(__file__).resolve().parents[2] / "shared" / "scripts"
 if str(_SHARED_SCRIPTS_ROOT) not in sys.path:
@@ -83,6 +84,19 @@ def _build_store(*, beads_root: Path, repo_root: Path):
     return build_atelier_store(beads=client)
 
 
+def _clean(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _resolve_refinement_policy(*, repo_root: Path):
+    from atelier.refinement_invariants import resolve_refinement_policy_for_repo
+
+    return resolve_refinement_policy_for_repo(repo_root=repo_root)
+
+
 def _render_refinement_note(record: object) -> str:
     from typing import cast
 
@@ -129,12 +143,10 @@ def _required_refinement_note(
     approval_source: str,
     approved_by: str,
     approved_at: str,
+    plan_edit_rounds_max: int,
+    post_impl_review_rounds_max: int,
 ) -> str:
-    from typing import cast
-
     from atelier.planning_refinement import (
-        DEFAULT_PLAN_EDIT_ROUNDS_MAX,
-        DEFAULT_POST_IMPL_REVIEW_ROUNDS_MAX,
         ApprovalSource,
         PlanningRefinementRecord,
     )
@@ -148,8 +160,8 @@ def _required_refinement_note(
         approval_source=cast(ApprovalSource, approval_source),
         approved_by=approved_by,
         approved_at=approved_at,
-        plan_edit_rounds_max=DEFAULT_PLAN_EDIT_ROUNDS_MAX,
-        post_impl_review_rounds_max=DEFAULT_POST_IMPL_REVIEW_ROUNDS_MAX,
+        plan_edit_rounds_max=plan_edit_rounds_max,
+        post_impl_review_rounds_max=post_impl_review_rounds_max,
     )
     return _render_refinement_note(record)
 
@@ -186,6 +198,18 @@ def main() -> None:
         help="Approval timestamp for required refinement",
     )
     parser.add_argument(
+        "--refinement-plan-edit-rounds-max",
+        type=int,
+        default=None,
+        help="Optional plan-edit round budget override for required refinement",
+    )
+    parser.add_argument(
+        "--refinement-post-impl-review-rounds-max",
+        type=int,
+        default=None,
+        help="Optional post-implementation round budget override for required refinement",
+    )
+    parser.add_argument(
         "--no-export",
         action="store_true",
         help="Opt out this bead from default auto-export behavior",
@@ -218,9 +242,41 @@ def main() -> None:
 
     description = _description(args.scope, args.changeset_strategy)
     store = _build_store(beads_root=context.beads_root, repo_root=context.project_dir)
+    policy = _resolve_refinement_policy(repo_root=context.project_dir)
     from atelier.store import CreateEpicRequest, LifecycleStatus
 
     try:
+        required_refinement: tuple[str, str, str, int, int] | None = None
+        if args.required_refinement:
+            from atelier.refinement_invariants import (
+                resolve_refinement_round_limits,
+                validate_required_refinement_approval,
+            )
+
+            _status, approval_source, approved_by, approved_at = (
+                validate_required_refinement_approval(
+                    mode="requested",
+                    approval_status=None,
+                    approval_source=_clean(args.refinement_approval_source),
+                    approved_by=_clean(args.refinement_approved_by),
+                    approved_at=_clean(args.refinement_approved_at),
+                    policy=policy,
+                )
+            )
+            plan_edit_rounds_max, post_impl_review_rounds_max = resolve_refinement_round_limits(
+                cli_plan_edit_rounds_max=args.refinement_plan_edit_rounds_max,
+                cli_post_impl_review_rounds_max=args.refinement_post_impl_review_rounds_max,
+                item_plan_edit_rounds_max=None,
+                item_post_impl_review_rounds_max=None,
+                policy=policy,
+            )
+            required_refinement = (
+                approval_source,
+                approved_by,
+                approved_at,
+                plan_edit_rounds_max,
+                post_impl_review_rounds_max,
+            )
         epic = asyncio.run(
             store.create_epic(
                 CreateEpicRequest(
@@ -233,21 +289,21 @@ def main() -> None:
                 )
             )
         )
-        if args.required_refinement:
-            approval_source = str(args.refinement_approval_source).strip()
-            approved_by = str(args.refinement_approved_by).strip()
-            approved_at = str(args.refinement_approved_at).strip()
-            if not approval_source or not approved_by or not approved_at:
-                raise RuntimeError(
-                    "required refinement must include approval evidence: "
-                    "refinement_approval_source, refinement_approved_by, and "
-                    "refinement_approved_at"
-                )
+        if required_refinement is not None:
+            (
+                approval_source,
+                approved_by,
+                approved_at,
+                plan_edit_rounds_max,
+                post_impl_review_rounds_max,
+            ) = required_refinement
             note = _required_refinement_note(
                 issue_id=epic.id,
                 approval_source=approval_source,
                 approved_by=approved_by,
                 approved_at=approved_at,
+                plan_edit_rounds_max=plan_edit_rounds_max,
+                post_impl_review_rounds_max=post_impl_review_rounds_max,
             )
             from atelier.store import AppendNotesRequest
 

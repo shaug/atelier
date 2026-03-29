@@ -158,6 +158,55 @@ def test_set_refinement_records_inherited_lineage_metadata(
     assert "post_impl_review_rounds_max: 9" in note
 
 
+def test_set_refinement_requested_mode_uses_policy_budget_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script_module()
+    captured: list[str] = []
+
+    class FakeStore:
+        async def get_epic(self, issue_id: str):
+            return SimpleNamespace(id=issue_id, lifecycle="open")
+
+        async def get_changeset(self, issue_id: str):
+            del issue_id
+            raise LookupError("not a changeset")
+
+        async def append_notes(self, request):
+            captured.extend(request.notes)
+            return SimpleNamespace(id=request.issue_id)
+
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
+    monkeypatch.setattr(
+        module, "_resolve_context", lambda **_kwargs: (Path("/tmp/.beads"), Path("/tmp"), None)
+    )
+    monkeypatch.setattr(
+        module,
+        "_resolve_refinement_policy",
+        lambda **_kwargs: SimpleNamespace(
+            required_by_default=True,
+            plan_edit_rounds_max=11,
+            post_impl_review_rounds_max=17,
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "set_refinement.py",
+            "--issue-id",
+            "at-123",
+        ],
+    )
+
+    module.main()
+
+    assert captured
+    note = captured[0]
+    assert "plan_edit_rounds_max: 11" in note
+    assert "post_impl_review_rounds_max: 17" in note
+
+
 def test_set_refinement_project_policy_mode_auto_records_approval_when_configured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

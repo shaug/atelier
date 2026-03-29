@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import datetime as dt
 import sys
 from pathlib import Path
 from typing import cast
@@ -28,13 +27,17 @@ from atelier.beads_context import (  # noqa: E402
     resolve_runtime_repo_dir_hint,
     resolve_skill_beads_context,
 )
+from atelier.models import PlanningRefinementConfig  # noqa: E402
 from atelier.planning_refinement import (  # noqa: E402
-    DEFAULT_PLAN_EDIT_ROUNDS_MAX,
-    DEFAULT_POST_IMPL_REVIEW_ROUNDS_MAX,
     ApprovalSource,
     ApprovalStatus,
     PlanningRefinementRecord,
     RefinementVerdict,
+)
+from atelier.refinement_invariants import (  # noqa: E402
+    resolve_refinement_policy_for_repo,
+    resolve_refinement_round_limits,
+    validate_required_refinement_approval,
 )
 from atelier.store import AppendNotesRequest  # noqa: E402
 
@@ -125,7 +128,7 @@ def _render_note(record: PlanningRefinementRecord) -> str:
 def _validate_approval_fields(
     args: argparse.Namespace,
     *,
-    policy: object | None,
+    policy: PlanningRefinementConfig | None,
 ) -> tuple[ApprovalStatus, ApprovalSource | None, str | None, str | None]:
     approval_source = _clean(args.approval_source)
     approved_by = _clean(args.approved_by)
@@ -133,27 +136,15 @@ def _validate_approval_fields(
     approval_status = _clean(args.approval_status)
 
     if args.required:
-        if approval_status not in {None, "approved"}:
-            raise ValueError("required refinement must set approval_status=approved")
-        if args.mode == "project_policy":
-            if policy is None or not bool(getattr(policy, "required_by_default", False)):
-                raise ValueError(
-                    "project_policy mode requires configured policy (required_by_default=true)"
-                )
-            if approval_source not in {None, "project_policy"}:
-                raise ValueError("project_policy mode requires approval_source=project_policy")
-            return (
-                "approved",
-                "project_policy",
-                approved_by or "project_policy",
-                approved_at or _utc_now_iso8601(),
-            )
-        if not approval_source or not approved_by or not approved_at:
-            raise ValueError(
-                "required refinement must include approval evidence: "
-                "approval_source, approved_by, and approved_at"
-            )
-        return "approved", cast(ApprovalSource, approval_source), approved_by, approved_at
+        status, source, by, at = validate_required_refinement_approval(
+            mode=args.mode,
+            approval_status=approval_status,
+            approval_source=approval_source,
+            approved_by=approved_by,
+            approved_at=approved_at,
+            policy=policy,
+        )
+        return cast(ApprovalStatus, status), cast(ApprovalSource, source), by, at
 
     if approval_status is None:
         approval_status = "missing"
@@ -172,51 +163,22 @@ def _validate_approval_fields(
     )
 
 
-def _utc_now_iso8601() -> str:
-    now = dt.datetime.now(tz=dt.timezone.utc).replace(microsecond=0)
-    return now.isoformat().replace("+00:00", "Z")
-
-
-def _resolve_refinement_policy(*, repo_root: Path) -> object | None:
-    from atelier import config as atelier_config
-    from atelier import git, paths
-    from atelier.commands.resolve import resolve_project_for_enlistment
-
-    _repo_root, enlistment_path, _origin_raw, origin = git.resolve_repo_enlistment(repo_root)
-    project_root, _project_config, _resolved_enlistment = resolve_project_for_enlistment(
-        enlistment_path, origin
-    )
-    config_path = paths.project_config_path(project_root)
-    project_config = atelier_config.load_project_config(config_path)
-    if project_config is None:
-        return None
-    return atelier_config.resolve_refinement_policy(project_config)
+def _resolve_refinement_policy(*, repo_root: Path) -> PlanningRefinementConfig | None:
+    return resolve_refinement_policy_for_repo(repo_root=repo_root)
 
 
 def _resolve_round_limits(
     args: argparse.Namespace,
     *,
-    policy: object | None,
+    policy: PlanningRefinementConfig | None,
 ) -> tuple[int, int]:
-    policy_plan_rounds = (
-        int(getattr(policy, "plan_edit_rounds_max"))
-        if policy is not None
-        else DEFAULT_PLAN_EDIT_ROUNDS_MAX
+    return resolve_refinement_round_limits(
+        cli_plan_edit_rounds_max=args.plan_edit_rounds_max,
+        cli_post_impl_review_rounds_max=args.post_impl_review_rounds_max,
+        item_plan_edit_rounds_max=None,
+        item_post_impl_review_rounds_max=None,
+        policy=policy,
     )
-    policy_post_impl_rounds = (
-        int(getattr(policy, "post_impl_review_rounds_max"))
-        if policy is not None
-        else DEFAULT_POST_IMPL_REVIEW_ROUNDS_MAX
-    )
-    plan_edit_rounds_max = (
-        args.plan_edit_rounds_max if args.plan_edit_rounds_max is not None else policy_plan_rounds
-    )
-    post_impl_review_rounds_max = (
-        args.post_impl_review_rounds_max
-        if args.post_impl_review_rounds_max is not None
-        else policy_post_impl_rounds
-    )
-    return int(plan_edit_rounds_max), int(post_impl_review_rounds_max)
 
 
 def main() -> None:
@@ -284,11 +246,7 @@ def main() -> None:
         if runtime_warning:
             print(runtime_warning, file=sys.stderr)
 
-        policy = (
-            _resolve_refinement_policy(repo_root=repo_root)
-            if args.mode == "project_policy"
-            else None
-        )
+        policy = _resolve_refinement_policy(repo_root=repo_root)
         approval_status, approval_source, approved_by, approved_at = _validate_approval_fields(
             args,
             policy=policy,

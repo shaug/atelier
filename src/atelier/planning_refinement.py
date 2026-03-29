@@ -270,8 +270,10 @@ def select_winning_refinement(
 ) -> PlanningRefinementRecord | None:
     """Select the winning refinement record from parsed blocks.
 
-    Selection is newest authoritative valid block when authoritative blocks
-    exist; otherwise newest valid block across all parsed blocks.
+    Selection is strict for authoritative scope: newest authoritative block
+    wins only when valid; otherwise no winner is selected. Without
+    authoritative blocks, the newest valid block across all parsed blocks
+    wins.
 
     Args:
         blocks: Parsed refinement blocks.
@@ -280,8 +282,12 @@ def select_winning_refinement(
         Winning valid refinement record, or ``None`` when no valid winner
         exists.
     """
-    scope = _select_scope(tuple(blocks))
-    for block in reversed(scope):
+    parsed = tuple(blocks)
+    authoritative = tuple(block for block in parsed if block.authoritative_hint)
+    if authoritative:
+        newest_authoritative = authoritative[-1]
+        return newest_authoritative.record
+    for block in reversed(parsed):
         if block.record is not None:
             return block.record
     return None
