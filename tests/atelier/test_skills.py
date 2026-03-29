@@ -44,7 +44,9 @@ def test_packaged_skills_include_core_set() -> None:
         "plan-promote-epic",
         "planner-startup-check",
         "planning",
+        "refine-plan",
         "plan-set-refinement",
+        "plan-refined-deliberation",
     }.issubset(names)
     assert all("_" not in name for name in names)
 
@@ -98,7 +100,9 @@ def test_install_workspace_skills_writes_skill_docs() -> None:
             "plan-promote-epic",
             "planner-startup-check",
             "planning",
+            "refine-plan",
             "plan-set-refinement",
+            "plan-refined-deliberation",
         ):
             assert (workspace_dir / "skills" / name / "SKILL.md").exists()
 
@@ -327,6 +331,23 @@ def test_plan_create_epic_skill_captures_drafts_without_approval() -> None:
     assert "not request approval to create or edit deferred beads." in text
     assert "edge_cases" in text
     assert "done_definition" in text
+
+
+def test_refinement_alias_skill_points_to_refine_plan() -> None:
+    skill = skills.load_packaged_skills()["plan-refined-deliberation"]
+    text = skill.files["SKILL.md"].decode("utf-8")
+
+    assert "compatibility alias" in text
+    assert "refine-plan" in text
+
+
+def test_refinement_skill_inventory_includes_aliases() -> None:
+    names = set(skills.list_packaged_skills())
+
+    assert "planning" in names
+    assert "refine-plan" in names
+    assert "plan-set-refinement" in names
+    assert "plan-refined-deliberation" in names
 
 
 def test_beads_conventions_reference_includes_concrete_authoring_examples() -> None:
