@@ -274,6 +274,8 @@ def main() -> None:
                 reason = epic_refinement_gate.reason or "refinement_metadata_missing_or_malformed"
                 problems.append(f"{epic_id}: {reason}")
         for record, issue in zip(changesets, child_issues, strict=True):
+            if record.lifecycle is LifecycleStatus.CLOSED:
+                continue
             refinement_gate = evaluate_refinement_claim_gate(_issue_notes_text(issue))
             if refinement_gate.required and not refinement_gate.claimable:
                 reason = refinement_gate.reason or "refinement_metadata_missing_or_malformed"
