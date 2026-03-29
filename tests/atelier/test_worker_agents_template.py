@@ -32,3 +32,17 @@ def test_worker_agents_template_contains_core_sections() -> None:
     assert "Update changeset metadata and labels." not in content
     assert "do not set `status=closed`" in content
     assert "Set `status=closed` only when terminal proof exists" in content
+
+
+def test_worker_agents_template_calls_out_refinement_lineage_split_rule() -> None:
+    template_path = (
+        Path(__file__).resolve().parents[2]
+        / "src"
+        / "atelier"
+        / "templates"
+        / "AGENTS.worker.md.tmpl"
+    )
+    content = template_path.read_text(encoding="utf-8")
+
+    assert "If the source lineage is refinement-required" in content
+    assert "inherited `planning_refinement.v1`" in content

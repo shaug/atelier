@@ -63,6 +63,8 @@ Skills link: ./skills
    - Split into nested changesets in the bead (all executable items remain leaf
      work beads under the epic).
    - Create deferred child changesets only; do not promote descendants.
+   - If the source lineage is refinement-required, every split child must carry
+     inherited `planning_refinement.v1` metadata before dispatch.
    - Message the planner with the proposed split.
    - Stop after updating the bead.
 6. If any ambiguity or missing context exists:
