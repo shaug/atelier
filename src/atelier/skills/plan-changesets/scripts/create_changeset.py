@@ -29,6 +29,12 @@ from atelier.executable_work_validation import (  # noqa: E402
     compact_excerpt,
     validate_executable_work_payload,
 )
+from atelier.planning_refinement import (  # noqa: E402
+    PlanningRefinementRecord,
+    parse_refinement_blocks,
+    select_winning_refinement,
+)
+from atelier.store import AppendNotesRequest  # noqa: E402
 
 
 def _fail_invalid_payload(*, title: str, description: str) -> None:
@@ -70,6 +76,90 @@ def _build_store(*, beads_root: Path, repo_root: Path):
         env={"BEADS_DIR": str(beads_root)},
     )
     return build_atelier_store(beads=client)
+
+
+def _render_refinement_note(record: PlanningRefinementRecord) -> str:
+    payload = record.model_dump(exclude_none=True)
+    ordered_keys = (
+        "authoritative",
+        "mode",
+        "required",
+        "lineage_root",
+        "approval_status",
+        "approval_source",
+        "approved_by",
+        "approved_at",
+        "plan_edit_rounds_max",
+        "post_impl_review_rounds_max",
+        "plan_edit_rounds_used",
+        "latest_verdict",
+        "initial_plan_path",
+        "latest_plan_path",
+        "round_log_dir",
+    )
+    lines = ["planning_refinement.v1"]
+    for key in ordered_keys:
+        if key not in payload:
+            continue
+        value = payload[key]
+        if isinstance(value, bool):
+            rendered = "true" if value else "false"
+        else:
+            rendered = str(value)
+        lines.append(f"{key}: {rendered}")
+    return "\n".join(lines)
+
+
+def _parent_notes(*, store, epic_id: str, beads_root: Path, repo_root: Path) -> str | None:
+    if not hasattr(store, "get_epic"):
+        return None
+    parent = asyncio.run(store.get_epic(epic_id))
+    from_store = getattr(parent, "notes", None)
+    if isinstance(from_store, str) and from_store.strip():
+        return from_store
+    if isinstance(from_store, (tuple, list)):
+        joined = "\n".join(str(item).strip() for item in from_store if str(item).strip())
+        if joined:
+            return joined
+
+    from atelier.lib.beads import ShowIssueRequest, SubprocessBeadsClient
+
+    client = SubprocessBeadsClient(
+        cwd=repo_root,
+        beads_root=beads_root,
+        env={"BEADS_DIR": str(beads_root)},
+    )
+    issue = asyncio.run(client.show(ShowIssueRequest(issue_id=epic_id)))
+    notes = getattr(issue, "notes", None)
+    if isinstance(notes, str) and notes.strip():
+        return notes
+    if isinstance(notes, (tuple, list)):
+        joined = "\n".join(str(item).strip() for item in notes if str(item).strip())
+        if joined:
+            return joined
+    return None
+
+
+def _inherited_refinement_note(*, parent_notes: str | None, epic_id: str) -> str | None:
+    if not parent_notes:
+        return None
+    selected = select_winning_refinement(parse_refinement_blocks(parent_notes))
+    if selected is None or not selected.required:
+        return None
+    inherited = PlanningRefinementRecord(
+        authoritative=True,
+        mode="inherited",
+        required=True,
+        lineage_root=selected.lineage_root or epic_id,
+        approval_status=selected.approval_status,
+        approval_source=selected.approval_source,
+        approved_by=selected.approved_by,
+        approved_at=selected.approved_at,
+        plan_edit_rounds_max=selected.plan_edit_rounds_max,
+        post_impl_review_rounds_max=selected.post_impl_review_rounds_max,
+        latest_verdict=selected.latest_verdict,
+    )
+    return _render_refinement_note(inherited)
 
 
 def main() -> None:
@@ -131,6 +221,16 @@ def main() -> None:
     initial_status = LifecycleStatus(args.status)
     notes = (str(args.notes).strip(),) if str(args.notes).strip() else ()
     try:
+        parent_notes = _parent_notes(
+            store=store,
+            epic_id=args.epic_id,
+            beads_root=context.beads_root,
+            repo_root=context.project_dir,
+        )
+        refinement_note = _inherited_refinement_note(
+            parent_notes=parent_notes,
+            epic_id=args.epic_id,
+        )
         changeset = asyncio.run(
             store.create_changeset(
                 CreateChangesetRequest(
@@ -144,6 +244,12 @@ def main() -> None:
                 )
             )
         )
+        if refinement_note is not None:
+            asyncio.run(
+                store.append_notes(
+                    AppendNotesRequest(issue_id=changeset.id, notes=(refinement_note,))
+                )
+            )
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

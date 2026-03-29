@@ -27,6 +27,7 @@ from atelier.beads_context import (  # noqa: E402
     resolve_skill_beads_context,
 )
 from atelier.lib.beads import description_fields as bead_fields  # noqa: E402
+from atelier.planning_refinement import evaluate_refinement_claim_gate  # noqa: E402
 
 
 def _build_store_and_client(*, beads_root: Path, repo_root: Path):
@@ -267,6 +268,11 @@ def main() -> None:
             problems.append(
                 "incomplete child changesets remain deferred: " + ", ".join(incomplete_children)
             )
+        for record, issue in zip(changesets, child_issues, strict=True):
+            refinement_gate = evaluate_refinement_claim_gate(_issue_notes_text(issue))
+            if refinement_gate.required and not refinement_gate.claimable:
+                reason = refinement_gate.reason or "refinement_metadata_missing_or_malformed"
+                problems.append(f"{record.id}: {reason}")
 
         if problems:
             raise RuntimeError("; ".join(problems))

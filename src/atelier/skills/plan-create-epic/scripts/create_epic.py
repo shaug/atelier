@@ -8,6 +8,7 @@ import asyncio
 import sys
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 _SHARED_SCRIPTS_ROOT = Path(__file__).resolve().parents[2] / "shared" / "scripts"
 if str(_SHARED_SCRIPTS_ROOT) not in sys.path:
@@ -29,6 +30,13 @@ from atelier.executable_work_validation import (  # noqa: E402
     compact_excerpt,
     validate_executable_work_payload,
 )
+from atelier.planning_refinement import (  # noqa: E402
+    DEFAULT_PLAN_EDIT_ROUNDS_MAX,
+    DEFAULT_POST_IMPL_REVIEW_ROUNDS_MAX,
+    ApprovalSource,
+    PlanningRefinementRecord,
+)
+from atelier.store import AppendNotesRequest  # noqa: E402
 
 
 def _description(scope: str, changeset_strategy: str | None) -> str:
@@ -83,6 +91,38 @@ def _build_store(*, beads_root: Path, repo_root: Path):
     return build_atelier_store(beads=client)
 
 
+def _render_refinement_note(record: PlanningRefinementRecord) -> str:
+    payload = record.model_dump(exclude_none=True)
+    ordered_keys = (
+        "authoritative",
+        "mode",
+        "required",
+        "lineage_root",
+        "approval_status",
+        "approval_source",
+        "approved_by",
+        "approved_at",
+        "plan_edit_rounds_max",
+        "post_impl_review_rounds_max",
+        "plan_edit_rounds_used",
+        "latest_verdict",
+        "initial_plan_path",
+        "latest_plan_path",
+        "round_log_dir",
+    )
+    lines = ["planning_refinement.v1"]
+    for key in ordered_keys:
+        if key not in payload:
+            continue
+        value = payload[key]
+        if isinstance(value, bool):
+            rendered = "true" if value else "false"
+        else:
+            rendered = str(value)
+        lines.append(f"{key}: {rendered}")
+    return "\n".join(lines)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--title", required=True, help="Epic title")
@@ -93,6 +133,27 @@ def main() -> None:
         help="Optional guardrail/decomposition strategy text",
     )
     parser.add_argument("--design", help="Optional design notes")
+    parser.add_argument(
+        "--required-refinement",
+        action="store_true",
+        help="Require refinement for this epic and persist approval evidence",
+    )
+    parser.add_argument(
+        "--refinement-approval-source",
+        choices=("project_policy", "operator"),
+        default="",
+        help="Approval source for required refinement",
+    )
+    parser.add_argument(
+        "--refinement-approved-by",
+        default="",
+        help="Approver principal id for required refinement",
+    )
+    parser.add_argument(
+        "--refinement-approved-at",
+        default="",
+        help="Approval timestamp for required refinement",
+    )
     parser.add_argument(
         "--no-export",
         action="store_true",
@@ -141,6 +202,31 @@ def main() -> None:
                 )
             )
         )
+        if args.required_refinement:
+            approval_source = str(args.refinement_approval_source).strip()
+            approved_by = str(args.refinement_approved_by).strip()
+            approved_at = str(args.refinement_approved_at).strip()
+            if not approval_source or not approved_by or not approved_at:
+                raise RuntimeError(
+                    "required refinement must include approval evidence: "
+                    "refinement_approval_source, refinement_approved_by, and "
+                    "refinement_approved_at"
+                )
+            note = _render_refinement_note(
+                PlanningRefinementRecord(
+                    authoritative=True,
+                    mode="requested",
+                    required=True,
+                    lineage_root=epic.id,
+                    approval_status="approved",
+                    approval_source=cast(ApprovalSource, approval_source),
+                    approved_by=approved_by,
+                    approved_at=approved_at,
+                    plan_edit_rounds_max=DEFAULT_PLAN_EDIT_ROUNDS_MAX,
+                    post_impl_review_rounds_max=DEFAULT_POST_IMPL_REVIEW_ROUNDS_MAX,
+                )
+            )
+            asyncio.run(store.append_notes(AppendNotesRequest(issue_id=epic.id, notes=(note,))))
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

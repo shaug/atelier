@@ -478,3 +478,59 @@ def test_run_bd_json_defaults_to_direct_mode(monkeypatch) -> None:
 
     assert payload == []
     assert captured["command"] == ["bd", "list", "--json"]
+
+
+def test_evaluate_guardrails_flags_refinement_contract_gaps() -> None:
+    module = _load_script_module()
+    child = {
+        "id": "at-epic.1",
+        "labels": [],
+        "description": _planner_contract_text() + "\nLOC estimate: 220",
+        "acceptance_criteria": "Done when refinement gaps are surfaced.",
+        "notes": (
+            "planning_refinement.v1\n"
+            "authoritative: true\n"
+            "mode: requested\n"
+            "required: true\n"
+            "lineage_root: at-epic\n"
+            "approval_status: missing\n"
+        ),
+    }
+
+    report = module._evaluate_guardrails(
+        epic_issue=None,
+        child_changesets=[],
+        target_changesets=[child],
+    )
+
+    assert any("refinement evidence incomplete" in item for item in report.violations)
+
+
+def test_evaluate_guardrails_accepts_complete_required_refinement_contract() -> None:
+    module = _load_script_module()
+    child = {
+        "id": "at-epic.1",
+        "labels": [],
+        "description": _planner_contract_text() + "\nLOC estimate: 220",
+        "acceptance_criteria": "Done when refinement contract checks pass.",
+        "notes": (
+            "planning_refinement.v1\n"
+            "authoritative: true\n"
+            "mode: requested\n"
+            "required: true\n"
+            "lineage_root: at-epic\n"
+            "approval_status: approved\n"
+            "approval_source: operator\n"
+            "approved_by: planner-user\n"
+            "approved_at: 2026-03-29T12:00:00Z\n"
+            "latest_verdict: READY\n"
+        ),
+    }
+
+    report = module._evaluate_guardrails(
+        epic_issue=None,
+        child_changesets=[],
+        target_changesets=[child],
+    )
+
+    assert not any("refinement evidence incomplete" in item for item in report.violations)

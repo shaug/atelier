@@ -305,3 +305,84 @@ def test_create_changeset_rejects_incident_placeholder_shapes(
     assert excinfo.value.code == 1
     assert "invalid executable work payload for changeset creation" in captured.err
     assert "planner-context: NEEDS-DECISION" in captured.err
+
+
+def test_create_changeset_inherits_required_refinement_from_parent(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    captured_notes: list[tuple[str, ...]] = []
+    context = SimpleNamespace(
+        project_dir=tmp_path / "project",
+        beads_root=tmp_path / ".beads",
+    )
+    parent_notes = (
+        "planning_refinement.v1\n"
+        "authoritative: true\n"
+        "mode: requested\n"
+        "required: true\n"
+        "lineage_root: at-epic\n"
+        "approval_status: approved\n"
+        "approval_source: operator\n"
+        "approved_by: planner-user\n"
+        "approved_at: 2026-03-29T12:00:00Z\n"
+        "plan_edit_rounds_max: 7\n"
+        "post_impl_review_rounds_max: 9\n"
+        "latest_verdict: READY\n"
+    )
+
+    monkeypatch.setattr(
+        module.auto_export,
+        "resolve_auto_export_context",
+        lambda **_kwargs: context,
+    )
+
+    class FakeStore:
+        async def create_changeset(self, request):
+            del request
+            return SimpleNamespace(id="at-epic.1")
+
+        async def get_epic(self, epic_id):
+            return SimpleNamespace(id=epic_id, notes=parent_notes)
+
+        async def append_notes(self, request):
+            captured_notes.append(request.notes)
+            return SimpleNamespace(id=request.issue_id)
+
+    monkeypatch.setattr(module, "_build_store", lambda **_kwargs: FakeStore())
+    monkeypatch.setattr(
+        module.auto_export,
+        "auto_export_issue",
+        lambda issue_id, *, context: module.auto_export.AutoExportResult(
+            status="skipped",
+            issue_id=issue_id,
+            provider=None,
+            message="auto-export disabled for test",
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "create_changeset.py",
+            "--epic-id",
+            "at-epic",
+            "--title",
+            "Inherited refinement changeset",
+            "--acceptance",
+            "Child changesets preserve required refinement lineage.",
+        ],
+    )
+
+    module.main()
+
+    assert captured_notes
+    note = captured_notes[0][0]
+    assert note.startswith("planning_refinement.v1")
+    assert "authoritative: true" in note
+    assert "mode: inherited" in note
+    assert "required: true" in note
+    assert "lineage_root: at-epic" in note
+    assert "plan_edit_rounds_max: 7" in note
+    assert "post_impl_review_rounds_max: 9" in note

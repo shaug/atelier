@@ -35,6 +35,8 @@ description: >-
   changeset or stack extension) when thresholds or new domains appear.
 - Require explicit guidance that review-feedback scope growth is captured
   immediately as deferred follow-on work or stack extension.
+- When `planning_refinement.v1` marks refinement as required, require complete
+  approval evidence and `latest_verdict=READY`.
 
 ## Steps
 
@@ -50,6 +52,8 @@ description: >-
      epic context.
    - Look for a LOC estimate (e.g., `loc`, `LOC`, `estimate`).
    - If a large estimate is found (>800), ensure approval is recorded.
+   - If required refinement metadata exists, validate approval/verdict
+     completeness and report deterministic reason tokens for missing evidence.
    - When lifecycle/contract invariant terms are present, verify the invariant
      impact map and re-split guidance fields are present.
 1. If an epic has exactly one child changeset, require explicit decomposition
@@ -66,6 +70,7 @@ description: >-
 - One-child anti-pattern warnings are reported when rationale is missing.
 - Cross-cutting invariant violations identify missing impact map coverage,
   decomposition expectations, and re-split handling requirements.
+- Required refinement gaps are reported as explicit contract violations.
 - No beads are blocked or re-labeled automatically.
 
 ## Example (Cross-cutting lifecycle bug)
