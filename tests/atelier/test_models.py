@@ -1,6 +1,9 @@
 import tempfile
 from pathlib import Path
 
+import pytest
+
+from atelier import config as config_module
 from atelier.models import BeadsSection, BranchConfig, ProjectUserConfig
 
 
@@ -48,3 +51,30 @@ def test_beads_section_normalizes_server_runtime_aliases() -> None:
 def test_beads_section_migrates_legacy_mode_key() -> None:
     parsed = BeadsSection.model_validate({"mode": "dolt_server"})
     assert parsed.runtime_mode == "dolt-server"
+
+
+def test_project_user_config_refinement_defaults_match_trycycle_budgets() -> None:
+    parsed = ProjectUserConfig.model_validate({})
+    assert parsed.planning.refinement.required_by_default is False
+    assert parsed.planning.refinement.plan_edit_rounds_max == 5
+    assert parsed.planning.refinement.post_impl_review_rounds_max == 8
+
+
+def test_project_user_config_rejects_invalid_refinement_budget_values() -> None:
+    with pytest.raises(ValueError, match="plan_edit_rounds_max must be between"):
+        ProjectUserConfig.model_validate(
+            {
+                "planning": {
+                    "refinement": {
+                        "plan_edit_rounds_max": 0,
+                    }
+                }
+            }
+        )
+
+
+def test_resolve_refinement_policy_uses_defaults_for_missing_payload() -> None:
+    policy = config_module.resolve_refinement_policy({})
+    assert policy.required_by_default is False
+    assert policy.plan_edit_rounds_max == 5
+    assert policy.post_impl_review_rounds_max == 8

@@ -34,6 +34,8 @@ from .models import (
     AtelierUserSection,
     BranchConfig,
     EditorConfig,
+    PlanningRefinementConfig,
+    PlanningSection,
     ProjectConfig,
     ProjectSection,
     ProjectSystemConfig,
@@ -120,7 +122,7 @@ def _backup_legacy_config(path: Path) -> None:
 
 def _split_project_payload(payload: dict) -> tuple[dict, dict]:
     user_payload: dict = {}
-    for key in ("branch", "worker", "agent", "editor", "git"):
+    for key in ("branch", "worker", "planning", "agent", "editor", "git"):
         if key in payload:
             user_payload[key] = payload.get(key)
     project_payload = payload.get("project")
@@ -136,7 +138,7 @@ def _split_project_payload(payload: dict) -> tuple[dict, dict]:
     if "atelier" in payload and "upgrade" in payload.get("atelier", {}):
         user_payload["atelier"] = {"upgrade": upgrade}
     system_payload = dict(payload)
-    for key in ("branch", "worker", "agent", "editor", "git"):
+    for key in ("branch", "worker", "planning", "agent", "editor", "git"):
         system_payload.pop(key, None)
     project_system = dict(system_payload.get("project", {}) or {})
     for key in ("provider", "provider_url", "owner"):
@@ -225,7 +227,7 @@ def merge_project_configs(
     system_payload = system_config.model_dump()
     user_payload = (user_config or ProjectUserConfig()).model_dump()
     merged = dict(system_payload)
-    for key in ("branch", "worker", "agent", "editor", "git"):
+    for key in ("branch", "worker", "planning", "agent", "editor", "git"):
         merged[key] = user_payload.get(key, {})
     system_project = system_payload.get("project", {}) if system_payload else {}
     user_project = user_payload.get("project", {}) if user_payload else {}
@@ -348,6 +350,40 @@ def resolve_branch_config(config: ProjectConfig | dict) -> BranchConfig:
         return BranchConfig.model_validate(branch or {})
     except ValidationError as exc:
         die(f"invalid branch config:\n{exc}")
+
+
+def resolve_planning_config(
+    config: ProjectConfig | ProjectUserConfig | dict | None,
+) -> PlanningSection:
+    """Resolve planning configuration from project config payloads.
+
+    Args:
+        config: Project configuration model or raw payload.
+
+    Returns:
+        Parsed planning section with defaults.
+    """
+    if isinstance(config, (ProjectConfig, ProjectUserConfig)):
+        return config.planning
+    planning_payload = config.get("planning") if isinstance(config, dict) else None
+    try:
+        return PlanningSection.model_validate(planning_payload or {})
+    except ValidationError as exc:
+        die(f"invalid planning config:\n{exc}")
+
+
+def resolve_refinement_policy(
+    config: ProjectConfig | ProjectUserConfig | dict | None,
+) -> PlanningRefinementConfig:
+    """Resolve planning refinement policy and budgets from config payloads.
+
+    Args:
+        config: Project configuration model or raw payload.
+
+    Returns:
+        Parsed refinement policy with default trycycle budgets.
+    """
+    return resolve_planning_config(config).refinement
 
 
 def resolve_branch_pr(branch_config: BranchConfig) -> bool:
