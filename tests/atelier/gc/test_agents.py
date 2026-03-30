@@ -41,6 +41,13 @@ def test_collect_agent_homes_prunes_stale_session_agent_beads_deterministically(
             "labels": ["at:agent"],
             "description": f"agent_id: {legacy_agent}\nrole_type: worker\n",
         },
+        {
+            "id": "agent-closed",
+            "title": "atelier/worker/codex/p4444-t4",
+            "status": "closed",
+            "labels": ["at:agent"],
+            "description": "agent_id: atelier/worker/codex/p4444-t4\nrole_type: worker\n",
+        },
     ]
     epics = [
         {

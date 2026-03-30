@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .. import agent_home, beads
+from .. import agent_home, beads, lifecycle
 from .hooks import release_epic
 from .models import GcAction
 
@@ -44,6 +44,8 @@ def collect_agent_homes(
         epics_by_assignee.setdefault(assignee_id, []).append(epic)
 
     for issue in agent_issues:
+        if lifecycle.canonical_lifecycle_status(issue.get("status")) in {"closed", "done"}:
+            continue
         description = issue.get("description")
         fields = beads.parse_description_fields(description if isinstance(description, str) else "")
         agent_id = fields.get("agent_id") or issue.get("title") or ""
