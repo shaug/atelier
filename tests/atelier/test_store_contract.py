@@ -14,6 +14,8 @@ from atelier.lib.beads import (
     BeadsCommandError,
     BeadsCommandRequest,
     BeadsCommandResult,
+    BeadsParseError,
+    CloseIssueRequest,
     ListIssuesRequest,
     RecordingBeadsTransport,
     ScriptedBeadsTransport,
@@ -204,6 +206,60 @@ def test_store_message_query_and_request_do_not_expose_assignee_routing() -> Non
     assert "assignee" not in MessageQuery.model_fields
     assert "assignee" not in CreateMessageRequest.model_fields
     assert "recipient" not in CreateMessageRequest.model_fields
+
+
+def test_transition_lifecycle_verifies_close_after_unparseable_close_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async_client, issue_store = build_in_memory_beads_client(
+        issues=(BUILDER.issue("at-change", issue_type="task", status="in_progress"),)
+    )
+
+    async def close_then_fail(request: CloseIssueRequest):
+        issue_store.close(request.issue_id, reason=request.reason)
+        raise BeadsParseError("expected JSON output from close, received empty stdout")
+
+    monkeypatch.setattr(async_client, "close", close_then_fail)
+    store = build_atelier_store(beads=async_client)
+
+    transition = _RUN(
+        store.transition_lifecycle(
+            LifecycleTransitionRequest(
+                issue_id="at-change",
+                target_status=LifecycleStatus.CLOSED,
+                expected_current=LifecycleStatus.IN_PROGRESS,
+            )
+        )
+    )
+
+    assert transition.to_status is LifecycleStatus.CLOSED
+    assert _RUN(store._show_issue("at-change")).status == "closed"
+
+
+def test_transition_lifecycle_fails_closed_when_unparseable_close_output_lacks_convergence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async_client, _issue_store = build_in_memory_beads_client(
+        issues=(BUILDER.issue("at-change", issue_type="task", status="in_progress"),)
+    )
+
+    async def close_then_fail(request: CloseIssueRequest):
+        del request
+        raise BeadsParseError("failed to parse JSON output from close")
+
+    monkeypatch.setattr(async_client, "close", close_then_fail)
+    store = build_atelier_store(beads=async_client)
+
+    with pytest.raises(RuntimeError, match="lifecycle close could not be verified for at-change"):
+        _RUN(
+            store.transition_lifecycle(
+                LifecycleTransitionRequest(
+                    issue_id="at-change",
+                    target_status=LifecycleStatus.CLOSED,
+                    expected_current=LifecycleStatus.IN_PROGRESS,
+                )
+            )
+        )
 
 
 def test_message_record_enforces_store_message_contract() -> None:

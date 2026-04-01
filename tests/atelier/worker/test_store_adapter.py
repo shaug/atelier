@@ -2,7 +2,7 @@ import datetime as dt
 from pathlib import Path
 from unittest.mock import patch
 
-from atelier.lib.beads import IssueRecord, SyncBeadsClient
+from atelier.lib.beads import BeadsParseError, CloseIssueRequest, IssueRecord, SyncBeadsClient
 from atelier.messages import render_message
 from atelier.store import HookRecord, StartupMessageRecord, build_atelier_store
 from atelier.testing.beads import IssueFixtureBuilder
@@ -292,6 +292,48 @@ def test_transition_lifecycle_updates_changeset_status(monkeypatch) -> None:
 
     assert refreshed is not None
     assert refreshed["status"] == "blocked"
+    worker_store.clear_bundle_cache()
+
+
+def test_transition_lifecycle_closes_changeset_after_unparseable_close_output(
+    monkeypatch,
+) -> None:
+    builder = IssueFixtureBuilder()
+    async_client, issue_store = build_in_memory_beads_client(
+        issues=(builder.issue("at-epic.1", issue_type="task", status="in_progress"),),
+    )
+    store = build_atelier_store(beads=async_client)
+    worker_store.clear_bundle_cache()
+
+    async def close_then_fail(request: CloseIssueRequest) -> IssueRecord:
+        issue_store.close(request.issue_id, reason=request.reason)
+        raise BeadsParseError("expected JSON output from close, received empty stdout")
+
+    monkeypatch.setattr(async_client, "close", close_then_fail)
+    monkeypatch.setattr(
+        worker_store,
+        "_build_store_bundle",
+        lambda **_kwargs: worker_store._StoreBundle(  # pyright: ignore[reportPrivateUsage]
+            store=store,
+            sync_client=SyncBeadsClient(async_client),
+        ),
+    )
+
+    worker_store.transition_lifecycle(
+        "at-epic.1",
+        target_status="closed",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    refreshed = worker_store.show_issue(
+        "at-epic.1",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert refreshed is not None
+    assert refreshed["status"] == "closed"
     worker_store.clear_bundle_cache()
 
 

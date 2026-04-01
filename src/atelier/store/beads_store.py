@@ -15,6 +15,7 @@ from atelier.lib.beads import (
     Beads,
     BeadsCommandRequest,
     BeadsCommandResult,
+    BeadsParseError,
     CloseIssueRequest,
     CreateIssueRequest,
     DependencyMutationRequest,
@@ -1193,15 +1194,10 @@ class AtelierStore:
                 reason=request.reason,
             )
         if request.target_status is LifecycleStatus.CLOSED:
-            updated = await self._beads.close(
-                CloseIssueRequest(issue_id=request.issue_id, reason=request.reason)
+            await self._close_issue_until_verified(
+                request.issue_id,
+                reason=request.reason,
             )
-            if lifecycle.canonical_lifecycle_status(updated.status) != LifecycleStatus.CLOSED.value:
-                refreshed = await self._show_issue(request.issue_id)
-                if lifecycle.canonical_lifecycle_status(refreshed.status) != "closed":
-                    raise RuntimeError(
-                        f"lifecycle close could not be verified for {request.issue_id}"
-                    )
         else:
             expected_from = request.expected_current
 
@@ -1238,6 +1234,32 @@ class AtelierStore:
             to_status=request.target_status,
             reason=request.reason,
         )
+
+    async def _close_issue_until_verified(
+        self,
+        issue_id: str,
+        *,
+        reason: str | None,
+    ) -> IssueRecord:
+        try:
+            updated = await self._beads.close(CloseIssueRequest(issue_id=issue_id, reason=reason))
+        except BeadsParseError as exc:
+            refreshed = await self._show_issue(issue_id)
+            if (
+                lifecycle.canonical_lifecycle_status(refreshed.status)
+                == LifecycleStatus.CLOSED.value
+            ):
+                return refreshed
+            raise RuntimeError(f"lifecycle close could not be verified for {issue_id}") from exc
+
+        if lifecycle.canonical_lifecycle_status(updated.status) == LifecycleStatus.CLOSED.value:
+            return updated
+
+        refreshed = await self._show_issue(issue_id)
+        if lifecycle.canonical_lifecycle_status(refreshed.status) == LifecycleStatus.CLOSED.value:
+            return refreshed
+
+        raise RuntimeError(f"lifecycle close could not be verified for {issue_id}")
 
     async def _show_issue(self, issue_id: str) -> IssueRecord:
         try:
@@ -1278,9 +1300,7 @@ class AtelierStore:
     ) -> None:
         transition_detail = str(transition_error).strip() or "status update failed"
         try:
-            closed = await self._beads.close(
-                CloseIssueRequest(issue_id=issue_id, reason=_FAIL_CLOSED_REASON)
-            )
+            await self._close_issue_until_verified(issue_id, reason=_FAIL_CLOSED_REASON)
         except Exception as close_error:
             close_detail = str(close_error).strip() or "close command failed"
             raise RuntimeError(
@@ -1288,18 +1308,6 @@ class AtelierStore:
                 f"after {_MAX_UPDATE_ATTEMPTS} attempts; auto-close failed "
                 f"({transition_detail}; {close_detail})"
             ) from transition_error
-
-        if lifecycle.canonical_lifecycle_status(closed.status) != LifecycleStatus.CLOSED.value:
-            refreshed = await self._show_issue(issue_id)
-            if (
-                lifecycle.canonical_lifecycle_status(refreshed.status)
-                != LifecycleStatus.CLOSED.value
-            ):
-                raise RuntimeError(
-                    f"created {issue_label} {issue_id} but failed to set status=deferred "
-                    f"after {_MAX_UPDATE_ATTEMPTS} attempts; auto-close failed "
-                    f"({transition_detail}; close verification failed)"
-                ) from transition_error
 
         raise RuntimeError(
             f"created {issue_label} {issue_id} but failed to set status=deferred "
