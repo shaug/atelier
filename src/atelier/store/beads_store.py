@@ -9,10 +9,12 @@ from dataclasses import dataclass, field
 from typing import cast
 
 from atelier import changesets, external_ticket_reconcile, lifecycle, messages
+from atelier import log as atelier_log
 from atelier.external_tickets import external_ticket_payload
 from atelier.lib.beads import (
     BeadError,
     Beads,
+    BeadsCommandError,
     BeadsCommandRequest,
     BeadsCommandResult,
     BeadsParseError,
@@ -100,6 +102,10 @@ _REVIEW_STATE_MAP = {
 }
 _EXTERNAL_CLOSE_NOTE_PREFIX = "external_close_pending:"
 _EXTERNAL_REOPEN_NOTE_PREFIX = "external_reopen_pending:"
+_CONCURRENT_DESCRIPTION_UPDATE_ERROR_MARKERS = (
+    "concurrent description update conflict",
+    "description update conflict",
+)
 
 
 def _clean_text(value: object) -> str | None:
@@ -117,6 +123,30 @@ def _has_contract_label(labels: set[str], label_name: str) -> bool:
 def _is_missing_issue_error(exc: BeadError) -> bool:
     detail = str(exc).lower()
     return any(marker in detail for marker in _ISSUE_NOT_FOUND_ERROR_MARKERS)
+
+
+def _is_retryable_description_update_conflict(
+    *,
+    request: UpdateIssueRequest,
+    error: BeadsCommandError,
+) -> bool:
+    if request.description is None:
+        return False
+    detail = str(error).lower()
+    return any(marker in detail for marker in _CONCURRENT_DESCRIPTION_UPDATE_ERROR_MARKERS)
+
+
+def _log_description_conflict_convergence(
+    *,
+    issue_id: str,
+    conflict_retries: int,
+) -> None:
+    if conflict_retries <= 0:
+        return
+    atelier_log.info(
+        f"issue={issue_id} converged after {conflict_retries} concurrent description "
+        "update conflict retries"
+    )
 
 
 async def _read_issue_slots(beads: Beads, issue_id: str) -> dict[str, str]:
@@ -1439,16 +1469,50 @@ class AtelierStore:
         verify: Callable[[IssueRecord], bool],
         failure_message: str,
     ) -> IssueRecord:
+        conflict_retries = 0
         for _attempt in range(_MAX_UPDATE_ATTEMPTS):
             current = await self._show_issue(issue_id)
             if verify(current):
+                _log_description_conflict_convergence(
+                    issue_id=issue_id,
+                    conflict_retries=conflict_retries,
+                )
                 return current
             request = build_request(current)
-            updated = await self._beads.update(request)
+            try:
+                updated = await self._beads.update(request)
+            except BeadsCommandError as exc:
+                if not _is_retryable_description_update_conflict(
+                    request=request,
+                    error=exc,
+                ):
+                    raise
+                conflict_retries += 1
+                atelier_log.warning(
+                    f"issue={issue_id} concurrent description update conflict while "
+                    f"verifying store mutation; retrying "
+                    f"({conflict_retries}/{_MAX_UPDATE_ATTEMPTS})"
+                )
+                refreshed = await self._show_issue(issue_id)
+                if verify(refreshed):
+                    _log_description_conflict_convergence(
+                        issue_id=issue_id,
+                        conflict_retries=conflict_retries,
+                    )
+                    return refreshed
+                continue
             if verify(updated):
+                _log_description_conflict_convergence(
+                    issue_id=issue_id,
+                    conflict_retries=conflict_retries,
+                )
                 return updated
             refreshed = await self._show_issue(issue_id)
             if verify(refreshed):
+                _log_description_conflict_convergence(
+                    issue_id=issue_id,
+                    conflict_retries=conflict_retries,
+                )
                 return refreshed
         raise RuntimeError(failure_message)
 

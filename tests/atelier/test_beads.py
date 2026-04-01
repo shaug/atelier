@@ -4254,10 +4254,20 @@ def test_set_agent_hook_updates_description() -> None:
         captured["description"] = description
         state["description"] = description
 
+    def fake_try_update(
+        issue_id: str,
+        description: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> CompletedProcess[str]:
+        fake_update(issue_id, description, beads_root=beads_root, cwd=cwd)
+        return CompletedProcess(args=["bd", "update"], returncode=0, stdout="", stderr="")
+
     with (
         patch("atelier.beads.run_bd_json", side_effect=fake_json),
         patch("atelier.beads.run_bd_command", side_effect=fake_command),
-        patch("atelier.beads._update_issue_description", side_effect=fake_update),
+        patch.object(beads, "_try_update_issue_description", side_effect=fake_try_update),
     ):
         beads.set_agent_hook(
             "atelier-agent",
@@ -4282,7 +4292,13 @@ def test_update_issue_description_fields_serializes_concurrent_writers() -> None
         del args, beads_root, cwd
         return [{"id": "issue-1", "description": state["description"]}]
 
-    def fake_update(issue_id: str, description: str, *, beads_root: Path, cwd: Path) -> None:
+    def fake_update(
+        issue_id: str,
+        description: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> CompletedProcess[str]:
         del issue_id, beads_root, cwd
         nonlocal write_order
         write_order += 1
@@ -4290,6 +4306,7 @@ def test_update_issue_description_fields_serializes_concurrent_writers() -> None
             first_write_started.set()
             assert release_first_write.wait(timeout=1.0)
         state["description"] = description
+        return CompletedProcess(args=["bd", "update"], returncode=0, stdout="", stderr="")
 
     def apply_fields(fields: dict[str, str | None]) -> None:
         try:
@@ -4304,7 +4321,7 @@ def test_update_issue_description_fields_serializes_concurrent_writers() -> None
 
     with (
         patch("atelier.beads.run_bd_json", side_effect=fake_json),
-        patch("atelier.beads._update_issue_description", side_effect=fake_update),
+        patch.object(beads, "_try_update_issue_description", side_effect=fake_update),
     ):
         first = threading.Thread(target=apply_fields, args=({"hook_bead": "epic-1"},))
         second = threading.Thread(target=apply_fields, args=({"pr_state": "in-review"},))
@@ -5962,9 +5979,19 @@ def test_update_changeset_review_feedback_cursor_updates_description() -> None:
         captured["description"] = description
         state["description"] = description
 
+    def fake_try_update(
+        issue_id: str,
+        description: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> CompletedProcess[str]:
+        fake_update(issue_id, description, beads_root=beads_root, cwd=cwd)
+        return CompletedProcess(args=["bd", "update"], returncode=0, stdout="", stderr="")
+
     with (
         patch("atelier.beads.run_bd_json", side_effect=fake_json),
-        patch("atelier.beads._update_issue_description", side_effect=fake_update),
+        patch.object(beads, "_try_update_issue_description", side_effect=fake_try_update),
     ):
         beads.update_changeset_review_feedback_cursor(
             "atelier-99",
@@ -6022,18 +6049,25 @@ def test_update_issue_description_fields_retries_after_interleaved_overwrite() -
     def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         return [{"id": "agent-1", "description": state["description"]}]
 
-    def fake_update(issue_id: str, description: str, *, beads_root: Path, cwd: Path) -> None:
+    def fake_update(
+        issue_id: str,
+        description: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> CompletedProcess[str]:
         nonlocal writes
         del issue_id, beads_root, cwd
         writes += 1
         if writes == 1:
             state["description"] = "pr_state: in-review\n"
-            return
+            return CompletedProcess(args=["bd", "update"], returncode=0, stdout="", stderr="")
         state["description"] = description
+        return CompletedProcess(args=["bd", "update"], returncode=0, stdout="", stderr="")
 
     with (
         patch("atelier.beads.run_bd_json", side_effect=fake_json),
-        patch("atelier.beads._update_issue_description", side_effect=fake_update),
+        patch.object(beads, "_try_update_issue_description", side_effect=fake_update),
     ):
         beads.update_issue_description_fields(
             "agent-1",
@@ -6042,6 +6076,52 @@ def test_update_issue_description_fields_retries_after_interleaved_overwrite() -
             cwd=Path("/repo"),
         )
 
+    assert "hook_bead: epic-2" in state["description"]
+    assert "pr_state: in-review" in state["description"]
+
+
+def test_update_issue_description_fields_retries_after_command_conflict() -> None:
+    state = {"description": "hook_bead: epic-1\npr_state: draft-pr\n"}
+    writes = 0
+
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        del args, beads_root, cwd
+        return [{"id": "agent-1", "description": state["description"]}]
+
+    def fake_command(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+    ) -> CompletedProcess[str]:
+        nonlocal writes
+        del beads_root, cwd, allow_failure
+        writes += 1
+        if writes == 1:
+            state["description"] = "pr_state: in-review\n"
+            return CompletedProcess(
+                args=["bd", *args],
+                returncode=1,
+                stdout="",
+                stderr="concurrent description update conflict for agent-1",
+            )
+        body_path = Path(args[args.index("--body-file") + 1])
+        state["description"] = body_path.read_text(encoding="utf-8")
+        return CompletedProcess(args=["bd", *args], returncode=0, stdout="", stderr="")
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.run_bd_command", side_effect=fake_command),
+    ):
+        beads.update_issue_description_fields(
+            "agent-1",
+            {"hook_bead": "epic-2"},
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert writes == 2
     assert "hook_bead: epic-2" in state["description"]
     assert "pr_state: in-review" in state["description"]
 
@@ -6058,9 +6138,19 @@ def test_update_worktree_path_writes_description() -> None:
         captured["description"] = description
         state["description"] = description
 
+    def fake_try_update(
+        issue_id: str,
+        description: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> CompletedProcess[str]:
+        fake_update(issue_id, description, beads_root=beads_root, cwd=cwd)
+        return CompletedProcess(args=["bd", "update"], returncode=0, stdout="", stderr="")
+
     with (
         patch("atelier.beads.run_bd_json", side_effect=fake_json),
-        patch("atelier.beads._update_issue_description", side_effect=fake_update),
+        patch.object(beads, "_try_update_issue_description", side_effect=fake_try_update),
     ):
         beads.update_worktree_path(
             "epic-1", "worktrees/epic-1", beads_root=Path("/beads"), cwd=Path("/repo")
