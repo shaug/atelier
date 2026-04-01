@@ -714,7 +714,7 @@ def test_reconcile_closed_path_reports_integrated_sha_conflict_without_aborting(
     with (
         patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[issue]),
         patch("atelier.worker.reconcile.worker_store.show_issue", return_value=issue),
-        patch("atelier.worker.reconcile.beads.reconcile_closed_issue_exported_github_tickets"),
+        patch("atelier.worker.reconcile.worker_store.reconcile_closed_external_tickets"),
         patch(
             "atelier.worker.reconcile.worker_store.update_changeset_integrated_sha",
             side_effect=SystemExit("changeset integrated sha already set; override not permitted"),
