@@ -103,6 +103,11 @@ implementation is backed by Beads:
 - Hook ownership is an Atelier contract binding one agent to one epic.
 - Lifecycle transitions are store mutations with canonical target states, not
   free-form status edits.
+- Store-backed update mutations fail closed unless convergence can be proven
+  from an authoritative fresh store read. When process-backed `bd update --json`
+  emits empty stdout, absent command payload is not success by itself; the only
+  allowed recovery proof is a follow-up read that satisfies the
+  mutation-specific verification predicate.
 
 ## Beads-Client Responsibilities
 
