@@ -1513,7 +1513,7 @@ def mark_changeset_merged(
     *,
     beads_root: Path,
     repo_root: Path,
-    allow_terminal_status_fallback: bool = False,
+    allow_empty_output_close_fallback: bool = False,
 ) -> None:
     """Mark changeset merged.
 
@@ -1521,9 +1521,9 @@ def mark_changeset_merged(
         changeset_id: Value for `changeset_id`.
         beads_root: Value for `beads_root`.
         repo_root: Value for `repo_root`.
-        allow_terminal_status_fallback: Whether merged-terminal finalize may
-            bypass `bd close` and use a verified direct `status=closed` update
-            after higher-level integration proof is already established.
+        allow_empty_output_close_fallback: Whether merged-terminal finalize may
+            bypass `bd close` only after empty close output failed to converge
+            and higher-level integration proof is already established.
 
     Returns:
         Function result.
@@ -1532,7 +1532,7 @@ def mark_changeset_merged(
         changeset_id,
         beads_root=beads_root,
         repo_root=repo_root,
-        allow_terminal_status_fallback=allow_terminal_status_fallback,
+        allow_empty_output_close_fallback=allow_empty_output_close_fallback,
     )
 
 

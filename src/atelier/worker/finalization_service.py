@@ -31,13 +31,13 @@ def mark_changeset_merged(
     *,
     beads_root: Path,
     repo_root: Path,
-    allow_terminal_status_fallback: bool = False,
+    allow_empty_output_close_fallback: bool = False,
 ) -> None:
     worker_changeset_state.mark_changeset_merged(
         changeset_id,
         beads_root=beads_root,
         repo_root=repo_root,
-        allow_terminal_status_fallback=allow_terminal_status_fallback,
+        allow_empty_output_close_fallback=allow_empty_output_close_fallback,
     )
 
 

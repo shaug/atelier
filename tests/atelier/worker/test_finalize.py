@@ -108,8 +108,8 @@ def test_work_finalization_integration_enables_merged_close_fallback(monkeypatch
     monkeypatch.setattr(
         work_finalization_integration,
         "mark_changeset_merged",
-        lambda changeset_id, *, beads_root, repo_root, allow_terminal_status_fallback=False: (
-            merged_calls.append((changeset_id, allow_terminal_status_fallback))
+        lambda changeset_id, *, beads_root, repo_root, allow_empty_output_close_fallback=False: (
+            merged_calls.append((changeset_id, allow_empty_output_close_fallback))
         ),
     )
     monkeypatch.setattr(

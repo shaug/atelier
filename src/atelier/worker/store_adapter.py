@@ -740,20 +740,21 @@ def transition_lifecycle(
         )
 
 
-def force_close_issue_status(
+def force_close_issue_status_for_empty_close_nonconvergence(
     issue_id: str,
     *,
     beads_root: Path,
     repo_root: Path,
     expected_current: str | None = None,
 ) -> None:
-    """Force a verified direct ``status=closed`` update for a work item.
+    """Close one work item after empty close output failed to converge.
 
-    This bypasses the Beads ``close`` command semantics and must only be used
-    when an upstream runtime has already proven terminal closure through a
-    stronger authority signal, such as merged PR lifecycle plus verified
-    integration proof. The helper still requires bounded read-after-write
-    verification and raises on uncertainty.
+    This bypasses the Beads ``close`` command semantics only for the narrowed
+    merged-finalize repair path where ``bd close`` emitted empty stdout, the
+    subsequent read still did not converge, and upstream runtime logic has
+    already proven terminal merged PR lifecycle plus integration. The helper
+    still requires bounded read-after-write verification and raises on
+    uncertainty.
     """
 
     _fallback_issue_status_update(
@@ -1618,7 +1619,7 @@ __all__ = [
     "ensure_agent_bead",
     "epic_changeset_summary",
     "find_agent_bead",
-    "force_close_issue_status",
+    "force_close_issue_status_for_empty_close_nonconvergence",
     "get_agent_hook",
     "list_descendant_changesets",
     "list_epics",

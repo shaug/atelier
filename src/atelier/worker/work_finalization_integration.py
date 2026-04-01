@@ -554,7 +554,7 @@ def finalize_terminal_changeset(
                 target_id,
                 beads_root=beads_root,
                 repo_root=repo_root,
-                allow_terminal_status_fallback=True,
+                allow_empty_output_close_fallback=True,
             ),
             mark_changeset_abandoned=lambda target_id: mark_changeset_abandoned(
                 target_id, beads_root=beads_root, repo_root=repo_root
