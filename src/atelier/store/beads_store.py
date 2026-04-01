@@ -107,6 +107,11 @@ _CONCURRENT_DESCRIPTION_UPDATE_ERROR_MARKERS = (
     "description update conflict",
 )
 _EMPTY_UPDATE_STDOUT_PARSE_ERROR = "expected JSON output from update, received empty stdout"
+_EVENT_HISTORY_OVERFLOW_ERROR_MARKERS = (
+    "failed to record event",
+    "too large for column 'old_value'",
+    "too large for column 'new_value'",
+)
 
 
 def _clean_text(value: object) -> str | None:
@@ -151,7 +156,26 @@ def _log_description_conflict_convergence(
 
 
 def _is_empty_output_update_parse_error(error: BeadsParseError) -> bool:
-    return str(error).strip() == _EMPTY_UPDATE_STDOUT_PARSE_ERROR
+    return str(error).strip().startswith(_EMPTY_UPDATE_STDOUT_PARSE_ERROR)
+
+
+def _is_event_history_overflow_detail(detail: str) -> bool:
+    normalized = detail.lower()
+    return _EVENT_HISTORY_OVERFLOW_ERROR_MARKERS[0] in normalized and (
+        _EVENT_HISTORY_OVERFLOW_ERROR_MARKERS[1] in normalized
+        or _EVENT_HISTORY_OVERFLOW_ERROR_MARKERS[2] in normalized
+    )
+
+
+def _event_history_overflow_failure_detail(
+    issue_id: str,
+    *,
+    detail: str | None = None,
+) -> str:
+    failure = f"event-history overflow blocked the mutation for {issue_id}"
+    if detail:
+        return f"{failure} ({detail})"
+    return failure
 
 
 def _same_description_value(left: str | None, right: str | None) -> bool:
@@ -1499,6 +1523,7 @@ class AtelierStore:
         eventually fails closed with ``failure_message``.
         """
         conflict_retries = 0
+        last_failure_detail: str | None = None
         for _attempt in range(_MAX_UPDATE_ATTEMPTS):
             current = await self._show_issue(issue_id)
             if verify(current):
@@ -1507,6 +1532,7 @@ class AtelierStore:
                     conflict_retries=conflict_retries,
                 )
                 return current
+            last_failure_detail = None
             request = build_request(current)
             history_evidence = await self._description_history_evidence(
                 issue_id=issue_id,
@@ -1561,6 +1587,17 @@ class AtelierStore:
                         conflict_retries=conflict_retries,
                     )
                     return history_verified
+                if _is_event_history_overflow_detail(str(exc)):
+                    raise RuntimeError(
+                        _event_history_overflow_failure_detail(
+                            issue_id,
+                            detail=str(exc).strip(),
+                        )
+                    ) from exc
+                last_failure_detail = (
+                    "empty update stdout did not converge via fresh read or description "
+                    "history evidence"
+                )
                 continue
             if verify(updated):
                 _log_description_conflict_convergence(
@@ -1575,6 +1612,9 @@ class AtelierStore:
                     conflict_retries=conflict_retries,
                 )
                 return refreshed
+            last_failure_detail = "update response did not satisfy verification after refresh"
+        if last_failure_detail is not None:
+            raise RuntimeError(f"{failure_message}: {last_failure_detail}")
         raise RuntimeError(failure_message)
 
     async def _description_history_evidence(

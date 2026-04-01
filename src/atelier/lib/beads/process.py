@@ -43,6 +43,10 @@ from .models import (
 
 _SEMVER_SEARCH: Pattern[str] = compile(r"\bv?(\d+)\.(\d+)\.(\d+)\b")
 _FLAG_SEARCH: Pattern[str] = compile(r"--[a-z0-9][a-z0-9-]*")
+_EVENT_HISTORY_OVERFLOW_COLUMN_SEARCH: Pattern[str] = compile(
+    r"too large for column '([^']+)'",
+    flags=0,
+)
 _JSON_FLAG = "--json"
 _STARTUP_COUNT_SKEW_RECHECK_ATTEMPTS = 2
 _STARTUP_READY = "ready"
@@ -159,6 +163,19 @@ def _short_detail(value: str | None) -> str | None:
     if not flattened:
         return None
     return flattened[:220]
+
+
+def _parse_error_detail(result: BeadsCommandResult) -> str | None:
+    stderr = result.stderr.strip()
+    if stderr:
+        normalized = " ".join(part for part in stderr.splitlines() if part.strip())
+        lowered = normalized.lower()
+        if "failed to record event" in lowered:
+            match = _EVENT_HISTORY_OVERFLOW_COLUMN_SEARCH.search(normalized)
+            if match is not None:
+                return f"failed to record event: too large for column '{match.group(1)}'"
+        return _short_detail(stderr)
+    return _short_detail(result.stdout.strip())
 
 
 def _configured_backend(beads_root: Path) -> str | None:
@@ -829,5 +846,8 @@ def _parse_error(
     *,
     operation: SupportedOperation,
 ) -> BeadsParseError:
-    del result, operation
+    del operation
+    detail = _parse_error_detail(result)
+    if detail:
+        return BeadsParseError(f"{message} ({detail})")
     return BeadsParseError(message)
