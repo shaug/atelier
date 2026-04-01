@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import cast
-from urllib.parse import urlparse
 
-from atelier import changesets, lifecycle, messages
+from atelier import changesets, external_ticket_reconcile, lifecycle, messages
 from atelier.external_tickets import external_ticket_payload
-from atelier.github_issues_provider import GithubIssuesProvider
 from atelier.lib.beads import (
     BeadError,
     Beads,
@@ -100,8 +97,6 @@ _REVIEW_STATE_MAP = {
     ReviewState.MERGED.value: ReviewState.MERGED,
     ReviewState.CLOSED.value: ReviewState.CLOSED,
 }
-_GITHUB_API_ISSUE_PATH = re.compile(r"^/repos/(?P<owner>[^/]+)/(?P<repo>[^/]+)/issues/[^/]+$")
-_GITHUB_WEB_ISSUE_PATH = re.compile(r"^/(?P<owner>[^/]+)/(?P<repo>[^/]+)/issues/[^/]+$")
 _EXTERNAL_CLOSE_NOTE_PREFIX = "external_close_pending:"
 _EXTERNAL_REOPEN_NOTE_PREFIX = "external_reopen_pending:"
 
@@ -199,60 +194,6 @@ def _external_ticket_labels(tickets: tuple[ExternalTicketLink, ...]) -> set[str]
 
 def _issue_external_ticket_labels(issue: IssueRecord) -> set[str]:
     return {label for label in _normalized_labels(issue.labels) if label.startswith("ext:")}
-
-
-def _github_repo_from_ticket_url(url: str | None) -> str | None:
-    cleaned = (url or "").strip()
-    if not cleaned:
-        return None
-    parsed = urlparse(cleaned)
-    host = parsed.netloc.lower().split(":", 1)[0]
-    path = parsed.path or ""
-    if host == "api.github.com":
-        match = _GITHUB_API_ISSUE_PATH.match(path)
-    elif host in {"github.com", "www.github.com"}:
-        match = _GITHUB_WEB_ISSUE_PATH.match(path)
-    else:
-        return None
-    if not match:
-        return None
-    owner = match.group("owner").strip()
-    repo = match.group("repo").strip()
-    if not owner or not repo:
-        return None
-    return f"{owner}/{repo}"
-
-
-def _close_action_for_ticket(ticket: ExternalTicketLink) -> str:
-    if ticket.relation == "context" or ticket.on_close == "none":
-        return "none"
-    if ticket.on_close in {"close", "comment"}:
-        return "close"
-    if ticket.on_close == "sync":
-        return "sync"
-    if ticket.direction != "exported":
-        return "none"
-    return "close"
-
-
-def _merge_ticket_state(
-    ticket: ExternalTicketLink,
-    refreshed: ExternalTicketLink,
-    *,
-    assume_closed: bool = False,
-) -> ExternalTicketLink:
-    return ticket.model_copy(
-        update={
-            "url": refreshed.url or ticket.url,
-            "parent_id": refreshed.parent_id or ticket.parent_id,
-            "state": refreshed.state or ("closed" if assume_closed else ticket.state),
-            "raw_state": refreshed.raw_state or ticket.raw_state,
-            "state_updated_at": refreshed.state_updated_at or ticket.state_updated_at,
-            "content_updated_at": refreshed.content_updated_at or ticket.content_updated_at,
-            "notes_updated_at": refreshed.notes_updated_at or ticket.notes_updated_at,
-            "last_synced_at": dt.datetime.now(tz=dt.timezone.utc).isoformat(),
-        }
-    )
 
 
 def _empty_external_ticket_reconcile_result(issue_id: str) -> ExternalTicketReconcileResult:
@@ -1322,94 +1263,24 @@ class AtelierStore:
         if not existing_tickets:
             return _empty_external_ticket_reconcile_result(issue_id)
 
-        stale = 0
-        reconciled = 0
-        updated = False
-        notes: list[str] = []
-        provider_cache: dict[str, GithubIssuesProvider] = {}
-        merged_tickets: list[ExternalTicketLink] = []
-        for ticket in existing_tickets:
-            if ticket.provider != "github" or ticket.direction != "exported":
-                merged_tickets.append(ticket)
-                continue
-            if reopen and ticket.state != "closed":
-                merged_tickets.append(ticket)
-                continue
-            if not reopen and ticket.state == "closed":
-                merged_tickets.append(ticket)
-                continue
+        reconcile_result = external_ticket_reconcile.reconcile_exported_github_tickets(
+            issue_id=issue_id,
+            tickets=tuple(ticket.to_external_ref() for ticket in existing_tickets),
+            reopen=reopen,
+        )
 
-            stale += 1
-            action = "reopen" if reopen else _close_action_for_ticket(ticket)
-            if action == "none":
-                merged_tickets.append(ticket)
-                continue
-            repo_slug = _github_repo_from_ticket_url(ticket.url)
-            if repo_slug is None:
-                problem = (
-                    "cannot reopen exported ticket state"
-                    if reopen
-                    else "cannot reconcile exported ticket state"
-                )
-                notes.append(f"github:{ticket.ticket_id} missing repo slug; {problem}")
-                merged_tickets.append(ticket)
-                continue
-            provider = provider_cache.get(repo_slug)
-            if provider is None:
-                provider = GithubIssuesProvider(repo=repo_slug)
-                provider_cache[repo_slug] = provider
-            try:
-                if reopen:
-                    refreshed = provider.reopen_ticket(
-                        ticket.to_external_ref(),
-                        comment=(
-                            "Reopening external ticket because local bead "
-                            f"{issue_id} is active again."
-                        ),
-                    )
-                    merged = _merge_ticket_state(
-                        ticket,
-                        ExternalTicketLink.from_external_ref(refreshed),
-                    )
-                elif action == "close":
-                    close_comment = None
-                    if ticket.on_close == "comment":
-                        close_comment = (
-                            f"Closing external ticket because local bead {issue_id} is closed."
-                        )
-                    refreshed = provider.close_ticket(
-                        ticket.to_external_ref(),
-                        comment=close_comment,
-                    )
-                    merged = _merge_ticket_state(
-                        ticket,
-                        ExternalTicketLink.from_external_ref(refreshed),
-                        assume_closed=True,
-                    )
-                else:
-                    refreshed = provider.sync_state(ticket.to_external_ref())
-                    merged = _merge_ticket_state(
-                        ticket,
-                        ExternalTicketLink.from_external_ref(refreshed),
-                    )
-            except RuntimeError as exc:
-                notes.append(f"github:{ticket.ticket_id} {exc}")
-                merged_tickets.append(ticket)
-                continue
-            merged_tickets.append(merged)
-            reconciled += 1
-            if merged != ticket:
-                updated = True
-
-        if updated:
+        if reconcile_result.updated:
             await self.update_external_tickets(
                 UpdateExternalTicketsRequest(
                     issue_id=issue_id,
-                    tickets=tuple(merged_tickets),
+                    tickets=tuple(
+                        ExternalTicketLink.from_external_ref(ticket)
+                        for ticket in reconcile_result.merged_tickets
+                    ),
                 )
             )
 
-        unique_notes = tuple(dict.fromkeys(notes))
+        unique_notes = reconcile_result.needs_decision_notes
         if unique_notes:
             prefix = _EXTERNAL_REOPEN_NOTE_PREFIX if reopen else _EXTERNAL_CLOSE_NOTE_PREFIX
             await self.append_notes(
@@ -1421,9 +1292,9 @@ class AtelierStore:
 
         return ExternalTicketReconcileResult(
             issue_id=issue_id,
-            stale_exported_github_tickets=stale,
-            reconciled_tickets=reconciled,
-            updated=updated,
+            stale_exported_github_tickets=reconcile_result.stale_exported_github_tickets,
+            reconciled_tickets=reconcile_result.reconciled_tickets,
+            updated=reconcile_result.updated,
             needs_decision_notes=unique_notes,
         )
 

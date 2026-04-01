@@ -11,6 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 import atelier.store as public_store
+from atelier.external_ticket_reconcile import ExternalTicketReconcileOutcome
 from atelier.lib.beads import (
     Beads,
     BeadsCommandError,
@@ -1100,24 +1101,33 @@ def test_store_reconciles_reopened_external_tickets(backend: str, monkeypatch) -
     )
     store = _store_for_backend(backend, issues=issues)
 
-    def fake_reopen(self, ticket, *, comment=None):
-        assert comment == (
-            f"Reopening external ticket because local bead {issue_id} is active again."
+    def fake_reconcile(*, issue_id: str, tickets, reopen: bool) -> ExternalTicketReconcileOutcome:
+        assert issue_id == "at-change"
+        assert reopen is True
+        assert len(tickets) == 1
+        return ExternalTicketReconcileOutcome(
+            stale_exported_github_tickets=1,
+            reconciled_tickets=1,
+            merged_tickets=(
+                ExternalTicketLink(
+                    provider="github",
+                    ticket_id="179",
+                    url="https://github.com/acme/widgets/issues/179",
+                    direction="exported",
+                    state="open",
+                    raw_state="open",
+                    state_updated_at="2026-03-26T03:00:00Z",
+                    parent_id="200",
+                    last_synced_at="2026-03-26T03:00:01Z",
+                ).to_external_ref(),
+            ),
+            updated=True,
+            needs_decision_notes=(),
         )
-        return ExternalTicketLink(
-            provider="github",
-            ticket_id=ticket.ticket_id,
-            url="https://github.com/acme/widgets/issues/179",
-            direction="exported",
-            state="open",
-            raw_state="open",
-            state_updated_at="2026-03-26T03:00:00Z",
-            parent_id="200",
-        ).to_external_ref()
 
     monkeypatch.setattr(
-        "atelier.github_issues_provider.GithubIssuesProvider.reopen_ticket",
-        fake_reopen,
+        "atelier.store.beads_store.external_ticket_reconcile.reconcile_exported_github_tickets",
+        fake_reconcile,
     )
 
     result = _RUN(store.reconcile_reopened_external_tickets(issue_id))
@@ -1156,21 +1166,33 @@ def test_store_reconciles_closed_external_tickets(backend: str, monkeypatch) -> 
     )
     store = _store_for_backend(backend, issues=issues)
 
-    def fake_close(self, ticket, *, comment=None):
-        assert comment == f"Closing external ticket because local bead {issue_id} is closed."
-        return ExternalTicketLink(
-            provider="github",
-            ticket_id=ticket.ticket_id,
-            url="https://github.com/acme/widgets/issues/180",
-            direction="exported",
-            state="closed",
-            raw_state="closed",
-            state_updated_at="2026-03-26T03:05:00Z",
-        ).to_external_ref()
+    def fake_reconcile(*, issue_id: str, tickets, reopen: bool) -> ExternalTicketReconcileOutcome:
+        assert issue_id == "at-change"
+        assert reopen is False
+        assert len(tickets) == 1
+        return ExternalTicketReconcileOutcome(
+            stale_exported_github_tickets=1,
+            reconciled_tickets=1,
+            merged_tickets=(
+                ExternalTicketLink(
+                    provider="github",
+                    ticket_id="180",
+                    url="https://github.com/acme/widgets/issues/180",
+                    direction="exported",
+                    state="closed",
+                    raw_state="closed",
+                    state_updated_at="2026-03-26T03:05:00Z",
+                    on_close="comment",
+                    last_synced_at="2026-03-26T03:05:01Z",
+                ).to_external_ref(),
+            ),
+            updated=True,
+            needs_decision_notes=(),
+        )
 
     monkeypatch.setattr(
-        "atelier.github_issues_provider.GithubIssuesProvider.close_ticket",
-        fake_close,
+        "atelier.store.beads_store.external_ticket_reconcile.reconcile_exported_github_tickets",
+        fake_reconcile,
     )
 
     result = _RUN(store.reconcile_closed_external_tickets(issue_id))
