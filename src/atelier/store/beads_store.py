@@ -106,6 +106,7 @@ _CONCURRENT_DESCRIPTION_UPDATE_ERROR_MARKERS = (
     "concurrent description update conflict",
     "description update conflict",
 )
+_EMPTY_UPDATE_STDOUT_PARSE_ERROR = "expected JSON output from update, received empty stdout"
 
 
 def _clean_text(value: object) -> str | None:
@@ -147,6 +148,10 @@ def _log_description_conflict_convergence(
         f"issue={issue_id} converged after {conflict_retries} concurrent description "
         "update conflict retries"
     )
+
+
+def _is_empty_output_update_parse_error(error: BeadsParseError) -> bool:
+    return str(error).strip() == _EMPTY_UPDATE_STDOUT_PARSE_ERROR
 
 
 async def _read_issue_slots(beads: Beads, issue_id: str) -> dict[str, str]:
@@ -1469,6 +1474,15 @@ class AtelierStore:
         verify: Callable[[IssueRecord], bool],
         failure_message: str,
     ) -> IssueRecord:
+        """Persist one update mutation with bounded read-after-write verification.
+
+        The process-backed ``bd update --json`` path may occasionally emit empty
+        stdout even when the mutation lands. In that narrow case the
+        authoritative convergence check is a fresh store read that satisfies the
+        caller's ``verify`` predicate. Absent that proof, this helper keeps the
+        failure local to the current bounded retry loop and eventually fails
+        closed with ``failure_message``.
+        """
         conflict_retries = 0
         for _attempt in range(_MAX_UPDATE_ATTEMPTS):
             current = await self._show_issue(issue_id)
@@ -1495,6 +1509,20 @@ class AtelierStore:
                 )
                 refreshed = await self._show_issue(issue_id)
                 if verify(refreshed):
+                    _log_description_conflict_convergence(
+                        issue_id=issue_id,
+                        conflict_retries=conflict_retries,
+                    )
+                    return refreshed
+                continue
+            except BeadsParseError as exc:
+                if not _is_empty_output_update_parse_error(exc):
+                    raise
+                refreshed = await self._show_issue(issue_id)
+                if verify(refreshed):
+                    atelier_log.info(
+                        f"issue={issue_id} converged from fresh read after empty update stdout"
+                    )
                     _log_description_conflict_convergence(
                         issue_id=issue_id,
                         conflict_retries=conflict_retries,

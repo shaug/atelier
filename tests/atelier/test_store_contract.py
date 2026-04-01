@@ -323,6 +323,85 @@ def test_update_review_retries_after_concurrent_description_conflict(
     assert "changeset.integrated_sha: abc1234" in refreshed.description
 
 
+def test_update_review_verifies_after_empty_update_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async_client, issue_store = build_in_memory_beads_client(issues=_parity_seed_issues())
+    attempts = 0
+
+    async def update_then_emit_empty_stdout(request):
+        nonlocal attempts
+        attempts += 1
+        issue_store.update(
+            request.issue_id,
+            title=request.title,
+            description=request.description,
+            design=request.design,
+            acceptance_criteria=request.acceptance_criteria,
+            status=request.status,
+            assignee=request.assignee,
+            priority=request.priority,
+            estimate=request.estimate,
+            labels=request.labels if request.labels else None,
+        )
+        raise BeadsParseError("expected JSON output from update, received empty stdout")
+
+    monkeypatch.setattr(async_client, "update", update_then_emit_empty_stdout)
+    store = build_atelier_store(beads=async_client)
+
+    review = _RUN(
+        store.update_review(
+            UpdateReviewRequest(
+                changeset_id="at-change",
+                review=ReviewMetadata(
+                    pr_state=ReviewState.IN_REVIEW,
+                    review_owner="reviewer-b",
+                    integrated_sha="abc1234",
+                ),
+                preserve_existing=True,
+            )
+        )
+    )
+
+    refreshed = _RUN(store._show_issue("at-change"))
+    assert attempts == 1
+    assert review.review.pr_state is ReviewState.IN_REVIEW
+    assert review.review.review_owner == "reviewer-b"
+    assert review.review.integrated_sha == "abc1234"
+    assert refreshed.description is not None
+    assert "pr_state: in-review" in refreshed.description
+    assert "review_owner: reviewer-b" in refreshed.description
+    assert "changeset.integrated_sha: abc1234" in refreshed.description
+
+
+def test_update_review_fails_closed_when_empty_update_stdout_lacks_convergence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async_client, _issue_store = build_in_memory_beads_client(issues=_parity_seed_issues())
+
+    async def fail_with_empty_stdout(request):
+        del request
+        raise BeadsParseError("expected JSON output from update, received empty stdout")
+
+    monkeypatch.setattr(async_client, "update", fail_with_empty_stdout)
+    store = build_atelier_store(beads=async_client)
+
+    with pytest.raises(RuntimeError, match="review metadata update could not be verified"):
+        _RUN(
+            store.update_review(
+                UpdateReviewRequest(
+                    changeset_id="at-change",
+                    review=ReviewMetadata(
+                        pr_state=ReviewState.IN_REVIEW,
+                        review_owner="reviewer-b",
+                        integrated_sha="abc1234",
+                    ),
+                    preserve_existing=True,
+                )
+            )
+        )
+
+
 def test_append_notes_retries_after_concurrent_description_conflict(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -364,6 +443,49 @@ def test_append_notes_retries_after_concurrent_description_conflict(
     assert appended.id == "at-change"
     assert refreshed.description is not None
     assert "planner_update: concurrent verification note" in refreshed.description
+    assert refreshed.description.rstrip("\n").endswith(worker_note)
+
+
+def test_append_notes_verifies_after_empty_update_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async_client, issue_store = build_in_memory_beads_client(issues=_parity_seed_issues())
+    attempts = 0
+    worker_note = "worker_update: preserved lifecycle mutation parity"
+
+    async def update_then_emit_empty_stdout(request):
+        nonlocal attempts
+        attempts += 1
+        issue_store.update(
+            request.issue_id,
+            title=request.title,
+            description=request.description,
+            design=request.design,
+            acceptance_criteria=request.acceptance_criteria,
+            status=request.status,
+            assignee=request.assignee,
+            priority=request.priority,
+            estimate=request.estimate,
+            labels=request.labels if request.labels else None,
+        )
+        raise BeadsParseError("expected JSON output from update, received empty stdout")
+
+    monkeypatch.setattr(async_client, "update", update_then_emit_empty_stdout)
+    store = build_atelier_store(beads=async_client)
+
+    appended = _RUN(
+        store.append_notes(
+            AppendNotesRequest(
+                issue_id="at-change",
+                notes=(worker_note,),
+            )
+        )
+    )
+
+    refreshed = _RUN(store._show_issue("at-change"))
+    assert attempts == 1
+    assert appended.id == "at-change"
+    assert refreshed.description is not None
     assert refreshed.description.rstrip("\n").endswith(worker_note)
 
 
