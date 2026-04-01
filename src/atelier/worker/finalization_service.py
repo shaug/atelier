@@ -26,11 +26,18 @@ def mark_changeset_closed(changeset_id: str, *, beads_root: Path, repo_root: Pat
     )
 
 
-def mark_changeset_merged(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
+def mark_changeset_merged(
+    changeset_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+    allow_empty_output_close_fallback: bool = False,
+) -> None:
     worker_changeset_state.mark_changeset_merged(
         changeset_id,
         beads_root=beads_root,
         repo_root=repo_root,
+        allow_empty_output_close_fallback=allow_empty_output_close_fallback,
     )
 
 

@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .. import beads, lifecycle
+from ..lib.beads import BeadsParseError
 from . import store_adapter as worker_store
 
 
@@ -50,6 +51,15 @@ def _issue_parent_id(issue: dict[str, object]) -> str | None:
                 return normalized
         return None
     return boundary.parent_id
+
+
+def _is_empty_output_close_nonconvergence_error(exc: RuntimeError, *, issue_id: str) -> bool:
+    if str(exc).strip() != f"lifecycle close could not be verified for {issue_id}":
+        return False
+    cause = exc.__cause__
+    return isinstance(cause, BeadsParseError) and str(cause).strip() == (
+        "expected JSON output from close, received empty stdout"
+    )
 
 
 def _close_guard_allows(
@@ -106,15 +116,35 @@ def mark_changeset_closed(changeset_id: str, *, beads_root: Path, repo_root: Pat
     )
 
 
-def mark_changeset_merged(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
+def mark_changeset_merged(
+    changeset_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+    allow_empty_output_close_fallback: bool = False,
+) -> None:
     if not _close_guard_allows(changeset_id, beads_root=beads_root, repo_root=repo_root):
         return
-    worker_store.transition_lifecycle(
-        changeset_id,
-        target_status="closed",
-        beads_root=beads_root,
-        repo_root=repo_root,
-    )
+    try:
+        worker_store.transition_lifecycle(
+            changeset_id,
+            target_status="closed",
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+    except RuntimeError as exc:
+        if not allow_empty_output_close_fallback or not _is_empty_output_close_nonconvergence_error(
+            exc, issue_id=changeset_id
+        ):
+            raise
+        # Merged finalize already proved terminal PR lifecycle plus integration
+        # before calling here, so it may use the verified direct status update
+        # fallback when `bd close` emits empty output and does not converge.
+        worker_store.force_close_issue_status_for_empty_close_nonconvergence(
+            changeset_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
     worker_store.update_issue_labels(
         changeset_id,
         add_labels=("cs:merged",),

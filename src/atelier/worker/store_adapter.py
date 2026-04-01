@@ -6,7 +6,6 @@ import asyncio
 import datetime as dt
 import json
 import subprocess
-from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -177,7 +176,7 @@ def close_transition_has_active_pr_lifecycle(
     repo_root: Path | None = None,
     active_pr_lifecycle: bool | None = None,
 ) -> bool:
-    """Return whether worker close/reopen flow must defer to active PR lifecycle."""
+    """Return whether close/reopen flow must defer to active PR lifecycle."""
 
     if active_pr_lifecycle is not None:
         return bool(active_pr_lifecycle)
@@ -497,9 +496,12 @@ def resolve_hooked_epic(
     beads_root: Path,
     repo_root: Path,
 ) -> str | None:
-    """Resolve the current hook through AtelierStore and verify live ownership."""
+    """Resolve the current hook through AtelierStore.
 
-    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    The returned hook is verified against live issue ownership before it is
+    accepted.
+    """
+
     hook_id = get_agent_hook(agent_bead_id, beads_root=beads_root, repo_root=repo_root)
     if hook_id is None:
         return None
@@ -738,6 +740,32 @@ def transition_lifecycle(
         )
 
 
+def force_close_issue_status_for_empty_close_nonconvergence(
+    issue_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+    expected_current: str | None = None,
+) -> None:
+    """Close one work item after empty close output failed to converge.
+
+    This bypasses the Beads ``close`` command semantics only for the narrowed
+    merged-finalize repair path where ``bd close`` emitted empty stdout, the
+    subsequent read still did not converge, and upstream runtime logic has
+    already proven terminal merged PR lifecycle plus integration. The helper
+    still requires bounded read-after-write verification and raises on
+    uncertainty.
+    """
+
+    _fallback_issue_status_update(
+        issue_id,
+        target_status=LifecycleStatus.CLOSED.value,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        expected_current=expected_current,
+    )
+
+
 def append_notes(
     issue_id: str,
     *,
@@ -820,7 +848,7 @@ def update_changeset_review(
     beads_root: Path,
     repo_root: Path,
 ) -> None:
-    """Persist normalized review metadata for one changeset through AtelierStore."""
+    """Persist normalized review metadata through AtelierStore."""
 
     bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
     asyncio.run(
@@ -1340,7 +1368,7 @@ def epic_changeset_summary(
     beads_root: Path,
     repo_root: Path,
 ) -> EpicChangesetSummary:
-    """Summarize one epic's changesets using store-backed changeset discovery."""
+    """Summarize one epic's changesets through store-backed discovery."""
 
     bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
     ready_count = len(
@@ -1591,6 +1619,7 @@ __all__ = [
     "ensure_agent_bead",
     "epic_changeset_summary",
     "find_agent_bead",
+    "force_close_issue_status_for_empty_close_nonconvergence",
     "get_agent_hook",
     "list_descendant_changesets",
     "list_epics",

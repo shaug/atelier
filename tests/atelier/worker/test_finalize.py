@@ -1,7 +1,7 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from atelier.worker import finalize
+from atelier.worker import finalize, work_finalization_integration
 from atelier.worker.models import FinalizeResult
 
 
@@ -100,3 +100,46 @@ def test_finalize_epic_if_complete_blocks_when_metadata_missing() -> None:
 
     assert result.reason == "epic_blocked_missing_metadata"
     assert notifications == ["NEEDS-DECISION: Missing epic branch metadata (at-1)"]
+
+
+def test_work_finalization_integration_enables_merged_close_fallback(monkeypatch) -> None:
+    merged_calls: list[tuple[str, bool]] = []
+
+    monkeypatch.setattr(
+        work_finalization_integration,
+        "mark_changeset_merged",
+        lambda changeset_id, *, beads_root, repo_root, allow_empty_output_close_fallback=False: (
+            merged_calls.append((changeset_id, allow_empty_output_close_fallback))
+        ),
+    )
+    monkeypatch.setattr(
+        work_finalization_integration.worker_finalize,
+        "finalize_terminal_changeset",
+        lambda **kwargs: (
+            kwargs["mark_changeset_merged"](kwargs["changeset_id"])
+            or FinalizeResult(continue_running=True, reason="changeset_complete")
+        ),
+    )
+
+    result = work_finalization_integration.finalize_terminal_changeset(
+        changeset_id="at-1.1",
+        epic_id="at-1",
+        agent_id="worker/1",
+        agent_bead_id="at-agent",
+        terminal_state="merged",
+        integrated_sha="abc1234",
+        branch_pr=True,
+        branch_history="manual",
+        branch_squash_message="deterministic",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        project_data_dir=Path("/project"),
+        squash_message_agent_spec=None,
+        squash_message_agent_options=[],
+        squash_message_agent_home=None,
+        squash_message_agent_env=None,
+        git_path="git",
+    )
+
+    assert result.reason == "changeset_complete"
+    assert merged_calls == [("at-1.1", True)]

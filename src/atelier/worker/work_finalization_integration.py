@@ -19,7 +19,6 @@ from .work_finalization_state import (
 from .work_runtime_common import (
     ensure_exec_subcommand_flag,
     extract_changeset_root_branch,
-    issue_labels,
     normalize_branch_value,
     strip_flag_with_value,
     with_codex_exec,
@@ -552,7 +551,10 @@ def finalize_terminal_changeset(
             beads_root=beads_root,
             repo_root=repo_root,
             mark_changeset_merged=lambda target_id: mark_changeset_merged(
-                target_id, beads_root=beads_root, repo_root=repo_root
+                target_id,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                allow_empty_output_close_fallback=True,
             ),
             mark_changeset_abandoned=lambda target_id: mark_changeset_abandoned(
                 target_id, beads_root=beads_root, repo_root=repo_root
