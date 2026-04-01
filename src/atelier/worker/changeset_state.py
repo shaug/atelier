@@ -52,6 +52,10 @@ def _issue_parent_id(issue: dict[str, object]) -> str | None:
     return boundary.parent_id
 
 
+def _is_unverified_close_error(exc: RuntimeError, *, issue_id: str) -> bool:
+    return str(exc).strip() == f"lifecycle close could not be verified for {issue_id}"
+
+
 def _close_guard_allows(
     changeset_id: str,
     *,
@@ -106,15 +110,35 @@ def mark_changeset_closed(changeset_id: str, *, beads_root: Path, repo_root: Pat
     )
 
 
-def mark_changeset_merged(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
+def mark_changeset_merged(
+    changeset_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+    allow_terminal_status_fallback: bool = False,
+) -> None:
     if not _close_guard_allows(changeset_id, beads_root=beads_root, repo_root=repo_root):
         return
-    worker_store.transition_lifecycle(
-        changeset_id,
-        target_status="closed",
-        beads_root=beads_root,
-        repo_root=repo_root,
-    )
+    try:
+        worker_store.transition_lifecycle(
+            changeset_id,
+            target_status="closed",
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+    except RuntimeError as exc:
+        if not allow_terminal_status_fallback or not _is_unverified_close_error(
+            exc, issue_id=changeset_id
+        ):
+            raise
+        # Merged finalize already proved terminal PR lifecycle plus integration
+        # before calling here, so it may use the verified direct status update
+        # fallback when `bd close` emits empty output and does not converge.
+        worker_store.force_close_issue_status(
+            changeset_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
     worker_store.update_issue_labels(
         changeset_id,
         add_labels=("cs:merged",),

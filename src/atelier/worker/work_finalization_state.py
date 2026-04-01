@@ -192,8 +192,9 @@ def is_changeset_ready(
 ) -> bool:
     """Is changeset ready.
 
-    Call with has_work_children=False when issue is from list_descendant_changesets
-    (leaf work beads). Fails closed when has_work_children is unknown.
+    Call with has_work_children=False when issue is from
+    list_descendant_changesets (leaf work beads). Fails closed when
+    has_work_children is unknown.
 
     Args:
         issue: Value for `issue`.
@@ -1507,13 +1508,22 @@ def mark_changeset_closed(changeset_id: str, *, beads_root: Path, repo_root: Pat
     )
 
 
-def mark_changeset_merged(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
+def mark_changeset_merged(
+    changeset_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+    allow_terminal_status_fallback: bool = False,
+) -> None:
     """Mark changeset merged.
 
     Args:
         changeset_id: Value for `changeset_id`.
         beads_root: Value for `beads_root`.
         repo_root: Value for `repo_root`.
+        allow_terminal_status_fallback: Whether merged-terminal finalize may
+            bypass `bd close` and use a verified direct `status=closed` update
+            after higher-level integration proof is already established.
 
     Returns:
         Function result.
@@ -1522,6 +1532,7 @@ def mark_changeset_merged(changeset_id: str, *, beads_root: Path, repo_root: Pat
         changeset_id,
         beads_root=beads_root,
         repo_root=repo_root,
+        allow_terminal_status_fallback=allow_terminal_status_fallback,
     )
 
 

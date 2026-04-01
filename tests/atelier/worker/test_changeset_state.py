@@ -2,7 +2,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
-from atelier.lib.beads import SyncBeadsClient
+import pytest
+
+from atelier.lib.beads import BeadsParseError, CloseIssueRequest, SyncBeadsClient
 from atelier.store import build_atelier_store
 from atelier.testing.beads import InMemoryBeadsBackend, IssueFixtureBuilder, patch_in_memory_beads
 from atelier.testing.beads.client import InMemoryBeadsClient
@@ -256,6 +258,109 @@ def test_mark_changeset_merged_reconciles_external_tickets(tmp_path: Path, monke
     assert issue["status"] == "closed"
     assert "cs:merged" in issue["labels"]
     assert "cs:abandoned" not in issue["labels"]
+
+
+def test_mark_changeset_merged_fails_closed_without_terminal_status_fallback(
+    tmp_path: Path, monkeypatch
+) -> None:
+    builder = IssueFixtureBuilder()
+    backend, beads_root, repo_root = _seed_backend(
+        tmp_path,
+        builder.issue(
+            "at-1.1",
+            title="Merged changeset",
+            status="open",
+            description="pr_state: merged\n",
+            labels=("cs:abandoned",),
+        ),
+    )
+    async_client = InMemoryBeadsClient(issue_store=backend.state)
+    store = build_atelier_store(beads=async_client)
+    changeset_state.worker_store.clear_bundle_cache()
+
+    async def close_then_fail(request: CloseIssueRequest):
+        del request
+        raise BeadsParseError("expected JSON output from close, received empty stdout")
+
+    monkeypatch.setattr(async_client, "close", close_then_fail)
+    monkeypatch.setattr(
+        changeset_state.worker_store,
+        "_build_store_bundle",
+        lambda **_kwargs: changeset_state.worker_store._StoreBundle(  # pyright: ignore[reportPrivateUsage]
+            store=store,
+            sync_client=SyncBeadsClient(async_client),
+        ),
+    )
+
+    with patch_in_memory_beads(backend):
+        with patch(
+            "atelier.worker.changeset_state.beads.reconcile_closed_issue_exported_github_tickets"
+        ) as reconcile_closed:
+            with patch(
+                "atelier.worker.changeset_state.beads.reconcile_reopened_issue_exported_github_tickets"
+            ):
+                with pytest.raises(
+                    RuntimeError, match="lifecycle close could not be verified for at-1.1"
+                ):
+                    changeset_state.mark_changeset_merged(
+                        "at-1.1",
+                        beads_root=beads_root,
+                        repo_root=repo_root,
+                    )
+
+    issue = backend.state.show("at-1.1")
+    assert issue["status"] == "open"
+    assert "cs:merged" not in issue["labels"]
+    assert "cs:abandoned" in issue["labels"]
+    reconcile_closed.assert_not_called()
+    changeset_state.worker_store.clear_bundle_cache()
+
+
+def test_mark_changeset_merged_uses_terminal_status_fallback_after_unverified_close(
+    tmp_path: Path, monkeypatch
+) -> None:
+    builder = IssueFixtureBuilder()
+    backend, beads_root, repo_root = _seed_backend(
+        tmp_path,
+        builder.issue(
+            "at-1.1",
+            title="Merged changeset",
+            status="open",
+            description="pr_state: merged\n",
+            labels=("cs:abandoned",),
+        ),
+    )
+    async_client = InMemoryBeadsClient(issue_store=backend.state)
+    store = build_atelier_store(beads=async_client)
+    changeset_state.worker_store.clear_bundle_cache()
+
+    async def close_then_fail(request: CloseIssueRequest):
+        del request
+        raise BeadsParseError("expected JSON output from close, received empty stdout")
+
+    monkeypatch.setattr(async_client, "close", close_then_fail)
+    monkeypatch.setattr(
+        changeset_state.worker_store,
+        "_build_store_bundle",
+        lambda **_kwargs: changeset_state.worker_store._StoreBundle(  # pyright: ignore[reportPrivateUsage]
+            store=store,
+            sync_client=SyncBeadsClient(async_client),
+        ),
+    )
+
+    with patch_in_memory_beads(backend):
+        changeset_state.mark_changeset_merged(
+            "at-1.1",
+            beads_root=beads_root,
+            repo_root=repo_root,
+            allow_terminal_status_fallback=True,
+        )
+
+    issue = backend.state.show("at-1.1")
+    assert issue["status"] == "closed"
+    assert "cs:merged" in issue["labels"]
+    assert "cs:abandoned" not in issue["labels"]
+    changeset_state.worker_store.clear_bundle_cache()
 
 
 def test_mark_changeset_abandoned_sets_terminal_marker_and_reconciles_external_tickets(
