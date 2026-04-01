@@ -176,7 +176,7 @@ def close_transition_has_active_pr_lifecycle(
     repo_root: Path | None = None,
     active_pr_lifecycle: bool | None = None,
 ) -> bool:
-    """Return whether worker close/reopen flow must defer to active PR lifecycle."""
+    """Return whether close/reopen flow must defer to active PR lifecycle."""
 
     if active_pr_lifecycle is not None:
         return bool(active_pr_lifecycle)
@@ -1368,7 +1368,7 @@ def epic_changeset_summary(
     beads_root: Path,
     repo_root: Path,
 ) -> EpicChangesetSummary:
-    """Summarize one epic's changesets using store-backed changeset discovery."""
+    """Summarize one epic's changesets through store-backed discovery."""
 
     bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
     ready_count = len(
