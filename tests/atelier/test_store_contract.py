@@ -271,6 +271,102 @@ def test_transition_lifecycle_fails_closed_when_unparseable_close_output_lacks_c
         )
 
 
+def test_update_review_retries_after_concurrent_description_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async_client, issue_store = build_in_memory_beads_client(issues=_parity_seed_issues())
+    original_update = async_client.update
+    attempts = 0
+
+    async def conflict_then_update(request):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            current = issue_store.show("at-change")
+            issue_store.update(
+                "at-change",
+                description=(current.get("description") or "")
+                + "\nplanner_update: concurrent metadata refresh\n",
+            )
+            raise BeadsCommandError(
+                "bd command failed (1): bd update at-change --json\n"
+                "concurrent description update conflict for at-change"
+            )
+        return await original_update(request)
+
+    monkeypatch.setattr(async_client, "update", conflict_then_update)
+    store = build_atelier_store(beads=async_client)
+
+    review = _RUN(
+        store.update_review(
+            UpdateReviewRequest(
+                changeset_id="at-change",
+                review=ReviewMetadata(
+                    pr_state=ReviewState.IN_REVIEW,
+                    review_owner="reviewer-b",
+                    integrated_sha="abc1234",
+                ),
+                preserve_existing=True,
+            )
+        )
+    )
+
+    refreshed = _RUN(store._show_issue("at-change"))
+    assert attempts == 2
+    assert review.review.pr_state is ReviewState.IN_REVIEW
+    assert review.review.review_owner == "reviewer-b"
+    assert review.review.integrated_sha == "abc1234"
+    assert refreshed.description is not None
+    assert "planner_update: concurrent metadata refresh" in refreshed.description
+    assert "pr_state: in-review" in refreshed.description
+    assert "review_owner: reviewer-b" in refreshed.description
+    assert "changeset.integrated_sha: abc1234" in refreshed.description
+
+
+def test_append_notes_retries_after_concurrent_description_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async_client, issue_store = build_in_memory_beads_client(issues=_parity_seed_issues())
+    original_update = async_client.update
+    attempts = 0
+    worker_note = "worker_update: preserved lifecycle mutation parity"
+
+    async def conflict_then_update(request):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            current = issue_store.show("at-change")
+            issue_store.update(
+                "at-change",
+                description=(current.get("description") or "")
+                + "\nplanner_update: concurrent verification note\n",
+            )
+            raise BeadsCommandError(
+                "bd command failed (1): bd update at-change --json\n"
+                "concurrent description update conflict for at-change"
+            )
+        return await original_update(request)
+
+    monkeypatch.setattr(async_client, "update", conflict_then_update)
+    store = build_atelier_store(beads=async_client)
+
+    appended = _RUN(
+        store.append_notes(
+            AppendNotesRequest(
+                issue_id="at-change",
+                notes=(worker_note,),
+            )
+        )
+    )
+
+    refreshed = _RUN(store._show_issue("at-change"))
+    assert attempts == 2
+    assert appended.id == "at-change"
+    assert refreshed.description is not None
+    assert "planner_update: concurrent verification note" in refreshed.description
+    assert refreshed.description.rstrip("\n").endswith(worker_note)
+
+
 def test_message_record_enforces_store_message_contract() -> None:
     record = MessageRecord(
         id="msg-1",

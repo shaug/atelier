@@ -152,6 +152,10 @@ _DOLT_SERVER_ERROR_MARKERS = (
     "no such host",
     "unknown database",
 )
+_CONCURRENT_DESCRIPTION_UPDATE_ERROR_MARKERS = (
+    "concurrent description update conflict",
+    "description update conflict",
+)
 _DRY_RUN_RENAME_PREFIX_SUMMARY = re.compile(
     r"DRY RUN: Would rename (\d+) issues from prefix '([^']+)' to '([^']+)'"
 )
@@ -4054,6 +4058,34 @@ def _description_matches_expected(
     return True
 
 
+def _is_concurrent_description_update_conflict(detail: str | None) -> bool:
+    normalized = detail.strip().lower() if isinstance(detail, str) else ""
+    if not normalized:
+        return False
+    return any(marker in normalized for marker in _CONCURRENT_DESCRIPTION_UPDATE_ERROR_MARKERS)
+
+
+def _try_update_issue_description(
+    issue_id: str,
+    description: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> subprocess.CompletedProcess[str]:
+    with NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+        handle.write(description)
+        temp_path = Path(handle.name)
+    try:
+        return run_bd_command(
+            ["update", issue_id, "--body-file", str(temp_path)],
+            beads_root=beads_root,
+            cwd=cwd,
+            allow_failure=True,
+        )
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
 def _update_description_fields_optimistic(
     issue_id: str,
     *,
@@ -4065,6 +4097,7 @@ def _update_description_fields_optimistic(
 ) -> dict[str, object]:
     """Apply description field updates with optimistic retry + verification."""
     with _issue_write_lock(issue_id, beads_root=beads_root):
+        conflict_retries = 0
         for _attempt in range(_DESCRIPTION_UPDATE_MAX_ATTEMPTS):
             issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
             if not issues:
@@ -4085,8 +4118,32 @@ def _update_description_fields_optimistic(
                     changed = True
                     updated = next_value
             if not changed:
+                if conflict_retries > 0:
+                    atelier_log.info(
+                        f"issue={issue_id} converged after {conflict_retries} concurrent "
+                        "description update conflict retries"
+                    )
                 return issue
-            _update_issue_description(issue_id, updated, beads_root=beads_root, cwd=cwd)
+            result = _try_update_issue_description(
+                issue_id,
+                updated,
+                beads_root=beads_root,
+                cwd=cwd,
+            )
+            if result.returncode != 0:
+                detail = (result.stderr or result.stdout).strip()
+                if _is_concurrent_description_update_conflict(detail):
+                    conflict_retries += 1
+                    atelier_log.warning(
+                        f"issue={issue_id} concurrent description update conflict while "
+                        f"applying description fields; retrying "
+                        f"({conflict_retries}/{_DESCRIPTION_UPDATE_MAX_ATTEMPTS})"
+                    )
+                    continue
+                message = f"failed to update description for {issue_id}"
+                if detail:
+                    message = f"{message}\n{detail}"
+                die(message)
             refreshed = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
             if not refreshed:
                 continue
@@ -4099,6 +4156,11 @@ def _update_description_fields_optimistic(
                     return candidate
                 continue
             if _description_matches_updates(candidate, fields=fields):
+                if conflict_retries > 0:
+                    atelier_log.info(
+                        f"issue={issue_id} converged after {conflict_retries} concurrent "
+                        "description update conflict retries"
+                    )
                 return candidate
     die(f"concurrent description update conflict for {issue_id}")
     raise RuntimeError("unreachable")
