@@ -154,6 +154,10 @@ def _is_empty_output_update_parse_error(error: BeadsParseError) -> bool:
     return str(error).strip() == _EMPTY_UPDATE_STDOUT_PARSE_ERROR
 
 
+def _same_description_value(left: str | None, right: str | None) -> bool:
+    return (left or "") == (right or "")
+
+
 async def _read_issue_slots(beads: Beads, issue_id: str) -> dict[str, str]:
     issue_store = getattr(beads, "_issue_store", None)
     if issue_store is not None and hasattr(issue_store, "show_slots"):
@@ -331,6 +335,13 @@ def _description_fields_match(
         if current != expected:
             return False
     return True
+
+
+@dataclass(frozen=True)
+class _DescriptionHistoryEvidence:
+    history_length: int
+    previous_description: str | None
+    requested_description: str
 
 
 def _append_issue_notes(description: str, *, notes: tuple[str, ...]) -> str:
@@ -1164,6 +1175,7 @@ class AtelierStore:
             failure_message=(
                 f"review metadata update could not be verified for {request.changeset_id}"
             ),
+            allow_description_history_convergence=True,
         )
         updated_state = _ReadState(self, issue_cache={updated.id: updated})
         return await self._changeset_record(updated, state=updated_state)
@@ -1473,15 +1485,18 @@ class AtelierStore:
         build_request: Callable[[IssueRecord], UpdateIssueRequest],
         verify: Callable[[IssueRecord], bool],
         failure_message: str,
+        allow_description_history_convergence: bool = False,
     ) -> IssueRecord:
         """Persist one update mutation with bounded read-after-write verification.
 
         The process-backed ``bd update --json`` path may occasionally emit empty
         stdout even when the mutation lands. In that narrow case the
         authoritative convergence check is a fresh store read that satisfies the
-        caller's ``verify`` predicate. Absent that proof, this helper keeps the
-        failure local to the current bounded retry loop and eventually fails
-        closed with ``failure_message``.
+        caller's ``verify`` predicate. Review metadata updates may also opt into
+        exact description-history evidence for the current attempt when that
+        follow-up read is stale after empty stdout. Absent that proof, this
+        helper keeps the failure local to the current bounded retry loop and
+        eventually fails closed with ``failure_message``.
         """
         conflict_retries = 0
         for _attempt in range(_MAX_UPDATE_ATTEMPTS):
@@ -1493,6 +1508,12 @@ class AtelierStore:
                 )
                 return current
             request = build_request(current)
+            history_evidence = await self._description_history_evidence(
+                issue_id=issue_id,
+                current=current,
+                request=request,
+                enabled=allow_description_history_convergence,
+            )
             try:
                 updated = await self._beads.update(request)
             except BeadsCommandError as exc:
@@ -1528,6 +1549,18 @@ class AtelierStore:
                         conflict_retries=conflict_retries,
                     )
                     return refreshed
+                history_verified = await self._verify_empty_stdout_description_history(
+                    issue_id=issue_id,
+                    refreshed=refreshed,
+                    verify=verify,
+                    evidence=history_evidence,
+                )
+                if history_verified is not None:
+                    _log_description_conflict_convergence(
+                        issue_id=issue_id,
+                        conflict_retries=conflict_retries,
+                    )
+                    return history_verified
                 continue
             if verify(updated):
                 _log_description_conflict_convergence(
@@ -1543,6 +1576,56 @@ class AtelierStore:
                 )
                 return refreshed
         raise RuntimeError(failure_message)
+
+    async def _description_history_evidence(
+        self,
+        *,
+        issue_id: str,
+        current: IssueRecord,
+        request: UpdateIssueRequest,
+        enabled: bool,
+    ) -> _DescriptionHistoryEvidence | None:
+        if not enabled or request.description is None:
+            return None
+        if not isinstance(self._beads, BeadsDescriptionHistory):
+            return None
+        try:
+            history = await self._beads.description_history(issue_id)
+        except Exception:
+            return None
+        return _DescriptionHistoryEvidence(
+            history_length=len(history),
+            previous_description=current.description,
+            requested_description=request.description,
+        )
+
+    async def _verify_empty_stdout_description_history(
+        self,
+        *,
+        issue_id: str,
+        refreshed: IssueRecord,
+        verify: Callable[[IssueRecord], bool],
+        evidence: _DescriptionHistoryEvidence | None,
+    ) -> IssueRecord | None:
+        if evidence is None or not isinstance(self._beads, BeadsDescriptionHistory):
+            return None
+        try:
+            history = await self._beads.description_history(issue_id)
+        except Exception:
+            return None
+        for previous_description, new_description in reversed(history[evidence.history_length :]):
+            if not _same_description_value(new_description, evidence.requested_description):
+                continue
+            if not _same_description_value(previous_description, evidence.previous_description):
+                continue
+            candidate = refreshed.model_copy(update={"description": evidence.requested_description})
+            if not verify(candidate):
+                continue
+            atelier_log.info(
+                f"issue={issue_id} converged from description history after empty update stdout"
+            )
+            return candidate
+        return None
 
     async def _fail_closed_created_issue(
         self,
