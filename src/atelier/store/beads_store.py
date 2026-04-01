@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import cast
 
-from atelier import changesets, lifecycle, messages
+from atelier import changesets, external_ticket_reconcile, lifecycle, messages
 from atelier.external_tickets import external_ticket_payload
 from atelier.lib.beads import (
     BeadError,
@@ -26,6 +26,7 @@ from atelier.lib.beads import (
     UpdateIssueRequest,
 )
 from atelier.lib.beads import description_fields as bead_fields
+from atelier.lib.beads.client import BeadsDescriptionHistory
 
 from .contract import (
     AppendNotesRequest,
@@ -42,6 +43,7 @@ from .contract import (
     MarkMessageReadRequest,
     MessageQuery,
     ReadyChangesetQuery,
+    RepairExternalTicketMetadataRequest,
     SetAgentBeadHookRequest,
     SetHookRequest,
     UpdateExternalTicketsRequest,
@@ -55,6 +57,8 @@ from .models import (
     EpicIdentityViolation,
     EpicRecord,
     ExternalTicketLink,
+    ExternalTicketMetadataRepairResult,
+    ExternalTicketReconcileResult,
     HookRecord,
     LifecycleStatus,
     LifecycleTransition,
@@ -94,6 +98,8 @@ _REVIEW_STATE_MAP = {
     ReviewState.MERGED.value: ReviewState.MERGED,
     ReviewState.CLOSED.value: ReviewState.CLOSED,
 }
+_EXTERNAL_CLOSE_NOTE_PREFIX = "external_close_pending:"
+_EXTERNAL_REOPEN_NOTE_PREFIX = "external_reopen_pending:"
 
 
 def _clean_text(value: object) -> str | None:
@@ -189,6 +195,31 @@ def _external_ticket_labels(tickets: tuple[ExternalTicketLink, ...]) -> set[str]
 
 def _issue_external_ticket_labels(issue: IssueRecord) -> set[str]:
     return {label for label in _normalized_labels(issue.labels) if label.startswith("ext:")}
+
+
+def _empty_external_ticket_reconcile_result(issue_id: str) -> ExternalTicketReconcileResult:
+    return ExternalTicketReconcileResult(
+        issue_id=issue_id,
+        stale_exported_github_tickets=0,
+        reconciled_tickets=0,
+        updated=False,
+        needs_decision_notes=(),
+    )
+
+
+async def _recover_external_ticket_links(
+    beads: Beads,
+    issue_id: str,
+) -> tuple[ExternalTicketLink, ...]:
+    if not isinstance(beads, BeadsDescriptionHistory):
+        return ()
+    history = await beads.description_history(issue_id)
+    for old_description, new_description in reversed(history):
+        for description in (new_description, old_description):
+            tickets = bead_fields.parse_external_tickets(description)
+            if tickets:
+                return tuple(ExternalTicketLink.from_external_ref(ticket) for ticket in tickets)
+    return ()
 
 
 def _changeset_branches(issue: IssueRecord) -> ChangesetBranches | None:
@@ -471,6 +502,22 @@ class AtelierStore:
 
         issue = await self._show_issue(issue_id)
         return _external_ticket_links(issue)
+
+    async def reconcile_reopened_external_tickets(
+        self,
+        issue_id: str,
+    ) -> ExternalTicketReconcileResult:
+        """Reopen stale exported GitHub tickets for an active issue."""
+
+        return await self._reconcile_external_tickets(issue_id, reopen=True)
+
+    async def reconcile_closed_external_tickets(
+        self,
+        issue_id: str,
+    ) -> ExternalTicketReconcileResult:
+        """Reconcile exported GitHub tickets for a closed issue."""
+
+        return await self._reconcile_external_tickets(issue_id, reopen=False)
 
     async def list_changesets(
         self,
@@ -1137,6 +1184,120 @@ class AtelierStore:
             ),
         )
         return _external_ticket_links(updated)
+
+    async def repair_external_ticket_metadata(
+        self,
+        request: RepairExternalTicketMetadataRequest,
+    ) -> tuple[ExternalTicketMetadataRepairResult, ...]:
+        """Repair missing external ticket metadata through store-owned logic.
+
+        Args:
+            request: Repair selection and whether recovered metadata should be
+                persisted back to the store.
+
+        Returns:
+            One repair outcome per issue with provider labels but missing
+            persisted external ticket metadata.
+        """
+        if request.issue_ids:
+            issues_list: list[IssueRecord] = []
+            for issue_id in request.issue_ids:
+                issues_list.append(await self._show_issue(issue_id))
+            issues = tuple(issues_list)
+        else:
+            issues = await self._beads.list(
+                ListIssuesRequest(include_closed=True, limit=self.scan_limit)
+            )
+
+        results: list[ExternalTicketMetadataRepairResult] = []
+        for issue in issues:
+            providers = tuple(
+                sorted(
+                    label.removeprefix("ext:")
+                    for label in _normalized_labels(issue.labels)
+                    if label.startswith("ext:")
+                )
+            )
+            if not providers:
+                continue
+            if _external_ticket_links(issue):
+                continue
+            recovered_tickets = await _recover_external_ticket_links(self._beads, issue.id)
+            repaired = False
+            if recovered_tickets and request.apply:
+                await self.update_external_tickets(
+                    UpdateExternalTicketsRequest(
+                        issue_id=issue.id,
+                        tickets=recovered_tickets,
+                    )
+                )
+                repaired = True
+            results.append(
+                ExternalTicketMetadataRepairResult(
+                    issue_id=issue.id,
+                    providers=providers,
+                    recovered=bool(recovered_tickets),
+                    repaired=repaired,
+                    ticket_count=len(recovered_tickets),
+                )
+            )
+        return tuple(sorted(results, key=lambda item: item.issue_id))
+
+    async def _reconcile_external_tickets(
+        self,
+        issue_id: str,
+        *,
+        reopen: bool,
+    ) -> ExternalTicketReconcileResult:
+        try:
+            issue = await self._show_issue(issue_id)
+        except LookupError:
+            return _empty_external_ticket_reconcile_result(issue_id)
+
+        issue_status = _canonical_status(issue)
+        if reopen and issue_status is LifecycleStatus.CLOSED:
+            return _empty_external_ticket_reconcile_result(issue_id)
+        if not reopen and issue_status is not LifecycleStatus.CLOSED:
+            return _empty_external_ticket_reconcile_result(issue_id)
+
+        existing_tickets = _external_ticket_links(issue)
+        if not existing_tickets:
+            return _empty_external_ticket_reconcile_result(issue_id)
+
+        reconcile_result = external_ticket_reconcile.reconcile_exported_github_tickets(
+            issue_id=issue_id,
+            tickets=tuple(ticket.to_external_ref() for ticket in existing_tickets),
+            reopen=reopen,
+        )
+
+        if reconcile_result.updated:
+            await self.update_external_tickets(
+                UpdateExternalTicketsRequest(
+                    issue_id=issue_id,
+                    tickets=tuple(
+                        ExternalTicketLink.from_external_ref(ticket)
+                        for ticket in reconcile_result.merged_tickets
+                    ),
+                )
+            )
+
+        unique_notes = reconcile_result.needs_decision_notes
+        if unique_notes:
+            prefix = _EXTERNAL_REOPEN_NOTE_PREFIX if reopen else _EXTERNAL_CLOSE_NOTE_PREFIX
+            await self.append_notes(
+                AppendNotesRequest(
+                    issue_id=issue_id,
+                    notes=tuple(f"{prefix} {note}" for note in unique_notes),
+                )
+            )
+
+        return ExternalTicketReconcileResult(
+            issue_id=issue_id,
+            stale_exported_github_tickets=reconcile_result.stale_exported_github_tickets,
+            reconciled_tickets=reconcile_result.reconciled_tickets,
+            updated=reconcile_result.updated,
+            needs_decision_notes=unique_notes,
+        )
 
     async def append_notes(
         self,

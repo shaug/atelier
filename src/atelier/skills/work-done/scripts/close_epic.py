@@ -22,7 +22,21 @@ _BOOTSTRAP_REPO_ROOT = bootstrap_projected_atelier_script(
     require_runtime_health=__name__ == "__main__",
 )
 
-from atelier import beads  # noqa: E402
+
+def _resolve_repo_root() -> Path:
+    """Return the repo root selected by projected bootstrap, if available."""
+    return _BOOTSTRAP_REPO_ROOT if _BOOTSTRAP_REPO_ROOT is not None else Path.cwd()
+
+
+def _resolve_beads_root(beads_dir: str) -> Path:
+    """Resolve the Beads store root for this invocation."""
+    beads_dir_arg = beads_dir.strip()
+    if beads_dir_arg:
+        return Path(beads_dir_arg).expanduser().resolve()
+    env_beads_dir = os.environ.get("BEADS_DIR", "").strip()
+    if env_beads_dir:
+        return Path(env_beads_dir).expanduser().resolve()
+    return (_resolve_repo_root() / ".beads").resolve()
 
 
 def close_epic(
@@ -30,7 +44,7 @@ def close_epic(
     epic_id: str,
     agent_bead_id: str,
     beads_root: Path,
-    cwd: Path,
+    repo_root: Path,
     direct_close: bool,
 ) -> bool:
     """Close an epic and clear the worker hook.
@@ -39,27 +53,40 @@ def close_epic(
         epic_id: Epic bead id to close.
         agent_bead_id: Agent bead id that currently owns the hook.
         beads_root: Beads data directory.
-        cwd: Working directory for `bd` commands.
+        repo_root: Repository root for store and `bd` execution.
         direct_close: When true, skip completion checks and close immediately.
 
     Returns:
         `True` when the epic was closed during this call.
     """
+    runtime = _load_epic_close_runtime_for_execution()
     if direct_close:
-        beads.close_issue(epic_id, beads_root=beads_root, cwd=cwd)
-        beads.clear_agent_hook(
+        runtime.direct_close_epic(
+            epic_id,
             agent_bead_id,
             beads_root=beads_root,
-            cwd=cwd,
-            expected_hook=epic_id,
+            repo_root=repo_root,
         )
         return True
-    return beads.close_epic_if_complete(
+    return runtime.close_epic_if_complete(
         epic_id,
         agent_bead_id,
         beads_root=beads_root,
-        cwd=cwd,
+        repo_root=repo_root,
     )
+
+
+def _load_epic_close_runtime_for_execution():
+    """Load the worker close runtime only for actual close execution.
+
+    The projected script's `--help` path intentionally stops after bootstrap
+    and argument parsing. Importing `atelier.worker.epic_close` eagerly would
+    force that heavier runtime onto help-only invocations and break the split
+    runtime bootstrap contract that the projected tests exercise.
+    """
+    from atelier.worker import epic_close
+
+    return epic_close
 
 
 def main() -> None:
@@ -78,21 +105,18 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    beads_dir = str(args.beads_dir).strip() or None
-    if beads_dir:
-        beads_root = Path(beads_dir).expanduser().resolve()
-    else:
-        beads_root = Path(os.environ.get("BEADS_DIR", str(Path.cwd() / ".beads"))).expanduser()
-        beads_root = beads_root.resolve()
+    beads_root = _resolve_beads_root(str(args.beads_dir))
     if not beads_root.exists():
         print(f"error: beads dir not found: {beads_root}", file=sys.stderr)
         raise SystemExit(1)
+
+    repo_root = _resolve_repo_root()
 
     closed = close_epic(
         epic_id=args.epic_id.strip(),
         agent_bead_id=args.agent_bead_id.strip(),
         beads_root=beads_root,
-        cwd=Path.cwd(),
+        repo_root=repo_root,
         direct_close=bool(args.direct_close),
     )
     if not closed:

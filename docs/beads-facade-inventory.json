@@ -6,67 +6,6 @@
   ],
   "concern_domains": [
     {
-      "name": "mutation-and-coordination-shims",
-      "follow_on_changeset": "at-rhxbc.3",
-      "summary": "Closing, repair, GC, and worktree coordination flows that still patch or invoke the facade directly.",
-      "call_sites": [
-        {
-          "path": "src/atelier/skills/tickets/scripts/repair_external_ticket_metadata.py",
-          "imports": [
-            {
-              "alias": null,
-              "kind": "from",
-              "module": "atelier",
-              "name": "beads"
-            }
-          ],
-          "dotted_refs": 0
-        },
-        {
-          "path": "src/atelier/skills/work-done/scripts/close_epic.py",
-          "imports": [
-            {
-              "alias": null,
-              "kind": "from",
-              "module": "atelier",
-              "name": "beads"
-            }
-          ],
-          "dotted_refs": 0
-        },
-        {
-          "path": "tests/atelier/commands/test_gc.py",
-          "imports": [],
-          "dotted_refs": 6
-        },
-        {
-          "path": "tests/atelier/gc/test_agents.py",
-          "imports": [],
-          "dotted_refs": 7
-        },
-        {
-          "path": "tests/atelier/gc/test_hooks.py",
-          "imports": [],
-          "dotted_refs": 13
-        },
-        {
-          "path": "tests/atelier/gc/test_labels.py",
-          "imports": [],
-          "dotted_refs": 13
-        },
-        {
-          "path": "tests/atelier/gc/test_worktrees.py",
-          "imports": [],
-          "dotted_refs": 25
-        },
-        {
-          "path": "tests/atelier/worker/test_integration.py",
-          "imports": [],
-          "dotted_refs": 2
-        }
-      ]
-    },
-    {
       "name": "retained-facade-contract-tests",
       "follow_on_changeset": "at-rhxbc.4",
       "summary": "Facade-specific harnesses and contract tests that can only disappear once the remaining shim surface is retired.",

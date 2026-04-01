@@ -564,8 +564,10 @@ def run_finalize_pipeline(
             if refreshed_result is not None:
                 return refreshed_result
             stale_signal_recovered = not active_pr_lifecycle
-        if beads.close_transition_has_active_pr_lifecycle(
+        if worker_store.close_transition_has_active_pr_lifecycle(
             issue,
+            beads_root=beads_root,
+            repo_root=repo_root,
             active_pr_lifecycle=active_pr_lifecycle,
         ):
             atelier_log.warning(

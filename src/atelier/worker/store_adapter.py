@@ -12,7 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import cast
 
-from .. import beads, changeset_fields, lifecycle, messages
+from .. import beads, changeset_fields, changesets, lifecycle, messages
 from ..io import die
 from ..lib.beads import (
     CreateIssueRequest,
@@ -28,9 +28,11 @@ from ..store import (
     AppendNotesRequest,
     AtelierStore,
     ChangesetQuery,
+    ChangesetRecord,
     ClaimMessageRequest,
     ClearAgentBeadHookRequest,
     CreateMessageRequest,
+    ExternalTicketReconcileResult,
     LifecycleStatus,
     LifecycleTransitionRequest,
     MarkMessageReadRequest,
@@ -59,6 +61,32 @@ _AGENT_LABEL_SCAN_LIMIT = 10_000
 class _StoreBundle:
     store: AtelierStore
     sync_client: SyncBeadsProtocol
+
+
+@dataclass(frozen=True)
+class EpicCloseCandidate:
+    """Typed close-readiness view for one descendant changeset candidate."""
+
+    id: str
+    lifecycle: LifecycleStatus
+    review: StoreReviewMetadata
+
+
+@dataclass(frozen=True)
+class EpicChangesetSummary:
+    """Worker-owned close-readiness summary derived from typed store records."""
+
+    total: int
+    ready: int
+    merged: int
+    abandoned: int
+    remaining: int
+
+    @property
+    def ready_to_close(self) -> bool:
+        """Return whether every tracked changeset is terminal."""
+
+        return self.total > 0 and self.remaining == 0
 
 
 def _build_async_beads_client(*, beads_root: Path, repo_root: Path) -> SubprocessBeadsClient:
@@ -124,6 +152,64 @@ def show_issue(
     """Return one raw issue payload for adapter-local compatibility callers."""
 
     return _show_issue(issue_id=issue_id, beads_root=beads_root, repo_root=repo_root)
+
+
+def show_issue_lifecycle(
+    issue_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> LifecycleStatus | None:
+    """Return the canonical lifecycle state for one issue."""
+
+    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    try:
+        issue = bundle.sync_client.show(ShowIssueRequest(issue_id=issue_id))
+    except KeyError:
+        return None
+    return _issue_lifecycle_status(issue)
+
+
+def close_transition_has_active_pr_lifecycle(
+    candidate: dict[str, object] | EpicCloseCandidate,
+    *,
+    beads_root: Path | None = None,
+    repo_root: Path | None = None,
+    active_pr_lifecycle: bool | None = None,
+) -> bool:
+    """Return whether worker close/reopen flow must defer to active PR lifecycle."""
+
+    if active_pr_lifecycle is not None:
+        return bool(active_pr_lifecycle)
+
+    if isinstance(candidate, EpicCloseCandidate):
+        lifecycle_status = candidate.lifecycle.value
+        review_state = (
+            candidate.review.pr_state.value if candidate.review.pr_state is not None else None
+        )
+    else:
+        hydrated = candidate
+        description = hydrated.get("description")
+        if not isinstance(description, str) and beads_root is not None and repo_root is not None:
+            issue_id = _normalize_text(hydrated.get("id"))
+            if issue_id is not None:
+                detailed = _show_issue(
+                    issue_id=issue_id,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                )
+                if detailed is not None:
+                    hydrated = detailed
+                    description = detailed.get("description")
+        lifecycle_status = _normalize_status(hydrated.get("status"))
+        review = changesets.parse_review_metadata(
+            description if isinstance(description, str) else ""
+        )
+        review_state = lifecycle.normalize_review_state(review.pr_state)
+
+    if review_state == ReviewState.PUSHED.value:
+        return lifecycle_status == LifecycleStatus.CLOSED.value
+    return lifecycle.is_active_pr_lifecycle_state(review_state)
 
 
 def _store_ids_to_payloads(
@@ -194,6 +280,25 @@ def list_descendant_changesets(
     )
 
 
+def has_work_children(
+    parent_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+    include_closed: bool = False,
+) -> bool:
+    """Return whether a work item has any direct child work items."""
+
+    return bool(
+        list_work_children(
+            parent_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            include_closed=include_closed,
+        )
+    )
+
+
 def list_work_children(
     parent_id: str,
     *,
@@ -218,25 +323,41 @@ def list_work_children(
     ]
 
 
-def mark_issue_in_progress(
-    issue_id: str,
+def _close_candidate_from_changeset(record: ChangesetRecord) -> EpicCloseCandidate:
+    return EpicCloseCandidate(
+        id=record.id,
+        lifecycle=record.lifecycle,
+        review=record.review,
+    )
+
+
+def list_epic_close_candidates(
+    epic_id: str,
     *,
     beads_root: Path,
     repo_root: Path,
-) -> beads.ExternalTicketReconcileResult:
-    """Restore one issue to in-progress using the store lifecycle contract."""
+    include_closed: bool = False,
+) -> list[EpicCloseCandidate]:
+    """List typed descendant changeset candidates for epic-close evaluation."""
 
-    transition_lifecycle(
-        issue_id,
-        target_status=LifecycleStatus.IN_PROGRESS.value,
+    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    records = asyncio.run(
+        bundle.store.list_changesets(ChangesetQuery(epic_id=epic_id, include_closed=include_closed))
+    )
+    if records:
+        return [_close_candidate_from_changeset(record) for record in records]
+    if has_work_children(
+        epic_id,
         beads_root=beads_root,
         repo_root=repo_root,
-    )
-    return beads.reconcile_reopened_issue_exported_github_tickets(
-        issue_id,
-        beads_root=beads_root,
-        cwd=repo_root,
-    )
+        include_closed=include_closed,
+    ):
+        return []
+    try:
+        record = asyncio.run(bundle.store.get_changeset(epic_id))
+    except LookupError:
+        return []
+    return [_close_candidate_from_changeset(record)]
 
 
 def ready_changesets_global(
@@ -465,6 +586,13 @@ def _normalize_status(value: object) -> str | None:
     if normalized is not None:
         return normalized
     return _normalize_text(value)
+
+
+def _issue_lifecycle_status(issue: IssueRecord) -> LifecycleStatus:
+    normalized = _normalize_status(issue.status)
+    if normalized is None:
+        raise ValueError(f"issue {issue.id} is missing a canonical lifecycle status")
+    return LifecycleStatus(normalized)
 
 
 def _append_issue_notes(description: str | None, *, notes: tuple[str, ...]) -> str:
@@ -738,6 +866,30 @@ def update_changeset_integrated_sha(
         beads_root=beads_root,
         repo_root=repo_root,
     )
+
+
+def reconcile_reopened_external_tickets(
+    issue_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> ExternalTicketReconcileResult:
+    """Reconcile reopened exported tickets through the AtelierStore seam."""
+
+    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    return asyncio.run(bundle.store.reconcile_reopened_external_tickets(issue_id))
+
+
+def reconcile_closed_external_tickets(
+    issue_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> ExternalTicketReconcileResult:
+    """Reconcile closed exported tickets through the AtelierStore seam."""
+
+    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    return asyncio.run(bundle.store.reconcile_closed_external_tickets(issue_id))
 
 
 def update_issue_labels(
@@ -1187,27 +1339,38 @@ def epic_changeset_summary(
     *,
     beads_root: Path,
     repo_root: Path,
-) -> beads.ChangesetSummary:
+) -> EpicChangesetSummary:
     """Summarize one epic's changesets using store-backed changeset discovery."""
 
-    changesets = list_descendant_changesets(
+    bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    ready_count = len(
+        asyncio.run(bundle.store.list_ready_changesets(ReadyChangesetQuery(epic_id=epic_id)))
+    )
+    changesets = list_epic_close_candidates(
         epic_id,
         beads_root=beads_root,
         repo_root=repo_root,
         include_closed=True,
     )
-    if not changesets:
-        work_children = list_work_children(
-            epic_id,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            include_closed=True,
-        )
-        if not work_children:
-            issue = show_issue(epic_id, beads_root=beads_root, repo_root=repo_root)
-            if issue is not None:
-                changesets = [issue]
-    return beads.summarize_changesets(changesets)
+    merged = 0
+    abandoned = 0
+    remaining = 0
+    for changeset in changesets:
+        if changeset.lifecycle is not LifecycleStatus.CLOSED:
+            remaining += 1
+            continue
+        review_state = changeset.review.pr_state
+        if review_state is ReviewState.MERGED:
+            merged += 1
+        elif review_state is ReviewState.CLOSED:
+            abandoned += 1
+    return EpicChangesetSummary(
+        total=len(changesets),
+        ready=ready_count,
+        merged=merged,
+        abandoned=abandoned,
+        remaining=remaining,
+    )
 
 
 class WorkerStoreBeadsAdapter:
@@ -1378,6 +1541,32 @@ class WorkerStoreBeadsAdapter:
             allow_override=allow_override,
         )
 
+    def reconcile_reopened_external_tickets(
+        self,
+        issue_id: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> ExternalTicketReconcileResult:
+        return reconcile_reopened_external_tickets(
+            issue_id,
+            beads_root=beads_root,
+            repo_root=cwd,
+        )
+
+    def reconcile_closed_external_tickets(
+        self,
+        issue_id: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> ExternalTicketReconcileResult:
+        return reconcile_closed_external_tickets(
+            issue_id,
+            beads_root=beads_root,
+            repo_root=cwd,
+        )
+
     def set_agent_hook(
         self,
         agent_bead_id: str,
@@ -1397,6 +1586,7 @@ __all__ = [
     "claim_queue_message",
     "clear_agent_hook",
     "clear_bundle_cache",
+    "close_transition_has_active_pr_lifecycle",
     "create_message",
     "ensure_agent_bead",
     "epic_changeset_summary",
@@ -1407,9 +1597,10 @@ __all__ = [
     "list_inbox_messages",
     "list_queue_messages",
     "list_work_children",
-    "mark_issue_in_progress",
     "mark_message_read",
     "ready_changesets_global",
+    "reconcile_closed_external_tickets",
+    "reconcile_reopened_external_tickets",
     "release_epic_assignment",
     "resolve_hooked_epic",
     "set_agent_hook",

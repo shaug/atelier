@@ -8,8 +8,8 @@ from atelier.lib.beads import IssueRecord
 
 
 def test_collect_hooks_returns_empty_when_no_agents() -> None:
-    with patch("atelier.beads.run_bd_json", return_value=[]):
-        with patch("atelier.beads.list_epics", return_value=[]):
+    with patch("atelier.gc.hooks.beads.run_bd_json", return_value=[]):
+        with patch("atelier.gc.hooks.beads.list_epics", return_value=[]):
             actions = gc_hooks.collect_hooks(
                 beads_root=Path("/beads"),
                 repo_root=Path("/repo"),
@@ -41,9 +41,9 @@ def test_collect_hooks_releases_stale_hook_when_heartbeat_missing() -> None:
     calls: list[tuple[str, str]] = []
 
     with (
-        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
-        patch("atelier.beads.list_epics", side_effect=fake_list_epics),
-        patch("atelier.beads.get_agent_hook", return_value="epic-1"),
+        patch("atelier.gc.hooks.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.gc.hooks.beads.list_epics", side_effect=fake_list_epics),
+        patch("atelier.gc.hooks.beads.get_agent_hook", return_value="epic-1"),
         patch(
             "atelier.gc.hooks.try_show_issue",
             return_value=IssueRecord.model_validate(epic),
@@ -53,7 +53,7 @@ def test_collect_hooks_releases_stale_hook_when_heartbeat_missing() -> None:
             side_effect=lambda e, *, beads_root, cwd: calls.append(("release", str(e["id"]))),
         ),
         patch(
-            "atelier.beads.clear_agent_hook",
+            "atelier.gc.hooks.worker_store.clear_agent_hook",
             side_effect=lambda issue_id, **_kwargs: calls.append(("clear", issue_id)),
         ),
     ):
@@ -77,12 +77,15 @@ def test_release_epic_clears_assignee_and_hooked_label() -> None:
         "status": "in_progress",
         "assignee": "agent-1",
     }
-    with patch("atelier.beads.release_epic_assignment", return_value=True) as release_assignment:
+    with patch(
+        "atelier.gc.hooks.worker_store.release_epic_assignment",
+        return_value=True,
+    ) as release_assignment:
         gc_hooks.release_epic(epic, beads_root=Path("/beads"), cwd=Path("/repo"))
     release_assignment.assert_called_once_with(
         "epic-1",
         beads_root=Path("/beads"),
-        cwd=Path("/repo"),
+        repo_root=Path("/repo"),
         expected_assignee="agent-1",
         expected_hooked=True,
     )
@@ -112,10 +115,10 @@ def test_collect_hooks_scans_all_agent_pages_before_releasing_stale_hooks() -> N
         return []
 
     with (
-        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json) as run_bd_json,
-        patch("atelier.beads.list_epics", return_value=[]),
+        patch("atelier.gc.hooks.beads.run_bd_json", side_effect=fake_run_bd_json) as run_bd_json,
+        patch("atelier.gc.hooks.beads.list_epics", return_value=[]),
         patch(
-            "atelier.beads.get_agent_hook",
+            "atelier.gc.hooks.beads.get_agent_hook",
             side_effect=lambda issue_id, *, beads_root, cwd: str(issue_id).replace("agent", "epic"),
         ),
         patch(
@@ -154,9 +157,9 @@ def test_collect_hooks_skips_placeholder_hook_without_issue_lookup() -> None:
         return []
 
     with (
-        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
-        patch("atelier.beads.list_epics", return_value=[]),
-        patch("atelier.beads.get_agent_hook", return_value="null"),
+        patch("atelier.gc.hooks.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.gc.hooks.beads.list_epics", return_value=[]),
+        patch("atelier.gc.hooks.beads.get_agent_hook", return_value="null"),
         patch(
             "atelier.gc.hooks.try_show_issue",
             side_effect=AssertionError("placeholder hook should not trigger issue lookup"),

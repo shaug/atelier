@@ -65,10 +65,10 @@ def _close_guard_allows(
         candidate = _load_changeset_issue(changeset_id, beads_root=beads_root, repo_root=repo_root)
     if candidate is None:
         return True
-    if not beads.close_transition_has_active_pr_lifecycle(
+    if not worker_store.close_transition_has_active_pr_lifecycle(
         candidate,
         beads_root=beads_root,
-        cwd=repo_root,
+        repo_root=repo_root,
         active_pr_lifecycle=active_pr_lifecycle,
     ):
         return True
@@ -83,10 +83,10 @@ def mark_changeset_in_progress(changeset_id: str, *, beads_root: Path, repo_root
         beads_root=beads_root,
         repo_root=repo_root,
     )
-    beads.reconcile_reopened_issue_exported_github_tickets(
+    worker_store.reconcile_reopened_external_tickets(
         changeset_id,
         beads_root=beads_root,
-        cwd=repo_root,
+        repo_root=repo_root,
     )
 
 
@@ -99,10 +99,10 @@ def mark_changeset_closed(changeset_id: str, *, beads_root: Path, repo_root: Pat
         beads_root=beads_root,
         repo_root=repo_root,
     )
-    beads.reconcile_closed_issue_exported_github_tickets(
+    worker_store.reconcile_closed_external_tickets(
         changeset_id,
         beads_root=beads_root,
-        cwd=repo_root,
+        repo_root=repo_root,
     )
 
 
@@ -122,10 +122,10 @@ def mark_changeset_merged(changeset_id: str, *, beads_root: Path, repo_root: Pat
         beads_root=beads_root,
         repo_root=repo_root,
     )
-    beads.reconcile_closed_issue_exported_github_tickets(
+    worker_store.reconcile_closed_external_tickets(
         changeset_id,
         beads_root=beads_root,
-        cwd=repo_root,
+        repo_root=repo_root,
     )
 
 
@@ -145,10 +145,10 @@ def mark_changeset_abandoned(changeset_id: str, *, beads_root: Path, repo_root: 
         beads_root=beads_root,
         repo_root=repo_root,
     )
-    beads.reconcile_closed_issue_exported_github_tickets(
+    worker_store.reconcile_closed_external_tickets(
         changeset_id,
         beads_root=beads_root,
-        cwd=repo_root,
+        repo_root=repo_root,
     )
 
 
