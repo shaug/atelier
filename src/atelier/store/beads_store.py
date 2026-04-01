@@ -1613,19 +1613,23 @@ class AtelierStore:
             history = await self._beads.description_history(issue_id)
         except Exception:
             return None
-        for previous_description, new_description in reversed(history[evidence.history_length :]):
-            if not _same_description_value(new_description, evidence.requested_description):
-                continue
-            if not _same_description_value(previous_description, evidence.previous_description):
-                continue
-            candidate = refreshed.model_copy(update={"description": evidence.requested_description})
-            if not verify(candidate):
-                continue
-            atelier_log.info(
-                f"issue={issue_id} converged from description history after empty update stdout"
-            )
-            return candidate
-        return None
+        post_snapshot_history = history[evidence.history_length :]
+        if not post_snapshot_history:
+            return None
+        latest_previous, latest_description = post_snapshot_history[-1]
+        if not _same_description_value(refreshed.description, evidence.previous_description):
+            return None
+        if not _same_description_value(latest_description, evidence.requested_description):
+            return None
+        if not _same_description_value(latest_previous, evidence.previous_description):
+            return None
+        candidate = refreshed.model_copy(update={"description": evidence.requested_description})
+        if not verify(candidate):
+            return None
+        atelier_log.info(
+            f"issue={issue_id} converged from description history after empty update stdout"
+        )
+        return candidate
 
     async def _fail_closed_created_issue(
         self,

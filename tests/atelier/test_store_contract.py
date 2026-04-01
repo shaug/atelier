@@ -513,6 +513,60 @@ def test_update_review_fails_closed_when_history_evidence_does_not_match_request
         )
 
 
+def test_update_review_fails_closed_when_later_history_entry_diverges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async_client, issue_store = build_in_memory_beads_client(issues=_parity_seed_issues())
+    store = build_atelier_store(beads=async_client)
+    original_show = store._show_issue
+    stale_reads_enabled = False
+    stale_issue = _RUN(original_show("at-change"))
+
+    async def stale_show(issue_id: str):
+        if issue_id == "at-change" and stale_reads_enabled:
+            return stale_issue
+        return await original_show(issue_id)
+
+    async def update_then_emit_empty_stdout(request):
+        nonlocal stale_reads_enabled
+        issue_store.update(
+            request.issue_id,
+            title=request.title,
+            description=request.description,
+            design=request.design,
+            acceptance_criteria=request.acceptance_criteria,
+            status=request.status,
+            assignee=request.assignee,
+            priority=request.priority,
+            estimate=request.estimate,
+            labels=request.labels if request.labels else None,
+        )
+        issue_store.update(
+            request.issue_id,
+            description=(request.description or "").replace("reviewer-b", "reviewer-c"),
+        )
+        stale_reads_enabled = True
+        raise BeadsParseError("expected JSON output from update, received empty stdout")
+
+    monkeypatch.setattr(store, "_show_issue", stale_show)
+    monkeypatch.setattr(async_client, "update", update_then_emit_empty_stdout)
+
+    with pytest.raises(RuntimeError, match="review metadata update could not be verified"):
+        _RUN(
+            store.update_review(
+                UpdateReviewRequest(
+                    changeset_id="at-change",
+                    review=ReviewMetadata(
+                        pr_state=ReviewState.IN_REVIEW,
+                        review_owner="reviewer-b",
+                        integrated_sha="abc1234",
+                    ),
+                    preserve_existing=True,
+                )
+            )
+        )
+
+
 def test_append_notes_retries_after_concurrent_description_conflict(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
