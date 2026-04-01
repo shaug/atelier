@@ -374,6 +374,67 @@ def test_update_review_verifies_after_empty_update_stdout(
     assert "changeset.integrated_sha: abc1234" in refreshed.description
 
 
+def test_update_review_verifies_after_empty_stdout_with_description_history_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async_client, issue_store = build_in_memory_beads_client(issues=_parity_seed_issues())
+    attempts = 0
+    store = build_atelier_store(beads=async_client)
+    original_show = store._show_issue
+    stale_reads_enabled = False
+    stale_issue = _RUN(original_show("at-change"))
+
+    async def stale_show(issue_id: str):
+        if issue_id == "at-change" and stale_reads_enabled:
+            return stale_issue
+        return await original_show(issue_id)
+
+    async def update_then_emit_empty_stdout(request):
+        nonlocal attempts, stale_reads_enabled
+        attempts += 1
+        issue_store.update(
+            request.issue_id,
+            title=request.title,
+            description=request.description,
+            design=request.design,
+            acceptance_criteria=request.acceptance_criteria,
+            status=request.status,
+            assignee=request.assignee,
+            priority=request.priority,
+            estimate=request.estimate,
+            labels=request.labels if request.labels else None,
+        )
+        stale_reads_enabled = True
+        raise BeadsParseError("expected JSON output from update, received empty stdout")
+
+    monkeypatch.setattr(store, "_show_issue", stale_show)
+    monkeypatch.setattr(async_client, "update", update_then_emit_empty_stdout)
+
+    review = _RUN(
+        store.update_review(
+            UpdateReviewRequest(
+                changeset_id="at-change",
+                review=ReviewMetadata(
+                    pr_state=ReviewState.IN_REVIEW,
+                    review_owner="reviewer-b",
+                    integrated_sha="abc1234",
+                ),
+                preserve_existing=True,
+            )
+        )
+    )
+
+    refreshed = _RUN(original_show("at-change"))
+    assert attempts == 1
+    assert review.review.pr_state is ReviewState.IN_REVIEW
+    assert review.review.review_owner == "reviewer-b"
+    assert review.review.integrated_sha == "abc1234"
+    assert refreshed.description is not None
+    assert "pr_state: in-review" in refreshed.description
+    assert "review_owner: reviewer-b" in refreshed.description
+    assert "changeset.integrated_sha: abc1234" in refreshed.description
+
+
 def test_update_review_fails_closed_when_empty_update_stdout_lacks_convergence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -385,6 +446,110 @@ def test_update_review_fails_closed_when_empty_update_stdout_lacks_convergence(
 
     monkeypatch.setattr(async_client, "update", fail_with_empty_stdout)
     store = build_atelier_store(beads=async_client)
+
+    with pytest.raises(RuntimeError, match="review metadata update could not be verified"):
+        _RUN(
+            store.update_review(
+                UpdateReviewRequest(
+                    changeset_id="at-change",
+                    review=ReviewMetadata(
+                        pr_state=ReviewState.IN_REVIEW,
+                        review_owner="reviewer-b",
+                        integrated_sha="abc1234",
+                    ),
+                    preserve_existing=True,
+                )
+            )
+        )
+
+
+def test_update_review_fails_closed_when_history_evidence_does_not_match_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async_client, issue_store = build_in_memory_beads_client(issues=_parity_seed_issues())
+    store = build_atelier_store(beads=async_client)
+    original_show = store._show_issue
+    stale_reads_enabled = False
+    stale_issue = _RUN(original_show("at-change"))
+
+    async def stale_show(issue_id: str):
+        if issue_id == "at-change" and stale_reads_enabled:
+            return stale_issue
+        return await original_show(issue_id)
+
+    async def update_then_emit_empty_stdout(request):
+        nonlocal stale_reads_enabled
+        issue_store.update(
+            request.issue_id,
+            title=request.title,
+            description=(request.description or "").replace("reviewer-b", "reviewer-c"),
+            design=request.design,
+            acceptance_criteria=request.acceptance_criteria,
+            status=request.status,
+            assignee=request.assignee,
+            priority=request.priority,
+            estimate=request.estimate,
+            labels=request.labels if request.labels else None,
+        )
+        stale_reads_enabled = True
+        raise BeadsParseError("expected JSON output from update, received empty stdout")
+
+    monkeypatch.setattr(store, "_show_issue", stale_show)
+    monkeypatch.setattr(async_client, "update", update_then_emit_empty_stdout)
+
+    with pytest.raises(RuntimeError, match="review metadata update could not be verified"):
+        _RUN(
+            store.update_review(
+                UpdateReviewRequest(
+                    changeset_id="at-change",
+                    review=ReviewMetadata(
+                        pr_state=ReviewState.IN_REVIEW,
+                        review_owner="reviewer-b",
+                        integrated_sha="abc1234",
+                    ),
+                    preserve_existing=True,
+                )
+            )
+        )
+
+
+def test_update_review_fails_closed_when_later_history_entry_diverges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async_client, issue_store = build_in_memory_beads_client(issues=_parity_seed_issues())
+    store = build_atelier_store(beads=async_client)
+    original_show = store._show_issue
+    stale_reads_enabled = False
+    stale_issue = _RUN(original_show("at-change"))
+
+    async def stale_show(issue_id: str):
+        if issue_id == "at-change" and stale_reads_enabled:
+            return stale_issue
+        return await original_show(issue_id)
+
+    async def update_then_emit_empty_stdout(request):
+        nonlocal stale_reads_enabled
+        issue_store.update(
+            request.issue_id,
+            title=request.title,
+            description=request.description,
+            design=request.design,
+            acceptance_criteria=request.acceptance_criteria,
+            status=request.status,
+            assignee=request.assignee,
+            priority=request.priority,
+            estimate=request.estimate,
+            labels=request.labels if request.labels else None,
+        )
+        issue_store.update(
+            request.issue_id,
+            description=(request.description or "").replace("reviewer-b", "reviewer-c"),
+        )
+        stale_reads_enabled = True
+        raise BeadsParseError("expected JSON output from update, received empty stdout")
+
+    monkeypatch.setattr(store, "_show_issue", stale_show)
+    monkeypatch.setattr(async_client, "update", update_then_emit_empty_stdout)
 
     with pytest.raises(RuntimeError, match="review metadata update could not be verified"):
         _RUN(
