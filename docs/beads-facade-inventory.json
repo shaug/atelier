@@ -6,6 +6,25 @@
   ],
   "concern_domains": [
     {
+      "name": "mutation-and-coordination-shims",
+      "follow_on_changeset": "at-rhxbc.3",
+      "summary": "The subprocess Beads client is the remaining runtime bridge to the legacy facade repair helpers.",
+      "call_sites": [
+        {
+          "path": "src/atelier/lib/beads/process.py",
+          "imports": [
+            {
+              "alias": "legacy_beads",
+              "kind": "from",
+              "module": "atelier",
+              "name": "beads"
+            }
+          ],
+          "dotted_refs": 0
+        }
+      ]
+    },
+    {
       "name": "retained-facade-contract-tests",
       "follow_on_changeset": "at-rhxbc.4",
       "summary": "Facade-specific harnesses and contract tests that can only disappear once the remaining shim surface is retired.",

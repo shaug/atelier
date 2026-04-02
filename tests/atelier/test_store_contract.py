@@ -5,6 +5,7 @@ import json
 import sqlite3
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from typing import get_args, get_origin, get_type_hints
 
 import pytest
@@ -674,6 +675,61 @@ def test_append_notes_verifies_after_empty_update_stdout(
     assert appended.id == "at-change"
     assert refreshed.description is not None
     assert refreshed.description.rstrip("\n").endswith(worker_note)
+
+
+def test_append_notes_verifies_multiline_notes_after_empty_update_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async_client, issue_store = build_in_memory_beads_client(issues=_parity_seed_issues())
+    attempts = 0
+    north_star_note = (
+        "north_star_review.2026-04-02T07:12:22-0700:\n"
+        "  authoritative: true\n"
+        "  unmet_acceptance_criteria: none\n"
+        "  completion_checklist:\n"
+        "    - Verification completed on commit 25536f4: just format; just lint; just test."
+    )
+    worker_note = (
+        "worker_update_2026-04-02T07:12:22-0700: re-verified existing head "
+        "25536f41caf1f68a8f8d169d06773dbb877cdb41."
+    )
+
+    async def update_then_emit_empty_stdout(request):
+        nonlocal attempts
+        attempts += 1
+        issue_store.update(
+            request.issue_id,
+            title=request.title,
+            description=request.description,
+            design=request.design,
+            acceptance_criteria=request.acceptance_criteria,
+            status=request.status,
+            assignee=request.assignee,
+            priority=request.priority,
+            estimate=request.estimate,
+            labels=request.labels if request.labels else None,
+        )
+        raise BeadsParseError("expected JSON output from update, received empty stdout")
+
+    monkeypatch.setattr(async_client, "update", update_then_emit_empty_stdout)
+    store = build_atelier_store(beads=async_client)
+
+    appended = _RUN(
+        store.append_notes(
+            AppendNotesRequest(
+                issue_id="at-change",
+                notes=(north_star_note, worker_note),
+            )
+        )
+    )
+
+    refreshed = _RUN(store._show_issue("at-change"))
+    assert attempts == 1
+    assert appended.id == "at-change"
+    assert refreshed.description is not None
+    assert refreshed.description.count(north_star_note) == 1
+    assert refreshed.description.count(worker_note) == 1
+    assert refreshed.description.rstrip("\n").endswith(f"{north_star_note}\n{worker_note}")
 
 
 def test_message_record_enforces_store_message_contract() -> None:
@@ -2061,6 +2117,104 @@ def test_beads_store_fails_closed() -> None:
         )
     with pytest.raises(UnsupportedOperationError, match="dep-add"):
         _RUN(store.add_dependency(DependencyMutation(issue_id="at-change", depends_on_id="at-dep")))
+
+
+def test_update_review_repairs_event_history_overflow_and_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _ = build_in_memory_beads_client(
+        issues=(
+            BUILDER.issue("at-epic", issue_type="epic", labels=("at:epic",)),
+            BUILDER.issue(
+                "at-change",
+                parent="at-epic",
+                status="open",
+                description="pr_state: draft-pr\n",
+            ),
+        )
+    )
+    store = build_atelier_store(beads=client)
+    original_update = client.update
+    attempts = 0
+    repairs: list[str] = []
+
+    async def update_with_overflow(request):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise BeadsCommandError(
+                "failed to record event: Error 1105 (HY000): string is too large "
+                "for column 'old_value'"
+            )
+        return await original_update(request)
+
+    monkeypatch.setattr(client, "update", update_with_overflow)
+    monkeypatch.setattr(
+        client, "is_event_history_overflow_detail", lambda detail: "old_value" in detail
+    )
+
+    async def repair_event_history_overflow(issue_id: str):
+        repairs.append(issue_id)
+        return SimpleNamespace(issue_id=issue_id, verified_mutable=True)
+
+    monkeypatch.setattr(client, "repair_event_history_overflow", repair_event_history_overflow)
+
+    review = _RUN(
+        store.update_review(
+            UpdateReviewRequest(
+                changeset_id="at-change",
+                review=ReviewMetadata(pr_state=ReviewState.IN_REVIEW),
+                preserve_existing=True,
+            )
+        )
+    )
+
+    assert review.review.pr_state is ReviewState.IN_REVIEW
+    assert attempts == 2
+    assert repairs == ["at-change"]
+
+
+def test_update_review_fails_closed_when_overflow_repair_lacks_convergence_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _ = build_in_memory_beads_client(
+        issues=(
+            BUILDER.issue("at-epic", issue_type="epic", labels=("at:epic",)),
+            BUILDER.issue(
+                "at-change",
+                parent="at-epic",
+                status="open",
+                description="pr_state: draft-pr\n",
+            ),
+        )
+    )
+    store = build_atelier_store(beads=client)
+
+    async def update_with_overflow(_request):
+        raise BeadsCommandError(
+            "failed to record event: Error 1105 (HY000): string is too large for column 'old_value'"
+        )
+
+    monkeypatch.setattr(client, "update", update_with_overflow)
+    monkeypatch.setattr(
+        client, "is_event_history_overflow_detail", lambda detail: "old_value" in detail
+    )
+
+    async def repair_event_history_overflow(_issue_id: str):
+        return SimpleNamespace(issue_id="wrong-issue", verified_mutable=False)
+
+    monkeypatch.setattr(client, "repair_event_history_overflow", repair_event_history_overflow)
+
+    with pytest.raises(RuntimeError, match="repair evidence did not prove convergence"):
+        _RUN(
+            store.update_review(
+                UpdateReviewRequest(
+                    changeset_id="at-change",
+                    review=ReviewMetadata(pr_state=ReviewState.IN_REVIEW),
+                    preserve_existing=True,
+                )
+            )
+        )
 
 
 def test_beads_store_public_message_listing_skips_compatibility_routing() -> None:

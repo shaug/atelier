@@ -1,5 +1,6 @@
 import datetime as dt
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from atelier.lib.beads import BeadsParseError, CloseIssueRequest, IssueRecord, SyncBeadsClient
@@ -478,6 +479,66 @@ def test_mark_issue_blocked_reuses_same_note_when_retry_reads_partial_state(
     assert requests[0].description == requests[1].description
     assert requests[1].description is not None
     assert requests[1].description.count("blocked_at:") == 1
+
+
+def test_mark_issue_blocked_repairs_event_history_overflow_and_retries(monkeypatch) -> None:
+    attempts = 0
+    repairs: list[str] = []
+
+    class _FakeSyncClient:
+        def is_event_history_overflow_detail(self, detail):
+            return "old_value" in detail
+
+        def repair_event_history_overflow(self, issue_id):
+            repairs.append(issue_id)
+            return SimpleNamespace(issue_id=issue_id, verified_mutable=True)
+
+        def update(self, request):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise RuntimeError(
+                    "failed to record event: Error 1105 (HY000): string is too large "
+                    "for column 'old_value'"
+                )
+            return IssueRecord(
+                id=request.issue_id,
+                title="Blocked",
+                status="blocked",
+                description=request.description,
+            )
+
+    monkeypatch.setattr(
+        worker_store,
+        "_build_store_bundle",
+        lambda **_kwargs: worker_store._StoreBundle(  # pyright: ignore[reportPrivateUsage]
+            store=build_atelier_store(beads=build_in_memory_beads_client()[0]),
+            sync_client=_FakeSyncClient(),
+        ),
+    )
+    monkeypatch.setattr(
+        worker_store,
+        "_show_issue",
+        lambda **_kwargs: {
+            "id": "at-epic.1",
+            "status": "open",
+            "description": "",
+        },
+    )
+    worker_store.clear_bundle_cache()
+
+    try:
+        worker_store.mark_issue_blocked(
+            "at-epic.1",
+            reason="missing integration",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+    finally:
+        worker_store.clear_bundle_cache()
+
+    assert attempts == 2
+    assert repairs == ["at-epic.1"]
 
 
 def test_update_changeset_review_preserves_existing_review_fields(monkeypatch) -> None:

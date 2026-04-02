@@ -22,6 +22,7 @@ from ..lib.beads import (
     SyncBeadsProtocol,
     UpdateIssueRequest,
     build_sync_beads_client,
+    maybe_repair_after_event_history_overflow_sync,
 )
 from ..store import (
     AppendNotesRequest,
@@ -463,8 +464,10 @@ def ensure_agent_bead(
     if existing is not None:
         issue_id = str(existing.get("id") or "").strip()
         if issue_id and lifecycle.canonical_lifecycle_status(existing.get("status")) == "closed":
-            bundle.sync_client.update(
-                UpdateIssueRequest(issue_id=issue_id, status=LifecycleStatus.OPEN.value)
+            _update_issue_with_overflow_repair(
+                UpdateIssueRequest(issue_id=issue_id, status=LifecycleStatus.OPEN.value),
+                bundle=bundle,
+                mutation_label="agent bead reopen",
             )
             refreshed = _show_issue(issue_id=issue_id, beads_root=beads_root, repo_root=repo_root)
             if (
@@ -501,7 +504,6 @@ def resolve_hooked_epic(
     The returned hook is verified against live issue ownership before it is
     accepted.
     """
-
     hook_id = get_agent_hook(agent_bead_id, beads_root=beads_root, repo_root=repo_root)
     if hook_id is None:
         return None
@@ -597,6 +599,28 @@ def _issue_lifecycle_status(issue: IssueRecord) -> LifecycleStatus:
     return LifecycleStatus(normalized)
 
 
+def _update_issue_with_overflow_repair(
+    request: UpdateIssueRequest,
+    *,
+    bundle: _StoreBundle,
+    mutation_label: str,
+) -> IssueRecord:
+    repaired_after_overflow = False
+    while True:
+        try:
+            return bundle.sync_client.update(request)
+        except Exception as exc:
+            if not maybe_repair_after_event_history_overflow_sync(
+                bundle.sync_client,
+                issue_id=request.issue_id,
+                failure=exc,
+                mutation_label=mutation_label,
+                already_repaired=repaired_after_overflow,
+            ):
+                raise
+            repaired_after_overflow = True
+
+
 def _append_issue_notes(description: str | None, *, notes: tuple[str, ...]) -> str:
     base = description.rstrip("\n") if description else ""
     joined = "\n".join(note for note in notes if note)
@@ -662,8 +686,10 @@ def _fallback_issue_status_update(
             )
         if _normalize_text(current.get("status")) == target_status:
             return
-        updated = bundle.sync_client.update(
-            UpdateIssueRequest(issue_id=issue_id, status=target_status)
+        updated = _update_issue_with_overflow_repair(
+            UpdateIssueRequest(issue_id=issue_id, status=target_status),
+            bundle=bundle,
+            mutation_label="lifecycle fallback update",
         )
         if _normalize_text(updated.status) == target_status:
             return
@@ -808,12 +834,14 @@ def mark_issue_blocked(
         ):
             return
 
-        updated = bundle.sync_client.update(
+        updated = _update_issue_with_overflow_repair(
             UpdateIssueRequest(
                 issue_id=issue_id,
                 status=LifecycleStatus.BLOCKED.value,
                 description=desired_description,
-            )
+            ),
+            bundle=bundle,
+            mutation_label="blocked transition update",
         )
         payload = _issue_payload(updated)
         payload_description = _normalize_text(payload.get("description"))
@@ -941,8 +969,10 @@ def update_issue_labels(
         desired_labels = tuple(sorted((current_labels | desired_add) - desired_remove))
         if current_labels == set(desired_labels):
             return current
-        updated = bundle.sync_client.update(
-            UpdateIssueRequest(issue_id=issue_id, labels=desired_labels)
+        updated = _update_issue_with_overflow_repair(
+            UpdateIssueRequest(issue_id=issue_id, labels=desired_labels),
+            bundle=bundle,
+            mutation_label="label update",
         )
         payload = _issue_payload(updated)
         updated_labels = _labels_from_payload(payload.get("labels"))
@@ -988,13 +1018,15 @@ def release_epic_assignment(
     desired_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
     if desired_status not in {"closed", "done"}:
         desired_status = "open"
-    updated = bundle.sync_client.update(
+    updated = _update_issue_with_overflow_repair(
         UpdateIssueRequest(
             issue_id=epic_id,
             assignee="",
             status=desired_status,
             labels=desired_labels,
-        )
+        ),
+        bundle=bundle,
+        mutation_label="epic release update",
     )
     payload = _issue_payload(updated)
     if str(payload.get("assignee") or "").strip():
@@ -1085,13 +1117,15 @@ def claim_epic(
     ):
         desired_labels.add(beads.issue_label("epic", beads_root=beads_root))
 
-    updated = bundle.sync_client.update(
+    updated = _update_issue_with_overflow_repair(
         UpdateIssueRequest(
             issue_id=epic_id,
             assignee=agent_id,
             status=LifecycleStatus.IN_PROGRESS.value,
             labels=tuple(sorted(desired_labels)),
-        )
+        ),
+        bundle=bundle,
+        mutation_label="epic claim update",
     )
     payload = _issue_payload(updated)
     if _claim_complete(payload, agent_id=agent_id, beads_root=beads_root):

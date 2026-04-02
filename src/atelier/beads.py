@@ -4820,6 +4820,20 @@ def _is_event_history_overflow_detail(detail: str | None) -> bool:
     return all(marker in normalized for marker in _EVENT_HISTORY_OVERFLOW_MARKERS)
 
 
+def is_event_history_overflow_detail(detail: str | None) -> bool:
+    """Return whether command detail matches the event-history overflow shape.
+
+    Args:
+        detail: Combined stderr/stdout detail emitted by a failed `bd`
+            mutation command.
+
+    Returns:
+        `True` when the detail matches the known Beads event-history overflow
+        signature that requires deterministic repair before retrying mutation.
+    """
+    return _is_event_history_overflow_detail(detail)
+
+
 def _issue_snapshot_bytes(issue: dict[str, object]) -> int:
     payload = json.dumps(issue, separators=(",", ":"), ensure_ascii=False)
     return len(payload.encode("utf-8"))

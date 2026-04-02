@@ -188,6 +188,14 @@ class _FakeClient:
             backend="in-memory",
         )
 
+    def is_event_history_overflow_detail(self, detail: str | None) -> bool:
+        del detail
+        return False
+
+    async def repair_event_history_overflow(self, issue_id: str):
+        del issue_id
+        raise NotImplementedError
+
     async def show(self, request: object) -> IssueRecord:
         del request
         return IssueRecord(id="at-1")
