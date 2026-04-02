@@ -6692,8 +6692,11 @@ def test_repair_issue_event_history_overflow_compacts_notes_and_restores_mutabil
         cwd: Path,
     ) -> list[dict[str, object]]:
         del beads_root, cwd
-        assert args[:2] == ["show", "at-overflow"]
-        return [dict(issue_state)]
+        if args[:2] == ["show", "at-overflow"]:
+            return [dict(issue_state)]
+        if args[0] == "sql":
+            return [{"notes": issue_state["notes"]}]
+        raise AssertionError(f"unexpected bd json command: {args}")
 
     def fake_run_bd_command(
         args: list[str],
@@ -6760,6 +6763,166 @@ def test_repair_issue_event_history_overflow_compacts_notes_and_restores_mutabil
     assert repaired_notes.startswith("overflow_repair:")
     assert "bd history at-overflow" in repaired_notes
     assert "bd restore at-overflow" in repaired_notes
+
+
+def test_repair_issue_event_history_overflow_accepts_backend_readback_when_show_is_stale() -> None:
+    initial_notes = "old note line\n" * 5000
+    issue_state = {
+        "id": "at-overflow",
+        "title": "Overflowed issue",
+        "description": "scope: repair event overflow\n",
+        "acceptance_criteria": "restore issue mutability\n",
+        "notes": initial_notes,
+        "status": "in_progress",
+        "priority": 2,
+        "issue_type": "task",
+        "owner": "scott",
+        "created_at": "2026-03-26T00:00:00Z",
+        "created_by": "planner",
+        "updated_at": "2026-03-26T00:00:00Z",
+    }
+    repaired_notes = beads._render_overflow_repair_notes(
+        backend="dolt",
+        issue_id="at-overflow",
+        original_notes=initial_notes,
+        snapshot_bytes_before=beads._issue_snapshot_bytes(issue_state),
+        retained_notes_chars=beads._find_overflow_repair_notes(
+            "at-overflow",
+            issue_state,
+            backend="dolt",
+        )[2],
+    )
+    sql_calls: list[str] = []
+    status_attempts = 0
+    show_calls = 0
+
+    def fake_run_bd_json(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        nonlocal show_calls
+        if args[:2] == ["show", "at-overflow"]:
+            show_calls += 1
+            return [dict(issue_state)]
+        if args[0] == "sql":
+            return [{"notes": repaired_notes}]
+        raise AssertionError(f"unexpected bd json command: {args}")
+
+    def fake_run_bd_command(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+    ) -> CompletedProcess[str]:
+        del beads_root, cwd, allow_failure
+        nonlocal status_attempts
+        if args[:3] == ["update", "at-overflow", "--status"]:
+            status_attempts += 1
+            if status_attempts == 1 and not sql_calls:
+                return CompletedProcess(
+                    args=["bd", *args],
+                    returncode=1,
+                    stdout="",
+                    stderr=(
+                        "failed to record event: Error 1105 (HY000): string "
+                        "is too large for column 'old_value'"
+                    ),
+                )
+            return CompletedProcess(args=["bd", *args], returncode=0, stdout="", stderr="")
+        if args[0] == "sql":
+            sql_calls.append(args[1])
+            return CompletedProcess(args=["bd", *args], returncode=0, stdout="", stderr="")
+        raise AssertionError(f"unexpected bd command: {args}")
+
+    with (
+        patch("atelier.beads._configured_beads_backend", return_value="dolt"),
+        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command),
+    ):
+        result = beads.repair_issue_event_history_overflow(
+            "at-overflow",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert result.repaired is True
+    assert result.verified_mutable is True
+    assert result.snapshot_bytes_before > result.snapshot_bytes_after
+    assert status_attempts == 1
+    assert show_calls == 2
+    assert sql_calls
+
+
+def test_repair_issue_event_history_overflow_fails_closed_for_backend_readback_mismatch() -> None:
+    initial_notes = "old note line\n" * 5000
+    issue_state = {
+        "id": "at-overflow",
+        "title": "Overflowed issue",
+        "description": "scope: repair event overflow\n",
+        "acceptance_criteria": "restore issue mutability\n",
+        "notes": initial_notes,
+        "status": "in_progress",
+        "priority": 2,
+        "issue_type": "task",
+        "owner": "scott",
+        "created_at": "2026-03-26T00:00:00Z",
+        "created_by": "planner",
+        "updated_at": "2026-03-26T00:00:00Z",
+    }
+
+    def fake_run_bd_json(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        if args[:2] == ["show", "at-overflow"]:
+            return [dict(issue_state)]
+        if args[0] == "sql":
+            return [{"notes": initial_notes}]
+        raise AssertionError(f"unexpected bd json command: {args}")
+
+    def fake_run_bd_command(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+    ) -> CompletedProcess[str]:
+        del beads_root, cwd, allow_failure
+        if args[:3] == ["update", "at-overflow", "--status"]:
+            return CompletedProcess(
+                args=["bd", *args],
+                returncode=1,
+                stdout="",
+                stderr=(
+                    "failed to record event: Error 1105 (HY000): string "
+                    "is too large for column 'old_value'"
+                ),
+            )
+        if args[0] == "sql":
+            return CompletedProcess(args=["bd", *args], returncode=0, stdout="", stderr="")
+        raise AssertionError(f"unexpected bd command: {args}")
+
+    with (
+        patch("atelier.beads._configured_beads_backend", return_value="dolt"),
+        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command),
+    ):
+        with pytest.raises(
+            RuntimeError,
+            match=r"backend notes readback did not return the repaired marker",
+        ):
+            beads.repair_issue_event_history_overflow(
+                "at-overflow",
+                beads_root=Path("/beads"),
+                cwd=Path("/repo"),
+            )
 
 
 def test_repair_issue_event_history_overflow_is_rerunnable_when_issue_is_already_safe() -> None:
