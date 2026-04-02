@@ -573,10 +573,7 @@ def test_update_review_fails_closed_with_event_history_overflow_detail() -> None
     transport = _EventOverflowSubprocessTransport(command_backend)
     client = SubprocessBeadsClient(transport=transport)
     store = build_atelier_store(beads=client)
-    with pytest.raises(
-        RuntimeError,
-        match="event-history overflow blocked the mutation.*too large for column 'old_value'",
-    ):
+    with pytest.raises(RuntimeError) as exc_info:
         _RUN(
             store.update_review(
                 UpdateReviewRequest(
@@ -587,6 +584,10 @@ def test_update_review_fails_closed_with_event_history_overflow_detail() -> None
             )
         )
 
+    message = str(exc_info.value)
+    assert "event-history overflow blocked the mutation" in message
+    assert "too large for column 'old_value'" in message
+    assert "atelier repair-event-history-overflow at-change" in message
     assert transport.overflow_attempts == 1
 
 
@@ -2205,7 +2206,11 @@ def test_update_review_fails_closed_when_overflow_repair_lacks_convergence_evide
 
     monkeypatch.setattr(client, "repair_event_history_overflow", repair_event_history_overflow)
 
-    with pytest.raises(RuntimeError, match="repair evidence did not prove convergence"):
+    with pytest.raises(
+        RuntimeError,
+        match=r"repair evidence did not prove convergence; run "
+        r"`atelier repair-event-history-overflow at-change`",
+    ):
         _RUN(
             store.update_review(
                 UpdateReviewRequest(

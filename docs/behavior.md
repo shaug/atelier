@@ -219,3 +219,15 @@ Atelier planning state. They are treated as external ticket sources.
   - Closes channel messages when explicit retention metadata is present.
   - Channel retention metadata can be set via `retention_days` or `expires_at`
     in message frontmatter.
+
+- `atelier repair-event-history-overflow`
+
+  - Repairs a Beads issue whose historical event payload overflowed and blocked
+    mutation.
+  - Compacts oversized note history, verifies that the issue is mutable again,
+    and prints backend-specific recovery guidance.
+  - See [Event History Overflow Recovery] for the operator runbook.
+
+<!-- inline reference link definitions. please keep alphabetized -->
+
+[event history overflow recovery]: ./event-history-overflow-recovery.md

@@ -3,6 +3,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from atelier.lib.beads import BeadsParseError, CloseIssueRequest, IssueRecord, SyncBeadsClient
 from atelier.messages import render_message
 from atelier.store import HookRecord, StartupMessageRecord, build_atelier_store
@@ -539,6 +541,56 @@ def test_mark_issue_blocked_repairs_event_history_overflow_and_retries(monkeypat
 
     assert attempts == 2
     assert repairs == ["at-epic.1"]
+
+
+def test_mark_issue_blocked_surfaces_overflow_repair_guidance_when_convergence_fails(
+    monkeypatch,
+) -> None:
+    class _FakeSyncClient:
+        def is_event_history_overflow_detail(self, detail):
+            return "old_value" in detail
+
+        def repair_event_history_overflow(self, _issue_id):
+            return SimpleNamespace(issue_id="different-issue", verified_mutable=False)
+
+        def update(self, _request):
+            raise RuntimeError(
+                "failed to record event: Error 1105 (HY000): string is too large "
+                "for column 'old_value'"
+            )
+
+    monkeypatch.setattr(
+        worker_store,
+        "_build_store_bundle",
+        lambda **_kwargs: worker_store._StoreBundle(  # pyright: ignore[reportPrivateUsage]
+            store=build_atelier_store(beads=build_in_memory_beads_client()[0]),
+            sync_client=_FakeSyncClient(),
+        ),
+    )
+    monkeypatch.setattr(
+        worker_store,
+        "_show_issue",
+        lambda **_kwargs: {
+            "id": "at-epic.1",
+            "status": "open",
+            "description": "",
+        },
+    )
+    worker_store.clear_bundle_cache()
+
+    try:
+        with pytest.raises(
+            RuntimeError,
+            match=r"atelier repair-event-history-overflow at-epic\.1",
+        ):
+            worker_store.mark_issue_blocked(
+                "at-epic.1",
+                reason="missing integration",
+                beads_root=Path("/beads"),
+                repo_root=Path("/repo"),
+            )
+    finally:
+        worker_store.clear_bundle_cache()
 
 
 def test_update_changeset_review_preserves_existing_review_fields(monkeypatch) -> None:

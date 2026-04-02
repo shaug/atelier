@@ -26,6 +26,7 @@ from atelier.lib.beads import (
     ShowIssueRequest,
     SupportedOperation,
     UpdateIssueRequest,
+    event_history_overflow_operator_guidance,
     maybe_repair_after_event_history_overflow,
 )
 from atelier.lib.beads import description_fields as bead_fields
@@ -175,8 +176,8 @@ def _event_history_overflow_failure_detail(
 ) -> str:
     failure = f"event-history overflow blocked the mutation for {issue_id}"
     if detail:
-        return f"{failure} ({detail})"
-    return failure
+        failure = f"{failure} ({detail})"
+    return f"{failure}; {event_history_overflow_operator_guidance(issue_id)}"
 
 
 def _same_description_value(left: str | None, right: str | None) -> bool:
