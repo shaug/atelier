@@ -29,13 +29,22 @@ deterministic:
 
 1. Primes the project-scoped Beads store.
 1. Creates a verified SQLite backup before mutating a SQLite-backed store.
-1. Compacts oversized historical notes for the target issue.
-1. Verifies that the issue is mutable again before reporting success.
+1. Checks the full serialized issue snapshot against the safe mutation budget
+   used for representative note/status writes.
+1. Compacts oversized historical notes for the target issue when that can bring
+   the snapshot back under the safe budget.
+1. Emits convergence evidence only when the repaired snapshot proves the
+   supported mutation classes are safe again.
 1. Prints backend-specific guidance for inspecting pre-repair content.
 
 For Dolt-backed stores, the output points operators at `bd history` and
 `bd restore`. For SQLite-backed stores, the output reports the backup path to
 inspect if the full pre-repair notes are needed.
+
+If large dependency payloads or other serialized fields still keep the issue
+above the safe mutation budget after note compaction, the command now fails
+closed with an explicit `repair unavailable for this mutation class` diagnostic
+instead of reporting a false `verified_mutable: true` result.
 
 ## After Repair
 

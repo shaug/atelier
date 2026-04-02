@@ -36,6 +36,13 @@ def test_repair_event_history_overflow_json_reports_sqlite_backup() -> None:
             snapshot_bytes_before=90000,
             snapshot_bytes_after=32000,
             retained_notes_chars=4096,
+            verified_mutation_classes=("notes_append", "status_transition"),
+            convergence_evidence=(
+                "snapshot_bytes_before=90000",
+                "snapshot_bytes_after=32000",
+                "safe_snapshot_target_bytes=49151",
+                "verified_mutation_classes=notes_append,status_transition",
+            ),
         )
 
         with (
@@ -74,6 +81,10 @@ def test_repair_event_history_overflow_json_reports_sqlite_backup() -> None:
     assert payload["issue_id"] == "at-overflow"
     assert payload["repaired"] is True
     assert payload["verified_mutable"] is True
+    assert payload["verified_mutation_classes"] == ["notes_append", "status_transition"]
+    assert payload["convergence_evidence"][-1] == (
+        "verified_mutation_classes=notes_append,status_transition"
+    )
     assert "does not support `bd history` or `bd restore`" in payload["recovery_guidance"]
 
 
@@ -96,6 +107,13 @@ def test_repair_event_history_overflow_table_uses_dolt_guidance_without_backup()
             snapshot_bytes_before=1200,
             snapshot_bytes_after=1200,
             retained_notes_chars=12,
+            verified_mutation_classes=("notes_append", "status_transition"),
+            convergence_evidence=(
+                "snapshot_bytes_before=1200",
+                "snapshot_bytes_after=1200",
+                "safe_snapshot_target_bytes=49151",
+                "verified_mutation_classes=notes_append,status_transition",
+            ),
         )
 
         with (
@@ -132,3 +150,4 @@ def test_repair_event_history_overflow_table_uses_dolt_guidance_without_backup()
     assert "sqlite backup" not in output
     assert "bd history at-overflow" in output
     assert "bd restore at-overflow" in output
+    assert "verified mutation classes: notes_append, status_transition" in output

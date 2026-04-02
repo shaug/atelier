@@ -1,7 +1,6 @@
 import datetime as dt
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 import pytest
 
@@ -493,7 +492,19 @@ def test_mark_issue_blocked_repairs_event_history_overflow_and_retries(monkeypat
 
         def repair_event_history_overflow(self, issue_id):
             repairs.append(issue_id)
-            return SimpleNamespace(issue_id=issue_id, verified_mutable=True)
+            return SimpleNamespace(
+                issue_id=issue_id,
+                verified_mutable=True,
+                snapshot_bytes_before=90000,
+                snapshot_bytes_after=32000,
+                verified_mutation_classes=("notes_append", "status_transition"),
+                convergence_evidence=(
+                    "snapshot_bytes_before=90000",
+                    "snapshot_bytes_after=32000",
+                    "safe_snapshot_target_bytes=49151",
+                    "verified_mutation_classes=notes_append,status_transition",
+                ),
+            )
 
         def update(self, request):
             nonlocal attempts
@@ -550,8 +561,8 @@ def test_mark_issue_blocked_surfaces_overflow_repair_guidance_when_convergence_f
         def is_event_history_overflow_detail(self, detail):
             return "old_value" in detail
 
-        def repair_event_history_overflow(self, _issue_id):
-            return SimpleNamespace(issue_id="different-issue", verified_mutable=False)
+        def repair_event_history_overflow(self, issue_id):
+            return SimpleNamespace(issue_id=issue_id, verified_mutable=True)
 
         def update(self, _request):
             raise RuntimeError(

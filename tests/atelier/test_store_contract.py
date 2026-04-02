@@ -2156,7 +2156,19 @@ def test_update_review_repairs_event_history_overflow_and_retries(
 
     async def repair_event_history_overflow(issue_id: str):
         repairs.append(issue_id)
-        return SimpleNamespace(issue_id=issue_id, verified_mutable=True)
+        return SimpleNamespace(
+            issue_id=issue_id,
+            verified_mutable=True,
+            snapshot_bytes_before=90000,
+            snapshot_bytes_after=32000,
+            verified_mutation_classes=("notes_append", "status_transition"),
+            convergence_evidence=(
+                "snapshot_bytes_before=90000",
+                "snapshot_bytes_after=32000",
+                "safe_snapshot_target_bytes=49151",
+                "verified_mutation_classes=notes_append,status_transition",
+            ),
+        )
 
     monkeypatch.setattr(client, "repair_event_history_overflow", repair_event_history_overflow)
 
@@ -2201,8 +2213,8 @@ def test_update_review_fails_closed_when_overflow_repair_lacks_convergence_evide
         client, "is_event_history_overflow_detail", lambda detail: "old_value" in detail
     )
 
-    async def repair_event_history_overflow(_issue_id: str):
-        return SimpleNamespace(issue_id="wrong-issue", verified_mutable=False)
+    async def repair_event_history_overflow(issue_id: str):
+        return SimpleNamespace(issue_id=issue_id, verified_mutable=True)
 
     monkeypatch.setattr(client, "repair_event_history_overflow", repair_event_history_overflow)
 

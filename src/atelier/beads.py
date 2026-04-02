@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import bd_invocation, changesets, config, exec, git, lifecycle, messages, paths, prs
 from . import log as atelier_log
-from .external_tickets import ExternalTicketRef, external_ticket_payload
+from .external_tickets import ExternalTicketRef
 from .io import die, say
 from .lib.beads.description_fields import (
     normalize_description as _normalize_description_text,
@@ -121,6 +121,10 @@ _EVENT_HISTORY_REPAIR_TARGET_BYTES = (
     _EVENT_HISTORY_VALUE_TEXT_LIMIT_BYTES - _EVENT_HISTORY_REPAIR_HEADROOM_BYTES
 )
 _EVENT_HISTORY_REPAIR_MARKER = "overflow_repair:"
+_EVENT_HISTORY_REPAIR_VERIFIED_MUTATION_CLASSES = (
+    "notes_append",
+    "status_transition",
+)
 _DOLT_SERVER_PRECHECK_BYPASS_COMMANDS = {
     "completion",
     "doctor",
@@ -452,6 +456,8 @@ class EventHistoryOverflowRepairResult:
     snapshot_bytes_before: int
     snapshot_bytes_after: int
     retained_notes_chars: int
+    verified_mutation_classes: tuple[str, ...]
+    convergence_evidence: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -4839,6 +4845,24 @@ def _issue_snapshot_bytes(issue: dict[str, object]) -> int:
     return len(payload.encode("utf-8"))
 
 
+def _snapshot_within_event_history_repair_target(snapshot_bytes: int) -> bool:
+    return snapshot_bytes <= _EVENT_HISTORY_REPAIR_TARGET_BYTES
+
+
+def _event_history_repair_convergence_evidence(
+    *,
+    snapshot_bytes_before: int,
+    snapshot_bytes_after: int,
+    verified_mutation_classes: tuple[str, ...],
+) -> tuple[str, ...]:
+    return (
+        f"snapshot_bytes_before={snapshot_bytes_before}",
+        f"snapshot_bytes_after={snapshot_bytes_after}",
+        f"safe_snapshot_target_bytes={_EVENT_HISTORY_REPAIR_TARGET_BYTES}",
+        f"verified_mutation_classes={','.join(verified_mutation_classes)}",
+    )
+
+
 def event_history_overflow_recovery_guidance(*, issue_id: str, backend: str | None) -> str:
     """Describe how operators can inspect repaired note history by backend.
 
@@ -5012,11 +5036,12 @@ def repair_issue_event_history_overflow(
     """Repair issue notes when Beads event-history overflow blocks mutation.
 
     The repair path is explicit and rerunnable:
-    1. Reproduce the failure with a no-op lifecycle write.
-    2. Compact only historical notes through a direct database update that
-       bypasses event recording.
-    3. Re-run the same no-op lifecycle write to verify the issue is mutable
-       again before reporting success.
+    1. Measure the full serialized issue snapshot against the safe mutation
+       budget, not just the notes payload.
+    2. When required, compact only historical notes through a direct database
+       update that bypasses event recording.
+    3. Re-run a bounded verification write and emit convergence evidence only
+       when the resulting snapshot remains within the safe mutation budget.
 
     Args:
         issue_id: Bead identifier to repair.
@@ -5045,36 +5070,47 @@ def repair_issue_event_history_overflow(
         issue = issues[0]
         status = _clean_text(issue.get("status")) or "open"
         snapshot_bytes_before = _issue_snapshot_bytes(issue)
-
-        noop_result = run_bd_command(
-            ["update", cleaned_issue_id, "--status", status],
-            beads_root=beads_root,
-            cwd=cwd,
-            allow_failure=True,
+        verified_mutation_classes = _EVENT_HISTORY_REPAIR_VERIFIED_MUTATION_CLASSES
+        snapshot_requires_repair = not _snapshot_within_event_history_repair_target(
+            snapshot_bytes_before
         )
-        if noop_result.returncode == 0:
-            return EventHistoryOverflowRepairResult(
-                issue_id=cleaned_issue_id,
-                repaired=False,
-                verified_mutable=True,
-                snapshot_bytes_before=snapshot_bytes_before,
-                snapshot_bytes_after=snapshot_bytes_before,
-                retained_notes_chars=len(str(issue.get("notes") or "")),
-            )
 
-        noop_detail = _command_output_detail(
-            exec.CommandResult(
-                argv=tuple(noop_result.args),
-                returncode=noop_result.returncode,
-                stdout=noop_result.stdout,
-                stderr=noop_result.stderr,
+        if not snapshot_requires_repair:
+            noop_result = run_bd_command(
+                ["update", cleaned_issue_id, "--status", status],
+                beads_root=beads_root,
+                cwd=cwd,
+                allow_failure=True,
             )
-        )
-        if not _is_event_history_overflow_detail(noop_detail):
-            raise RuntimeError(
-                "issue mutation failed, but the error did not match event-history "
-                f"overflow for {cleaned_issue_id}: {noop_detail or 'unknown failure'}"
+            if noop_result.returncode == 0:
+                return EventHistoryOverflowRepairResult(
+                    issue_id=cleaned_issue_id,
+                    repaired=False,
+                    verified_mutable=True,
+                    snapshot_bytes_before=snapshot_bytes_before,
+                    snapshot_bytes_after=snapshot_bytes_before,
+                    retained_notes_chars=len(str(issue.get("notes") or "")),
+                    verified_mutation_classes=verified_mutation_classes,
+                    convergence_evidence=_event_history_repair_convergence_evidence(
+                        snapshot_bytes_before=snapshot_bytes_before,
+                        snapshot_bytes_after=snapshot_bytes_before,
+                        verified_mutation_classes=verified_mutation_classes,
+                    ),
+                )
+
+            noop_detail = _command_output_detail(
+                exec.CommandResult(
+                    argv=tuple(noop_result.args),
+                    returncode=noop_result.returncode,
+                    stdout=noop_result.stdout,
+                    stderr=noop_result.stderr,
+                )
             )
+            if not _is_event_history_overflow_detail(noop_detail):
+                raise RuntimeError(
+                    "issue mutation failed, but the error did not match event-history "
+                    f"overflow for {cleaned_issue_id}: {noop_detail or 'unknown failure'}"
+                )
 
         repair_notes = _find_overflow_repair_notes(
             cleaned_issue_id,
@@ -5083,8 +5119,12 @@ def repair_issue_event_history_overflow(
         )
         if repair_notes is None:
             raise RuntimeError(
-                "event-history overflow repair requires notes compaction, but the "
-                f"issue has no repairable notes payload: {cleaned_issue_id}"
+                "event-history overflow repair could not bring the full issue snapshot "
+                f"for {cleaned_issue_id} under the safe mutation size "
+                f"({_EVENT_HISTORY_REPAIR_TARGET_BYTES} bytes); "
+                "notes compaction is unavailable or insufficient, so large "
+                "dependencies or other serialized fields still dominate the "
+                "snapshot. Repair unavailable for this mutation class."
             )
         repaired_notes, estimated_snapshot_bytes_after, retained_notes_chars = repair_notes
         _repair_overflowed_issue_notes_sql(
@@ -5108,10 +5148,13 @@ def repair_issue_event_history_overflow(
                 f"overflow repair could not be verified for {cleaned_issue_id}: notes mismatch"
             )
         snapshot_bytes_after = _issue_snapshot_bytes(repaired_issue)
-        if snapshot_bytes_after > _EVENT_HISTORY_REPAIR_TARGET_BYTES:
+        if not _snapshot_within_event_history_repair_target(snapshot_bytes_after):
             raise RuntimeError(
-                f"overflow repair for {cleaned_issue_id} remained above the safe snapshot "
-                f"size ({snapshot_bytes_after} > {_EVENT_HISTORY_REPAIR_TARGET_BYTES})"
+                f"overflow repair for {cleaned_issue_id} compacted notes, but the full "
+                "issue snapshot remained above the safe mutation size "
+                f"({snapshot_bytes_after} > {_EVENT_HISTORY_REPAIR_TARGET_BYTES}); "
+                "large dependencies or other serialized fields still dominate "
+                "the snapshot. Repair unavailable for this mutation class."
             )
 
         verify_result = run_bd_command(
@@ -5140,6 +5183,12 @@ def repair_issue_event_history_overflow(
             snapshot_bytes_before=snapshot_bytes_before,
             snapshot_bytes_after=min(snapshot_bytes_after, estimated_snapshot_bytes_after),
             retained_notes_chars=retained_notes_chars,
+            verified_mutation_classes=verified_mutation_classes,
+            convergence_evidence=_event_history_repair_convergence_evidence(
+                snapshot_bytes_before=snapshot_bytes_before,
+                snapshot_bytes_after=min(snapshot_bytes_after, estimated_snapshot_bytes_after),
+                verified_mutation_classes=verified_mutation_classes,
+            ),
         )
 
 
