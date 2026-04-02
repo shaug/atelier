@@ -4982,7 +4982,7 @@ def _repair_overflowed_issue_notes_sql(
             f"WHERE id = {issue_literal}"
         )
         result = run_bd_command(
-            ["sql", sql],
+            ["sql", "--dolt-auto-commit", "on", sql],
             beads_root=beads_root,
             cwd=cwd,
             allow_failure=True,
