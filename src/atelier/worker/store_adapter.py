@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import cast
 
-from .. import beads, changeset_fields, changesets, lifecycle, messages
+from .. import beads, changeset_fields, changesets, git, lifecycle, messages, prs
 from ..io import die
 from ..lib.beads import (
     CreateIssueRequest,
@@ -70,6 +70,7 @@ class EpicCloseCandidate:
     id: str
     lifecycle: LifecycleStatus
     review: StoreReviewMetadata
+    work_branch: str | None = None
 
 
 @dataclass(frozen=True)
@@ -187,6 +188,8 @@ def close_transition_has_active_pr_lifecycle(
         review_state = (
             candidate.review.pr_state.value if candidate.review.pr_state is not None else None
         )
+        integrated_sha = candidate.review.integrated_sha
+        work_branch = candidate.work_branch
     else:
         hydrated = candidate
         description = hydrated.get("description")
@@ -206,10 +209,56 @@ def close_transition_has_active_pr_lifecycle(
             description if isinstance(description, str) else ""
         )
         review_state = lifecycle.normalize_review_state(review.pr_state)
+        fields = changeset_fields.issue_fields(hydrated)
+        integrated_sha = changeset_fields.normalized_field(fields, "changeset.integrated_sha")
+        work_branch = changeset_fields.work_branch(hydrated)
+
+    terminal_proof = False
+    if lifecycle_status == LifecycleStatus.CLOSED.value and (
+        review_state == ReviewState.PUSHED.value
+        or lifecycle.is_active_pr_lifecycle_state(review_state)
+    ):
+        terminal_proof = _closed_candidate_has_terminal_proof(
+            integrated_sha=integrated_sha,
+            work_branch=work_branch,
+            repo_root=repo_root,
+        )
 
     if review_state == ReviewState.PUSHED.value:
-        return lifecycle_status == LifecycleStatus.CLOSED.value
+        return lifecycle_status == LifecycleStatus.CLOSED.value and not terminal_proof
+    if terminal_proof:
+        return False
     return lifecycle.is_active_pr_lifecycle_state(review_state)
+
+
+def _closed_candidate_has_terminal_proof(
+    *,
+    integrated_sha: str | None,
+    work_branch: str | None,
+    repo_root: Path | None,
+) -> bool:
+    """Return whether a closed candidate already has deterministic terminal proof."""
+
+    if integrated_sha:
+        return True
+    if repo_root is None or not work_branch:
+        return False
+    repo_slug = prs.github_repo_slug(git.git_origin_url(repo_root))
+    if not repo_slug:
+        return False
+    pushed = git.git_ref_exists(repo_root, f"refs/remotes/origin/{work_branch}")
+    lookup = prs.lookup_github_pr_status(repo_slug, work_branch)
+    if lookup.failed:
+        lookup = prs.lookup_github_pr_status(repo_slug, work_branch, refresh=True)
+    if not lookup.found or not isinstance(lookup.payload, dict):
+        return False
+    review_requested = prs.has_review_requests(lookup.payload)
+    live_pr_state = prs.lifecycle_state(
+        lookup.payload,
+        pushed=pushed,
+        review_requested=review_requested,
+    )
+    return live_pr_state in {ReviewState.MERGED.value, ReviewState.CLOSED.value}
 
 
 def _store_ids_to_payloads(
@@ -328,6 +377,7 @@ def _close_candidate_from_changeset(record: ChangesetRecord) -> EpicCloseCandida
         id=record.id,
         lifecycle=record.lifecycle,
         review=record.review,
+        work_branch=record.branches.work_branch if record.branches is not None else None,
     )
 
 

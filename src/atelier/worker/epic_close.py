@@ -43,7 +43,11 @@ def close_epic_if_complete(
     for candidate in changeset_candidates:
         if candidate.lifecycle.value != "closed":
             continue
-        if not worker_store.close_transition_has_active_pr_lifecycle(candidate):
+        if not worker_store.close_transition_has_active_pr_lifecycle(
+            candidate,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        ):
             continue
         if not dry_run:
             worker_store.transition_lifecycle(
