@@ -38,6 +38,17 @@ class SyncEventHistoryOverflowRecovery(Protocol):
     def repair_event_history_overflow(self, issue_id: str) -> EventHistoryOverflowRepairResult: ...
 
 
+def event_history_overflow_operator_guidance(issue_id: str) -> str:
+    """Return the explicit operator recovery action for overflowed issues."""
+
+    return (
+        f"run `atelier repair-event-history-overflow {issue_id}` to compact "
+        "the overflowed event history, verify mutability, and print "
+        "backend-specific recovery guidance for inspecting the pre-repair "
+        "content"
+    )
+
+
 def overflow_repair_result_proves_convergence(
     issue_id: str, result: EventHistoryOverflowRepairResult
 ) -> bool:
@@ -62,19 +73,22 @@ async def maybe_repair_after_event_history_overflow(
     if already_repaired:
         raise RuntimeError(
             f"{mutation_label} for {issue_id} still hit event-history overflow "
-            "after deterministic repair"
+            "after deterministic repair; "
+            f"{event_history_overflow_operator_guidance(issue_id)}"
         ) from failure
     try:
         repair_result = await client.repair_event_history_overflow(issue_id)
     except Exception as repair_error:
         raise RuntimeError(
             f"event-history overflow blocked the mutation for {issue_id} ({detail}); "
-            f"repair unavailable: {repair_error}"
+            f"repair unavailable: {repair_error}; "
+            f"{event_history_overflow_operator_guidance(issue_id)}"
         ) from failure
     if not overflow_repair_result_proves_convergence(issue_id, repair_result):
         raise RuntimeError(
             f"{mutation_label} for {issue_id} hit event-history overflow, "
-            "but repair evidence did not prove convergence"
+            "but repair evidence did not prove convergence; "
+            f"{event_history_overflow_operator_guidance(issue_id)}"
         ) from failure
     return True
 
@@ -95,18 +109,21 @@ def maybe_repair_after_event_history_overflow_sync(
     if already_repaired:
         raise RuntimeError(
             f"{mutation_label} for {issue_id} still hit event-history overflow "
-            "after deterministic repair"
+            "after deterministic repair; "
+            f"{event_history_overflow_operator_guidance(issue_id)}"
         ) from failure
     try:
         repair_result = client.repair_event_history_overflow(issue_id)
     except Exception as repair_error:
         raise RuntimeError(
             f"event-history overflow blocked the mutation for {issue_id} ({detail}); "
-            f"repair unavailable: {repair_error}"
+            f"repair unavailable: {repair_error}; "
+            f"{event_history_overflow_operator_guidance(issue_id)}"
         ) from failure
     if not overflow_repair_result_proves_convergence(issue_id, repair_result):
         raise RuntimeError(
             f"{mutation_label} for {issue_id} hit event-history overflow, "
-            "but repair evidence did not prove convergence"
+            "but repair evidence did not prove convergence; "
+            f"{event_history_overflow_operator_guidance(issue_id)}"
         ) from failure
     return True
