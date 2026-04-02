@@ -677,6 +677,61 @@ def test_append_notes_verifies_after_empty_update_stdout(
     assert refreshed.description.rstrip("\n").endswith(worker_note)
 
 
+def test_append_notes_verifies_multiline_notes_after_empty_update_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async_client, issue_store = build_in_memory_beads_client(issues=_parity_seed_issues())
+    attempts = 0
+    north_star_note = (
+        "north_star_review.2026-04-02T07:12:22-0700:\n"
+        "  authoritative: true\n"
+        "  unmet_acceptance_criteria: none\n"
+        "  completion_checklist:\n"
+        "    - Verification completed on commit 25536f4: just format; just lint; just test."
+    )
+    worker_note = (
+        "worker_update_2026-04-02T07:12:22-0700: re-verified existing head "
+        "25536f41caf1f68a8f8d169d06773dbb877cdb41."
+    )
+
+    async def update_then_emit_empty_stdout(request):
+        nonlocal attempts
+        attempts += 1
+        issue_store.update(
+            request.issue_id,
+            title=request.title,
+            description=request.description,
+            design=request.design,
+            acceptance_criteria=request.acceptance_criteria,
+            status=request.status,
+            assignee=request.assignee,
+            priority=request.priority,
+            estimate=request.estimate,
+            labels=request.labels if request.labels else None,
+        )
+        raise BeadsParseError("expected JSON output from update, received empty stdout")
+
+    monkeypatch.setattr(async_client, "update", update_then_emit_empty_stdout)
+    store = build_atelier_store(beads=async_client)
+
+    appended = _RUN(
+        store.append_notes(
+            AppendNotesRequest(
+                issue_id="at-change",
+                notes=(north_star_note, worker_note),
+            )
+        )
+    )
+
+    refreshed = _RUN(store._show_issue("at-change"))
+    assert attempts == 1
+    assert appended.id == "at-change"
+    assert refreshed.description is not None
+    assert refreshed.description.count(north_star_note) == 1
+    assert refreshed.description.count(worker_note) == 1
+    assert refreshed.description.rstrip("\n").endswith(f"{north_star_note}\n{worker_note}")
+
+
 def test_message_record_enforces_store_message_contract() -> None:
     record = MessageRecord(
         id="msg-1",

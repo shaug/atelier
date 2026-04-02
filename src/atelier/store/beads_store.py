@@ -384,10 +384,10 @@ def _append_issue_notes(description: str, *, notes: tuple[str, ...]) -> str:
 def _description_ends_with_notes(description: str, *, notes: tuple[str, ...]) -> bool:
     if not notes:
         return True
-    lines = (description or "").rstrip("\n").splitlines()
-    if len(lines) < len(notes):
-        return False
-    return tuple(lines[-len(notes) :]) == notes
+    normalized_description = description or ""
+    if not normalized_description.endswith("\n"):
+        normalized_description = f"{normalized_description}\n"
+    return normalized_description.endswith(_append_issue_notes("", notes=notes))
 
 
 @dataclass
