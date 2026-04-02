@@ -728,9 +728,10 @@ def _fallback_issue_status_update(
         current = _show_issue(issue_id=issue_id, beads_root=beads_root, repo_root=repo_root)
         if current is None:
             die(f"issue not found: {issue_id}")
-        current_status = _normalize_status(current.get("status"))
-        if current_status == target_status:
+        raw_status = _normalize_text(current.get("status"))
+        if raw_status == target_status:
             return
+        current_status = _normalize_status(current.get("status"))
         if expected_current is not None and current_status != expected_current:
             raise ValueError(
                 f"lifecycle mismatch for {issue_id}: expected {expected_current!r}, "
