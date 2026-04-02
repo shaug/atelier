@@ -4956,6 +4956,10 @@ def _mysql_utf8mb4_literal(value: str) -> str:
     return f"CONVERT(0x{encoded} USING utf8mb4)"
 
 
+def _uses_direct_sqlite_overflow_repair_backend(backend: str | None) -> bool:
+    return backend != "dolt"
+
+
 def _repair_overflowed_issue_notes_sql(
     *,
     issue_id: str,
@@ -4966,7 +4970,7 @@ def _repair_overflowed_issue_notes_sql(
 ) -> None:
     issue_literal = _sql_issue_id_literal(issue_id)
     backend = _configured_beads_backend(beads_root)
-    if backend == "dolt":
+    if not _uses_direct_sqlite_overflow_repair_backend(backend):
         sql = (
             "UPDATE issues "
             f"SET notes = {_mysql_utf8mb4_literal(repaired_notes)}, "
@@ -5025,6 +5029,76 @@ def _repair_overflowed_issue_notes_sql(
             connection.commit()
     except sqlite3.Error as exc:
         raise RuntimeError(f"direct SQLite repair failed for {issue_id}: {exc}") from exc
+
+
+@dataclass(frozen=True)
+class _OverflowRepairBackendReadback:
+    notes: str | None
+
+
+def _read_overflow_repair_backend_readback(
+    *,
+    issue_id: str,
+    backend: str | None,
+    beads_root: Path,
+    cwd: Path,
+) -> _OverflowRepairBackendReadback | None:
+    if _uses_direct_sqlite_overflow_repair_backend(backend):
+        db_path = beads_root / "beads.db"
+        if not db_path.exists():
+            return None
+        try:
+            with sqlite3.connect(db_path) as connection:
+                row = connection.execute(
+                    "SELECT notes FROM issues WHERE id = ?",
+                    (issue_id,),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise RuntimeError(f"direct SQLite readback failed for {issue_id}: {exc}") from exc
+        if row is None:
+            return None
+        notes_value = row[0] if isinstance(row[0], str) else None
+        return _OverflowRepairBackendReadback(notes=notes_value)
+    query = f"SELECT notes FROM issues WHERE id = {_sql_issue_id_literal(issue_id)}"
+    rows = run_bd_json(["sql", query], beads_root=beads_root, cwd=cwd)
+    if not rows:
+        return None
+    notes_value = rows[0].get("notes")
+    return _OverflowRepairBackendReadback(
+        notes=notes_value if isinstance(notes_value, str) else None
+    )
+
+
+def _verify_overflow_repair_backend_readback(
+    *,
+    issue_id: str,
+    backend: str | None,
+    beads_root: Path,
+    cwd: Path,
+) -> _OverflowRepairBackendReadback:
+    last_readback: _OverflowRepairBackendReadback | None = None
+    for _attempt in range(3):
+        last_readback = _read_overflow_repair_backend_readback(
+            issue_id=issue_id,
+            backend=backend,
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+        if (
+            last_readback is not None
+            and isinstance(last_readback.notes, str)
+            and last_readback.notes.startswith(_EVENT_HISTORY_REPAIR_MARKER)
+        ):
+            return last_readback
+        if _attempt < 2:
+            time.sleep(0.05)
+    detail = "issue row missing from backend readback"
+    if last_readback is not None:
+        if last_readback.notes is None:
+            detail = "backend notes readback returned no string value"
+        else:
+            detail = "backend notes readback did not return the repaired marker"
+    raise RuntimeError(f"overflow repair could not be verified for {issue_id}: {detail}")
 
 
 def repair_issue_event_history_overflow(
@@ -5134,19 +5208,18 @@ def repair_issue_event_history_overflow(
             beads_root=beads_root,
             cwd=cwd,
         )
+        backend_readback = _verify_overflow_repair_backend_readback(
+            issue_id=cleaned_issue_id,
+            backend=backend,
+            beads_root=beads_root,
+            cwd=cwd,
+        )
         refreshed = run_bd_json(["show", cleaned_issue_id], beads_root=beads_root, cwd=cwd)
-        if not refreshed:
-            raise RuntimeError(
-                f"overflow repair updated {cleaned_issue_id}, but verification reload failed"
-            )
-        repaired_issue = refreshed[0]
-        repaired_notes_value = repaired_issue.get("notes")
-        if not isinstance(repaired_notes_value, str) or not repaired_notes_value.startswith(
-            _EVENT_HISTORY_REPAIR_MARKER
-        ):
-            raise RuntimeError(
-                f"overflow repair could not be verified for {cleaned_issue_id}: notes mismatch"
-            )
+        if refreshed:
+            repaired_issue = dict(refreshed[0])
+        else:
+            repaired_issue = dict(issue)
+        repaired_issue["notes"] = backend_readback.notes
         snapshot_bytes_after = _issue_snapshot_bytes(repaired_issue)
         if not _snapshot_within_event_history_repair_target(snapshot_bytes_after):
             raise RuntimeError(
