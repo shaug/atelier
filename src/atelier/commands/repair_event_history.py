@@ -102,6 +102,7 @@ def repair_event_history_overflow(args: object) -> None:
     payload = {
         "backend": backend,
         "backup_path": str(backup_path) if backup_path is not None else None,
+        "convergence_evidence": result.convergence_evidence,
         "issue_id": issue_id,
         "recovery_guidance": beads.event_history_overflow_recovery_guidance(
             issue_id=issue_id,
@@ -112,6 +113,7 @@ def repair_event_history_overflow(args: object) -> None:
         "snapshot_bytes_after": result.snapshot_bytes_after,
         "snapshot_bytes_before": result.snapshot_bytes_before,
         "verified_mutable": result.verified_mutable,
+        "verified_mutation_classes": result.verified_mutation_classes,
     }
     if format_value == "json":
         say(json.dumps(payload, indent=2, sort_keys=True))
@@ -126,6 +128,8 @@ def repair_event_history_overflow(args: object) -> None:
         say(f"-> sqlite backup: {backup_path}")
     say(f"-> snapshot bytes: {result.snapshot_bytes_before} -> {result.snapshot_bytes_after}")
     say(f"-> retained recent notes chars: {result.retained_notes_chars}")
+    say(f"-> verified mutation classes: {', '.join(result.verified_mutation_classes)}")
+    say(f"-> convergence evidence: {'; '.join(result.convergence_evidence)}")
     say(
         "-> recovery guidance: "
         f"{beads.event_history_overflow_recovery_guidance(issue_id=issue_id, backend=backend)}"

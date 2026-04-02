@@ -16,6 +16,28 @@ class EventHistoryOverflowRepairResult:
     snapshot_bytes_before: int
     snapshot_bytes_after: int
     retained_notes_chars: int
+    verified_mutation_classes: tuple[str, ...]
+    convergence_evidence: tuple[str, ...]
+
+
+_REQUIRED_MUTATION_CLASSES = frozenset({"notes_append", "status_transition"})
+
+
+def _parse_convergence_evidence(
+    result: EventHistoryOverflowRepairResult,
+) -> dict[str, str] | None:
+    raw_evidence = getattr(result, "convergence_evidence", None)
+    if not isinstance(raw_evidence, tuple) or not raw_evidence:
+        return None
+    parsed: dict[str, str] = {}
+    for entry in raw_evidence:
+        if not isinstance(entry, str) or "=" not in entry:
+            return None
+        key, value = entry.split("=", 1)
+        if not key or not value or key in parsed:
+            return None
+        parsed[key] = value
+    return parsed
 
 
 @runtime_checkable
@@ -53,8 +75,25 @@ def overflow_repair_result_proves_convergence(
     issue_id: str, result: EventHistoryOverflowRepairResult
 ) -> bool:
     """Return whether a repair result proves the target issue is mutable."""
-
-    return result.issue_id == issue_id and result.verified_mutable is True
+    if result.issue_id != issue_id or result.verified_mutable is not True:
+        return False
+    classes = getattr(result, "verified_mutation_classes", None)
+    if not isinstance(classes, tuple) or not _REQUIRED_MUTATION_CLASSES.issubset(classes):
+        return False
+    evidence = _parse_convergence_evidence(result)
+    if evidence is None:
+        return False
+    try:
+        before = int(evidence["snapshot_bytes_before"])
+        after = int(evidence["snapshot_bytes_after"])
+        target = int(evidence["safe_snapshot_target_bytes"])
+    except (KeyError, ValueError):
+        return False
+    if before != result.snapshot_bytes_before or after != result.snapshot_bytes_after:
+        return False
+    if evidence.get("verified_mutation_classes") != ",".join(classes):
+        return False
+    return after <= target
 
 
 async def maybe_repair_after_event_history_overflow(

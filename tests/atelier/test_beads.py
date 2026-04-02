@@ -6706,7 +6706,7 @@ def test_repair_issue_event_history_overflow_compacts_notes_and_restores_mutabil
         nonlocal status_attempts
         if args[:3] == ["update", "at-overflow", "--status"]:
             status_attempts += 1
-            if status_attempts == 1:
+            if status_attempts == 1 and not sql_calls:
                 return CompletedProcess(
                     args=["bd", *args],
                     returncode=1,
@@ -6749,7 +6749,11 @@ def test_repair_issue_event_history_overflow_compacts_notes_and_restores_mutabil
     assert result.verified_mutable is True
     assert result.snapshot_bytes_before > result.snapshot_bytes_after
     assert result.retained_notes_chars > 0
-    assert status_attempts == 2
+    assert result.verified_mutation_classes == ("notes_append", "status_transition")
+    assert result.convergence_evidence[-1] == (
+        "verified_mutation_classes=notes_append,status_transition"
+    )
+    assert status_attempts == 1
     assert sql_calls
     assert "UPDATE issues" in sql_calls[0]
     repaired_notes = str(issue_state["notes"])
@@ -6791,9 +6795,48 @@ def test_repair_issue_event_history_overflow_is_rerunnable_when_issue_is_already
     assert result.verified_mutable is True
     assert result.snapshot_bytes_before == result.snapshot_bytes_after
     assert result.retained_notes_chars == len(issue["notes"])
+    assert result.verified_mutation_classes == ("notes_append", "status_transition")
+    assert result.convergence_evidence[-1] == (
+        "verified_mutation_classes=notes_append,status_transition"
+    )
     run_command.assert_called_once_with(
         ["update", "at-safe", "--status", "open"],
         beads_root=Path("/beads"),
         cwd=Path("/repo"),
         allow_failure=True,
     )
+
+
+def test_repair_issue_event_history_overflow_fails_closed_for_oversized_dependency_snapshot() -> (
+    None
+):
+    issue = {
+        "id": "at-dependency-heavy",
+        "title": "Dependency heavy",
+        "description": "scope: repair event overflow\n",
+        "acceptance_criteria": "restore issue mutability\n",
+        "notes": "",
+        "status": "open",
+        "priority": 2,
+        "issue_type": "task",
+        "owner": "scott",
+        "created_at": "2026-03-26T00:00:00Z",
+        "created_by": "planner",
+        "updated_at": "2026-03-26T00:00:00Z",
+        "dependencies": [{"id": f"dep-{index}", "title": "x" * 256} for index in range(200)],
+    }
+
+    assert (
+        len(json.dumps(issue, separators=(",", ":"), ensure_ascii=False).encode("utf-8")) > 50_000
+    )
+
+    with patch.object(beads, "run_bd_json", return_value=[issue]):
+        with pytest.raises(
+            RuntimeError,
+            match=r"Repair unavailable for this mutation class",
+        ):
+            beads.repair_issue_event_history_overflow(
+                "at-dependency-heavy",
+                beads_root=Path("/beads"),
+                cwd=Path("/repo"),
+            )

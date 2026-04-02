@@ -327,6 +327,8 @@ class SubprocessBeadsClient(Beads):
             snapshot_bytes_before=repair_result.snapshot_bytes_before,
             snapshot_bytes_after=repair_result.snapshot_bytes_after,
             retained_notes_chars=repair_result.retained_notes_chars,
+            verified_mutation_classes=repair_result.verified_mutation_classes,
+            convergence_evidence=repair_result.convergence_evidence,
         )
 
     async def inspect_environment(self) -> BeadsEnvironment:
