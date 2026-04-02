@@ -254,6 +254,32 @@ def test_transition_lifecycle_updates_changeset_status(monkeypatch) -> None:
     worker_store.clear_bundle_cache()
 
 
+def test_fallback_issue_status_update_accepts_already_target_status(monkeypatch) -> None:
+    builder = IssueFixtureBuilder()
+    _patch_bundle(
+        monkeypatch,
+        issues=(builder.issue("at-epic.1", issue_type="task", status="blocked"),),
+    )
+
+    worker_store._fallback_issue_status_update(  # pyright: ignore[reportPrivateUsage]
+        "at-epic.1",
+        target_status="blocked",
+        expected_current="open",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    refreshed = worker_store.show_issue(
+        "at-epic.1",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert refreshed is not None
+    assert refreshed["status"] == "blocked"
+    worker_store.clear_bundle_cache()
+
+
 def test_transition_lifecycle_closes_changeset_after_unparseable_close_output(
     monkeypatch,
 ) -> None:

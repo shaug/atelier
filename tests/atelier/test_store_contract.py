@@ -246,6 +246,24 @@ def test_transition_lifecycle_verifies_close_after_unparseable_close_output(
     assert _RUN(store._show_issue("at-change")).status == "closed"
 
 
+def test_transition_lifecycle_accepts_already_target_status_on_converged_retry() -> None:
+    store = _store_for(BUILDER.issue("at-change", issue_type="task", status="open"))
+
+    transition = _RUN(
+        store.transition_lifecycle(
+            LifecycleTransitionRequest(
+                issue_id="at-change",
+                target_status=LifecycleStatus.OPEN,
+                expected_current=LifecycleStatus.DEFERRED,
+            )
+        )
+    )
+
+    assert transition.from_status is LifecycleStatus.OPEN
+    assert transition.to_status is LifecycleStatus.OPEN
+    assert _RUN(store._show_issue("at-change")).status == "open"
+
+
 def test_transition_lifecycle_fails_closed_when_unparseable_close_output_lacks_convergence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1414,11 +1414,6 @@ class AtelierStore:
         issue = await state.get_issue(request.issue_id)
         issue_kind = await self._transition_issue_kind(issue, state=state)
         current_status = _canonical_status(issue)
-        if request.expected_current is not None and current_status is not request.expected_current:
-            raise ValueError(
-                f"lifecycle mismatch for {request.issue_id}: expected "
-                f"{request.expected_current.value!r}, got {current_status.value!r}"
-            )
         if current_status is request.target_status:
             return LifecycleTransition(
                 issue_id=request.issue_id,
@@ -1426,6 +1421,11 @@ class AtelierStore:
                 from_status=current_status,
                 to_status=request.target_status,
                 reason=request.reason,
+            )
+        if request.expected_current is not None and current_status is not request.expected_current:
+            raise ValueError(
+                f"lifecycle mismatch for {request.issue_id}: expected "
+                f"{request.expected_current.value!r}, got {current_status.value!r}"
             )
         if request.target_status is LifecycleStatus.CLOSED:
             updated = await self._close_issue_with_overflow_repair(
@@ -1493,7 +1493,7 @@ class AtelierStore:
         failure_message: str,
         allow_description_history_convergence: bool = False,
     ) -> IssueRecord:
-        """Persist one update mutation with bounded read-after-write verification.
+        """Persist one update mutation with bounded verification.
 
         The process-backed ``bd update --json`` path may occasionally emit empty
         stdout even when the mutation lands. In that narrow case the
