@@ -7034,13 +7034,95 @@ def test_repair_issue_event_history_overflow_fails_closed_for_backend_readback_m
     ):
         with pytest.raises(
             RuntimeError,
-            match=r"backend notes readback did not return the repaired marker",
+            match=r"backend notes readback did not preserve the repaired notes payload",
         ):
             beads.repair_issue_event_history_overflow(
                 "at-overflow",
                 beads_root=Path("/beads"),
                 cwd=Path("/repo"),
             )
+
+
+def test_repair_issue_event_history_overflow_fails_closed_when_verification_write_loses_notes() -> (
+    None
+):
+    initial_notes = "old note line\n" * 5000
+    issue_state = {
+        "id": "at-overflow",
+        "title": "Overflowed issue",
+        "description": "scope: repair event overflow\n",
+        "acceptance_criteria": "restore issue mutability\n",
+        "notes": initial_notes,
+        "status": "in_progress",
+        "priority": 2,
+        "issue_type": "task",
+        "owner": "scott",
+        "created_at": "2026-03-26T00:00:00Z",
+        "created_by": "planner",
+        "updated_at": "2026-03-26T00:00:00Z",
+    }
+    repaired_notes = beads._render_overflow_repair_notes(
+        backend="dolt",
+        issue_id="at-overflow",
+        original_notes=initial_notes,
+        snapshot_bytes_before=beads._issue_snapshot_bytes(issue_state),
+        retained_notes_chars=beads._find_overflow_repair_notes(
+            "at-overflow",
+            issue_state,
+            backend="dolt",
+        )[2],
+    )
+    readback_notes = [repaired_notes, initial_notes]
+    status_attempts = 0
+
+    def fake_run_bd_json(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        nonlocal readback_notes
+        if args[:2] == ["show", "at-overflow"]:
+            return [dict(issue_state)]
+        if args[0] == "sql":
+            current_notes = readback_notes.pop(0) if readback_notes else initial_notes
+            return [{"notes": current_notes}]
+        raise AssertionError(f"unexpected bd json command: {args}")
+
+    def fake_run_bd_command(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+    ) -> CompletedProcess[str]:
+        del beads_root, cwd, allow_failure
+        nonlocal status_attempts
+        if args[:3] == ["update", "at-overflow", "--status"]:
+            status_attempts += 1
+            return CompletedProcess(args=["bd", *args], returncode=0, stdout="", stderr="")
+        if args[0] == "sql":
+            return CompletedProcess(args=["bd", *args], returncode=0, stdout="", stderr="")
+        raise AssertionError(f"unexpected bd command: {args}")
+
+    with (
+        patch("atelier.beads._configured_beads_backend", return_value="dolt"),
+        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command),
+    ):
+        with pytest.raises(
+            RuntimeError,
+            match=r"backend notes readback did not preserve the repaired notes payload",
+        ):
+            beads.repair_issue_event_history_overflow(
+                "at-overflow",
+                beads_root=Path("/beads"),
+                cwd=Path("/repo"),
+            )
+
+    assert status_attempts == 1
+    assert not readback_notes
 
 
 def test_read_overflow_repair_backend_readback_uses_sqlite_when_metadata_is_invalid(

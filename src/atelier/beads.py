@@ -5075,6 +5075,7 @@ def _verify_overflow_repair_backend_readback(
     backend: str | None,
     beads_root: Path,
     cwd: Path,
+    expected_notes: str | None = None,
 ) -> _OverflowRepairBackendReadback:
     last_readback: _OverflowRepairBackendReadback | None = None
     for _attempt in range(3):
@@ -5087,7 +5088,11 @@ def _verify_overflow_repair_backend_readback(
         if (
             last_readback is not None
             and isinstance(last_readback.notes, str)
-            and last_readback.notes.startswith(_EVENT_HISTORY_REPAIR_MARKER)
+            and (
+                last_readback.notes == expected_notes
+                if expected_notes is not None
+                else last_readback.notes.startswith(_EVENT_HISTORY_REPAIR_MARKER)
+            )
         ):
             return last_readback
         if _attempt < 2:
@@ -5096,6 +5101,8 @@ def _verify_overflow_repair_backend_readback(
     if last_readback is not None:
         if last_readback.notes is None:
             detail = "backend notes readback returned no string value"
+        elif expected_notes is not None:
+            detail = "backend notes readback did not preserve the repaired notes payload"
         else:
             detail = "backend notes readback did not return the repaired marker"
     raise RuntimeError(f"overflow repair could not be verified for {issue_id}: {detail}")
@@ -5200,7 +5207,7 @@ def repair_issue_event_history_overflow(
                 "dependencies or other serialized fields still dominate the "
                 "snapshot. Repair unavailable for this mutation class."
             )
-        repaired_notes, estimated_snapshot_bytes_after, retained_notes_chars = repair_notes
+        repaired_notes, _estimated_snapshot_bytes_after, retained_notes_chars = repair_notes
         _repair_overflowed_issue_notes_sql(
             issue_id=cleaned_issue_id,
             repaired_notes=repaired_notes,
@@ -5213,6 +5220,7 @@ def repair_issue_event_history_overflow(
             backend=backend,
             beads_root=beads_root,
             cwd=cwd,
+            expected_notes=repaired_notes,
         )
         refreshed = run_bd_json(["show", cleaned_issue_id], beads_root=beads_root, cwd=cwd)
         if refreshed:
@@ -5249,17 +5257,32 @@ def repair_issue_event_history_overflow(
                 f"overflow repair did not restore mutability for {cleaned_issue_id}: "
                 f"{verify_detail or 'verification write failed'}"
             )
+        verified_readback = _verify_overflow_repair_backend_readback(
+            issue_id=cleaned_issue_id,
+            backend=backend,
+            beads_root=beads_root,
+            cwd=cwd,
+            expected_notes=repaired_notes,
+        )
+        repaired_issue["notes"] = verified_readback.notes
+        snapshot_bytes_after = _issue_snapshot_bytes(repaired_issue)
+        if not _snapshot_within_event_history_repair_target(snapshot_bytes_after):
+            raise RuntimeError(
+                f"overflow repair for {cleaned_issue_id} passed the verification write, "
+                "but the persisted issue snapshot remained above the safe mutation size "
+                f"({snapshot_bytes_after} > {_EVENT_HISTORY_REPAIR_TARGET_BYTES})"
+            )
         return EventHistoryOverflowRepairResult(
             issue_id=cleaned_issue_id,
             repaired=True,
             verified_mutable=True,
             snapshot_bytes_before=snapshot_bytes_before,
-            snapshot_bytes_after=min(snapshot_bytes_after, estimated_snapshot_bytes_after),
+            snapshot_bytes_after=snapshot_bytes_after,
             retained_notes_chars=retained_notes_chars,
             verified_mutation_classes=verified_mutation_classes,
             convergence_evidence=_event_history_repair_convergence_evidence(
                 snapshot_bytes_before=snapshot_bytes_before,
-                snapshot_bytes_after=min(snapshot_bytes_after, estimated_snapshot_bytes_after),
+                snapshot_bytes_after=snapshot_bytes_after,
                 verified_mutation_classes=verified_mutation_classes,
             ),
         )
