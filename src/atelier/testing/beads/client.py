@@ -130,7 +130,6 @@ class InMemoryBeadsClient(Beads):
 
         return self._issue_store.description_history(issue_id)
 
-
     def is_event_history_overflow_detail(self, detail: str | None) -> bool:
         del detail
         return False

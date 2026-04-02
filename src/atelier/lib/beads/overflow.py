@@ -64,7 +64,13 @@ async def maybe_repair_after_event_history_overflow(
             f"{mutation_label} for {issue_id} still hit event-history overflow "
             "after deterministic repair"
         ) from failure
-    repair_result = await client.repair_event_history_overflow(issue_id)
+    try:
+        repair_result = await client.repair_event_history_overflow(issue_id)
+    except Exception as repair_error:
+        raise RuntimeError(
+            f"event-history overflow blocked the mutation for {issue_id} ({detail}); "
+            f"repair unavailable: {repair_error}"
+        ) from failure
     if not overflow_repair_result_proves_convergence(issue_id, repair_result):
         raise RuntimeError(
             f"{mutation_label} for {issue_id} hit event-history overflow, "
@@ -91,7 +97,13 @@ def maybe_repair_after_event_history_overflow_sync(
             f"{mutation_label} for {issue_id} still hit event-history overflow "
             "after deterministic repair"
         ) from failure
-    repair_result = client.repair_event_history_overflow(issue_id)
+    try:
+        repair_result = client.repair_event_history_overflow(issue_id)
+    except Exception as repair_error:
+        raise RuntimeError(
+            f"event-history overflow blocked the mutation for {issue_id} ({detail}); "
+            f"repair unavailable: {repair_error}"
+        ) from failure
     if not overflow_repair_result_proves_convergence(issue_id, repair_result):
         raise RuntimeError(
             f"{mutation_label} for {issue_id} hit event-history overflow, "

@@ -597,6 +597,8 @@ def _issue_lifecycle_status(issue: IssueRecord) -> LifecycleStatus:
     if normalized is None:
         raise ValueError(f"issue {issue.id} is missing a canonical lifecycle status")
     return LifecycleStatus(normalized)
+
+
 def _update_issue_with_overflow_repair(
     request: UpdateIssueRequest,
     *,

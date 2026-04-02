@@ -8,32 +8,8 @@
     {
       "name": "mutation-and-coordination-shims",
       "follow_on_changeset": "at-rhxbc.3",
-      "summary": "Closing, repair, GC, and worktree coordination flows that still patch or invoke the facade directly.",
+      "summary": "The subprocess Beads client is the remaining runtime bridge to the legacy facade repair helpers.",
       "call_sites": [
-        {
-          "path": "src/atelier/skills/tickets/scripts/repair_external_ticket_metadata.py",
-          "imports": [
-            {
-              "alias": null,
-              "kind": "from",
-              "module": "atelier",
-              "name": "beads"
-            }
-          ],
-          "dotted_refs": 0
-        },
-        {
-          "path": "src/atelier/skills/work-done/scripts/close_epic.py",
-          "imports": [
-            {
-              "alias": null,
-              "kind": "from",
-              "module": "atelier",
-              "name": "beads"
-            }
-          ],
-          "dotted_refs": 0
-        },
         {
           "path": "src/atelier/lib/beads/process.py",
           "imports": [
@@ -45,36 +21,6 @@
             }
           ],
           "dotted_refs": 0
-        },
-        {
-          "path": "tests/atelier/commands/test_gc.py",
-          "imports": [],
-          "dotted_refs": 6
-        },
-        {
-          "path": "tests/atelier/gc/test_agents.py",
-          "imports": [],
-          "dotted_refs": 7
-        },
-        {
-          "path": "tests/atelier/gc/test_hooks.py",
-          "imports": [],
-          "dotted_refs": 13
-        },
-        {
-          "path": "tests/atelier/gc/test_labels.py",
-          "imports": [],
-          "dotted_refs": 13
-        },
-        {
-          "path": "tests/atelier/gc/test_worktrees.py",
-          "imports": [],
-          "dotted_refs": 25
-        },
-        {
-          "path": "tests/atelier/worker/test_integration.py",
-          "imports": [],
-          "dotted_refs": 2
         }
       ]
     },
@@ -109,7 +55,7 @@
               "module": "atelier.beads"
             }
           ],
-          "dotted_refs": 327
+          "dotted_refs": 324
         }
       ]
     }
