@@ -237,7 +237,7 @@ def _closed_candidate_has_terminal_proof(
     work_branch: str | None,
     repo_root: Path | None,
 ) -> bool:
-    """Return whether a closed candidate already has deterministic terminal proof."""
+    """Return whether a closed candidate has terminal proof."""
 
     if integrated_sha:
         return True
@@ -728,14 +728,15 @@ def _fallback_issue_status_update(
         current = _show_issue(issue_id=issue_id, beads_root=beads_root, repo_root=repo_root)
         if current is None:
             die(f"issue not found: {issue_id}")
+        raw_status = _normalize_text(current.get("status"))
+        if raw_status == target_status:
+            return
         current_status = _normalize_status(current.get("status"))
         if expected_current is not None and current_status != expected_current:
             raise ValueError(
                 f"lifecycle mismatch for {issue_id}: expected {expected_current!r}, "
                 f"got {current_status!r}"
             )
-        if _normalize_text(current.get("status")) == target_status:
-            return
         updated = _update_issue_with_overflow_repair(
             UpdateIssueRequest(issue_id=issue_id, status=target_status),
             bundle=bundle,

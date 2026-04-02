@@ -222,8 +222,11 @@ def main() -> None:
 
         epic_id = args.epic_id.strip()
         epic = asyncio.run(store.get_epic(epic_id))
-        if epic.lifecycle is not LifecycleStatus.DEFERRED:
-            raise RuntimeError(f"epic {epic_id} must be deferred before promotion")
+        if epic.lifecycle not in {LifecycleStatus.DEFERRED, LifecycleStatus.OPEN}:
+            raise RuntimeError(
+                f"epic {epic_id} must be deferred before promotion or already open after "
+                "a converged retry"
+            )
 
         epic_issue = asyncio.run(client.show(ShowIssueRequest(issue_id=epic_id)))
         changesets = tuple(
@@ -245,6 +248,7 @@ def main() -> None:
         preview_blocks = [_render_issue_preview(header=f"EPIC {epic_id}", issue=epic_issue)]
         child_missing: dict[str, tuple[str, ...]] = {}
         promotable_children: list[str] = []
+        already_open_children: list[str] = []
         for record, issue in zip(changesets, child_issues, strict=True):
             preview_blocks.append(
                 _render_issue_preview(header=f"CHANGESET {record.id}", issue=issue)
@@ -253,6 +257,8 @@ def main() -> None:
             child_missing[record.id] = missing
             if record.lifecycle is LifecycleStatus.DEFERRED and not missing:
                 promotable_children.append(record.id)
+            elif record.lifecycle is LifecycleStatus.OPEN:
+                already_open_children.append(record.id)
 
         print("\n\n".join(preview_blocks))
 
@@ -275,15 +281,17 @@ def main() -> None:
             print("confirmation_required: rerun with --yes after explicit operator confirmation")
             return
 
-        asyncio.run(
-            store.transition_lifecycle(
-                LifecycleTransitionRequest(
-                    issue_id=epic_id,
-                    target_status=LifecycleStatus.OPEN,
-                    expected_current=LifecycleStatus.DEFERRED,
+        epic_already_open = epic.lifecycle is LifecycleStatus.OPEN
+        if not epic_already_open:
+            asyncio.run(
+                store.transition_lifecycle(
+                    LifecycleTransitionRequest(
+                        issue_id=epic_id,
+                        target_status=LifecycleStatus.OPEN,
+                        expected_current=LifecycleStatus.DEFERRED,
+                    )
                 )
             )
-        )
         promoted_children: list[str] = []
         for child_id in promotable_children:
             asyncio.run(
@@ -302,10 +310,15 @@ def main() -> None:
         raise SystemExit(1) from exc
 
     print(f"promoted_epic: {epic_id}")
+    print(f"epic_convergence: {'already-open' if epic_already_open else 'promoted'}")
     if promoted_children:
         print("promoted_children: " + ", ".join(promoted_children))
     else:
         print("promoted_children: none")
+    if already_open_children:
+        print("already_open_children: " + ", ".join(already_open_children))
+    else:
+        print("already_open_children: none")
 
 
 if __name__ == "__main__":

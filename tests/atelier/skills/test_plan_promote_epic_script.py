@@ -161,6 +161,64 @@ def test_promote_epic_applies_store_lifecycle_transitions(monkeypatch, tmp_path:
     assert [request.issue_id for request in transitions] == ["at-epic", "at-epic.1"]
 
 
+def test_promote_epic_accepts_converged_open_targets(monkeypatch, tmp_path: Path) -> None:
+    module = _load_script_module()
+    transitions: list[object] = []
+
+    monkeypatch.setattr(
+        module,
+        "_resolve_context",
+        lambda **_kwargs: (tmp_path / ".beads", tmp_path / "repo", None),
+    )
+
+    epic_issue = _issue(
+        "at-epic",
+        title="Epic",
+        status="open",
+        description=(
+            "changeset_strategy: Keep review scope small.\n"
+            "related_context: at-context\n"
+            "promotion_note: ready for confirmation\n"
+        ),
+    )
+    child_issue = _issue(
+        "at-epic.1",
+        title="Child",
+        status="open",
+        description=("changeset_note: preserve lifecycle behavior\nrelated_context: at-context\n"),
+    )
+
+    class FakeStore:
+        async def get_epic(self, epic_id):
+            assert epic_id == "at-epic"
+            from atelier.store import LifecycleStatus
+
+            return SimpleNamespace(id=epic_id, lifecycle=LifecycleStatus.OPEN)
+
+        async def list_changesets(self, query):
+            del query
+            from atelier.store import LifecycleStatus
+
+            return (SimpleNamespace(id="at-epic.1", lifecycle=LifecycleStatus.OPEN),)
+
+        async def transition_lifecycle(self, request):
+            transitions.append(request)
+            return request
+
+    class FakeClient:
+        async def show(self, request):
+            return {"at-epic": epic_issue, "at-epic.1": child_issue}[request.issue_id]
+
+    monkeypatch.setattr(
+        module, "_build_store_and_client", lambda **_kwargs: (FakeStore(), FakeClient())
+    )
+    monkeypatch.setattr(sys, "argv", ["promote_epic.py", "--epic-id", "at-epic", "--yes"])
+
+    module.main()
+
+    assert transitions == []
+
+
 def test_promote_epic_preview_reads_canonical_notes_for_epic_and_child(
     monkeypatch,
     capsys: pytest.CaptureFixture[str],
