@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from atelier import prs
 from atelier.lib.beads import BeadsParseError, CloseIssueRequest, IssueRecord, SyncBeadsClient
 from atelier.messages import render_message
 from atelier.store import HookRecord, StartupMessageRecord, build_atelier_store
@@ -406,6 +407,47 @@ def test_close_transition_has_active_pr_lifecycle_treats_pushed_as_inactive_when
     assert (
         worker_store.close_transition_has_active_pr_lifecycle(
             {"status": "open", "description": "pr_state: pushed\n"}
+        )
+        is False
+    )
+
+
+def test_close_transition_has_active_pr_lifecycle_ignores_stale_active_state_with_live_merge(
+    monkeypatch,
+) -> None:
+    candidate = worker_store.EpicCloseCandidate(
+        id="at-epic.1",
+        lifecycle=worker_store.LifecycleStatus.CLOSED,
+        review=worker_store.StoreReviewMetadata(pr_state=worker_store.ReviewState.DRAFT_PR),
+        work_branch="feat/at-epic.1",
+    )
+
+    monkeypatch.setattr(
+        worker_store.git,
+        "git_origin_url",
+        lambda repo_root: "https://github.com/org/repo.git",
+    )
+    monkeypatch.setattr(worker_store.git, "git_ref_exists", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        worker_store.prs,
+        "lookup_github_pr_status",
+        lambda *args, **kwargs: prs.GithubPrLookup(
+            outcome="found",
+            payload={
+                "number": 101,
+                "state": "CLOSED",
+                "isDraft": False,
+                "reviewDecision": None,
+                "mergedAt": "2026-04-02T18:00:00Z",
+                "closedAt": "2026-04-02T18:00:00Z",
+            },
+        ),
+    )
+
+    assert (
+        worker_store.close_transition_has_active_pr_lifecycle(
+            candidate,
+            repo_root=Path("/repo"),
         )
         is False
     )
