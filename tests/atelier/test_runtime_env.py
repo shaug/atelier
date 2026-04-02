@@ -251,6 +251,7 @@ def test_ensure_projected_runtime_dependency_returns_when_import_succeeds(
     preserved = runtime_env.ensure_projected_runtime_dependency(
         repo_root=Path("/repo"),
         script_path=Path("/repo/skills/example.py"),
+        base_env={},
     )
 
     assert imported == [

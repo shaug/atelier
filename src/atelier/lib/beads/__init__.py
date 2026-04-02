@@ -38,6 +38,14 @@ from .models import (
     SupportedOperation,
     UpdateIssueRequest,
 )
+from .overflow import (
+    AsyncEventHistoryOverflowRecovery,
+    EventHistoryOverflowRepairResult,
+    SyncEventHistoryOverflowRecovery,
+    maybe_repair_after_event_history_overflow,
+    maybe_repair_after_event_history_overflow_sync,
+    overflow_repair_result_proves_convergence,
+)
 from .process import (
     SubprocessBeadsClient,
     SubprocessBeadsTransport,
@@ -51,6 +59,7 @@ __all__ = [
     "DEFAULT_COMPATIBILITY_POLICY",
     "DEFAULT_MINIMUM_BD_VERSION",
     "AsyncBeadsClient",
+    "AsyncEventHistoryOverflowRecovery",
     "BeadError",
     "Beads",
     "BeadsCapability",
@@ -70,6 +79,7 @@ __all__ = [
     "CompatibilityPolicy",
     "CreateIssueRequest",
     "DependencyMutationRequest",
+    "EventHistoryOverflowRepairResult",
     "IssueRecord",
     "IssueReference",
     "ListIssuesRequest",
@@ -85,10 +95,14 @@ __all__ = [
     "SupportedOperation",
     "SyncBeadsClient",
     "SyncBeadsProtocol",
+    "SyncEventHistoryOverflowRecovery",
     "UnsupportedOperationError",
     "UnsupportedVersionError",
     "UpdateIssueRequest",
     "build_sync_beads_client",
     "decode_help_output",
     "decode_version_output",
+    "maybe_repair_after_event_history_overflow",
+    "maybe_repair_after_event_history_overflow_sync",
+    "overflow_repair_result_proves_convergence",
 ]

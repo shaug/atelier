@@ -22,6 +22,7 @@ from ..lib.beads import (
     SyncBeadsProtocol,
     UpdateIssueRequest,
     build_sync_beads_client,
+    maybe_repair_after_event_history_overflow_sync,
 )
 from ..store import (
     AppendNotesRequest,
@@ -466,8 +467,6 @@ def ensure_agent_bead(
             _update_issue_with_overflow_repair(
                 UpdateIssueRequest(issue_id=issue_id, status=LifecycleStatus.OPEN.value),
                 bundle=bundle,
-                beads_root=beads_root,
-                repo_root=repo_root,
                 mutation_label="agent bead reopen",
             )
             refreshed = _show_issue(issue_id=issue_id, beads_root=beads_root, repo_root=repo_root)
@@ -598,50 +597,10 @@ def _issue_lifecycle_status(issue: IssueRecord) -> LifecycleStatus:
     if normalized is None:
         raise ValueError(f"issue {issue.id} is missing a canonical lifecycle status")
     return LifecycleStatus(normalized)
-
-
-def _overflow_repair_result_proves_convergence(issue_id: str, result: object) -> bool:
-    repaired_issue_id = _normalize_text(getattr(result, "issue_id", None))
-    verified_mutable = getattr(result, "verified_mutable", None)
-    return repaired_issue_id == issue_id and verified_mutable is True
-
-
-def _repair_issue_after_overflow(
-    issue_id: str,
-    *,
-    beads_root: Path,
-    repo_root: Path,
-    failure: BaseException,
-    mutation_label: str,
-    already_repaired: bool,
-) -> bool:
-    detail = str(failure).strip()
-    if not beads.is_event_history_overflow_detail(detail):
-        return False
-    if already_repaired:
-        raise RuntimeError(
-            f"{mutation_label} for {issue_id} still hit event-history overflow "
-            "after deterministic repair"
-        ) from failure
-    repair_result = beads.repair_issue_event_history_overflow(
-        issue_id,
-        beads_root=beads_root,
-        cwd=repo_root,
-    )
-    if not _overflow_repair_result_proves_convergence(issue_id, repair_result):
-        raise RuntimeError(
-            f"{mutation_label} for {issue_id} hit event-history overflow, "
-            "but repair evidence did not prove convergence"
-        ) from failure
-    return True
-
-
 def _update_issue_with_overflow_repair(
     request: UpdateIssueRequest,
     *,
     bundle: _StoreBundle,
-    beads_root: Path,
-    repo_root: Path,
     mutation_label: str,
 ) -> IssueRecord:
     repaired_after_overflow = False
@@ -649,10 +608,9 @@ def _update_issue_with_overflow_repair(
         try:
             return bundle.sync_client.update(request)
         except Exception as exc:
-            if not _repair_issue_after_overflow(
-                request.issue_id,
-                beads_root=beads_root,
-                repo_root=repo_root,
+            if not maybe_repair_after_event_history_overflow_sync(
+                bundle.sync_client,
+                issue_id=request.issue_id,
                 failure=exc,
                 mutation_label=mutation_label,
                 already_repaired=repaired_after_overflow,
@@ -729,8 +687,6 @@ def _fallback_issue_status_update(
         updated = _update_issue_with_overflow_repair(
             UpdateIssueRequest(issue_id=issue_id, status=target_status),
             bundle=bundle,
-            beads_root=beads_root,
-            repo_root=repo_root,
             mutation_label="lifecycle fallback update",
         )
         if _normalize_text(updated.status) == target_status:
@@ -883,8 +839,6 @@ def mark_issue_blocked(
                 description=desired_description,
             ),
             bundle=bundle,
-            beads_root=beads_root,
-            repo_root=repo_root,
             mutation_label="blocked transition update",
         )
         payload = _issue_payload(updated)
@@ -1016,8 +970,6 @@ def update_issue_labels(
         updated = _update_issue_with_overflow_repair(
             UpdateIssueRequest(issue_id=issue_id, labels=desired_labels),
             bundle=bundle,
-            beads_root=beads_root,
-            repo_root=repo_root,
             mutation_label="label update",
         )
         payload = _issue_payload(updated)
@@ -1072,8 +1024,6 @@ def release_epic_assignment(
             labels=desired_labels,
         ),
         bundle=bundle,
-        beads_root=beads_root,
-        repo_root=repo_root,
         mutation_label="epic release update",
     )
     payload = _issue_payload(updated)
@@ -1173,8 +1123,6 @@ def claim_epic(
             labels=tuple(sorted(desired_labels)),
         ),
         bundle=bundle,
-        beads_root=beads_root,
-        repo_root=repo_root,
         mutation_label="epic claim update",
     )
     payload = _issue_payload(updated)

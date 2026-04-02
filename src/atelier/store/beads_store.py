@@ -6,7 +6,6 @@ import datetime as dt
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import cast
 
 from atelier import changesets, external_ticket_reconcile, lifecycle, messages
@@ -27,6 +26,7 @@ from atelier.lib.beads import (
     ShowIssueRequest,
     SupportedOperation,
     UpdateIssueRequest,
+    maybe_repair_after_event_history_overflow,
 )
 from atelier.lib.beads import description_fields as bead_fields
 from atelier.lib.beads.client import BeadsDescriptionHistory
@@ -181,14 +181,6 @@ def _event_history_overflow_failure_detail(
 
 def _same_description_value(left: str | None, right: str | None) -> bool:
     return (left or "") == (right or "")
-
-
-def _overflow_repair_result_proves_convergence(issue_id: str, result: object) -> bool:
-    repaired_issue_id = _clean_text(getattr(result, "issue_id", None))
-    verified_mutable = getattr(result, "verified_mutable", None)
-    return repaired_issue_id == issue_id and verified_mutable is True
-
-
 async def _read_issue_slots(beads: Beads, issue_id: str) -> dict[str, str]:
     issue_store = getattr(beads, "_issue_store", None)
     if issue_store is not None and hasattr(issue_store, "show_slots"):
@@ -1579,26 +1571,23 @@ class AtelierStore:
             try:
                 updated = await self._beads.update(request)
             except BeadsCommandError as exc:
-                if not _is_retryable_description_update_conflict(
-                    request=request,
-                    error=exc,
-                ):
-                    raise
-                conflict_retries += 1
-                atelier_log.warning(
-                    f"issue={issue_id} concurrent description update conflict while "
-                    f"verifying store mutation; retrying "
-                    f"({conflict_retries}/{_MAX_UPDATE_ATTEMPTS})"
-                )
-                refreshed = await self._show_issue(issue_id)
-                if verify(refreshed):
-                    _log_description_conflict_convergence(
-                        issue_id=issue_id,
-                        conflict_retries=conflict_retries,
+                if _is_retryable_description_update_conflict(request=request, error=exc):
+                    conflict_retries += 1
+                    atelier_log.warning(
+                        f"issue={issue_id} concurrent description update conflict while "
+                        f"verifying store mutation; retrying "
+                        f"({conflict_retries}/{_MAX_UPDATE_ATTEMPTS})"
                     )
-                    return refreshed
-                continue
-                if not self._repair_issue_after_overflow(
+                    refreshed = await self._show_issue(issue_id)
+                    if verify(refreshed):
+                        _log_description_conflict_convergence(
+                            issue_id=issue_id,
+                            conflict_retries=conflict_retries,
+                        )
+                        return refreshed
+                    continue
+                if not await maybe_repair_after_event_history_overflow(
+                    self._beads,
                     issue_id=issue_id,
                     failure=exc,
                     mutation_label="issue update",
@@ -1608,7 +1597,8 @@ class AtelierStore:
                 repaired_after_overflow = True
                 continue
             except BeadsParseError as exc:
-                if self._repair_issue_after_overflow(
+                if await maybe_repair_after_event_history_overflow(
+                    self._beads,
                     issue_id=issue_id,
                     failure=exc,
                     mutation_label="issue update",
@@ -1724,48 +1714,55 @@ class AtelierStore:
         )
         return candidate
 
-    def _repair_issue_after_overflow(
+    async def _close_issue_with_overflow_repair(
         self,
+        request: CloseIssueRequest,
         *,
-        issue_id: str,
-        failure: BaseException,
         mutation_label: str,
-        already_repaired: bool,
-    ) -> bool:
-        from atelier import beads as legacy_beads
+    ) -> IssueRecord:
+        repaired_after_overflow = False
+        while True:
+            try:
+                updated = await self._beads.close(request)
+            except BeadsParseError as exc:
+                if await maybe_repair_after_event_history_overflow(
+                    self._beads,
+                    issue_id=request.issue_id,
+                    failure=exc,
+                    mutation_label=mutation_label,
+                    already_repaired=repaired_after_overflow,
+                ):
+                    repaired_after_overflow = True
+                    continue
+                refreshed = await self._show_issue(request.issue_id)
+                if (
+                    lifecycle.canonical_lifecycle_status(refreshed.status)
+                    == LifecycleStatus.CLOSED.value
+                ):
+                    return refreshed
+                raise RuntimeError(
+                    f"lifecycle close could not be verified for {request.issue_id}"
+                ) from exc
+            except Exception as exc:
+                if not await maybe_repair_after_event_history_overflow(
+                    self._beads,
+                    issue_id=request.issue_id,
+                    failure=exc,
+                    mutation_label=mutation_label,
+                    already_repaired=repaired_after_overflow,
+                ):
+                    raise
+                repaired_after_overflow = True
+                continue
 
-        detail = str(failure).strip()
-        if not legacy_beads.is_event_history_overflow_detail(detail):
-            return False
-        if already_repaired:
-            raise RuntimeError(
-                f"{mutation_label} for {issue_id} still hit event-history overflow "
-                "after deterministic repair"
-            ) from failure
-        repair_context = self._overflow_repair_context()
-        if repair_context is None:
-            raise RuntimeError(
-                f"{mutation_label} for {issue_id} hit event-history overflow, "
-                "but repair context is unavailable"
-            ) from failure
-        repair_result = legacy_beads.repair_issue_event_history_overflow(
-            issue_id,
-            beads_root=repair_context[0],
-            cwd=repair_context[1],
-        )
-        if not _overflow_repair_result_proves_convergence(issue_id, repair_result):
-            raise RuntimeError(
-                f"{mutation_label} for {issue_id} hit event-history overflow, "
-                "but repair evidence did not prove convergence"
-            ) from failure
-        return True
+            if lifecycle.canonical_lifecycle_status(updated.status) == LifecycleStatus.CLOSED.value:
+                return updated
 
-    def _overflow_repair_context(self) -> tuple[Path, Path] | None:
-        beads_root = getattr(self._beads, "_beads_root", None)
-        cwd = getattr(self._beads, "_cwd", None)
-        if not isinstance(beads_root, Path) or not isinstance(cwd, Path):
-            return None
-        return beads_root, cwd
+            refreshed = await self._show_issue(request.issue_id)
+            if lifecycle.canonical_lifecycle_status(refreshed.status) == LifecycleStatus.CLOSED.value:
+                return refreshed
+
+            raise RuntimeError(f"lifecycle close could not be verified for {request.issue_id}")
 
     async def _fail_closed_created_issue(
         self,

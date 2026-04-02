@@ -40,6 +40,7 @@ from .models import (
     SupportedOperation,
     UpdateIssueRequest,
 )
+from .overflow import EventHistoryOverflowRepairResult
 
 _SEMVER_SEARCH: Pattern[str] = compile(r"\bv?(\d+)\.(\d+)\.(\d+)\b")
 _FLAG_SEARCH: Pattern[str] = compile(r"--[a-z0-9][a-z0-9-]*")
@@ -267,6 +268,12 @@ def _read_description_history(
     return tuple(records)
 
 
+def _legacy_beads_module():
+    from atelier import beads as legacy_beads
+
+    return legacy_beads
+
+
 class SubprocessBeadsClient(Beads):
     def __init__(
         self,
@@ -293,6 +300,34 @@ class SubprocessBeadsClient(Beads):
     @property
     def compatibility_policy(self) -> CompatibilityPolicy:
         return self._compatibility_policy
+
+    def is_event_history_overflow_detail(self, detail: str | None) -> bool:
+        return _legacy_beads_module().is_event_history_overflow_detail(detail)
+
+    async def repair_event_history_overflow(
+        self, issue_id: str
+    ) -> EventHistoryOverflowRepairResult:
+        beads_root = self._resolve_beads_root()
+        if beads_root is None:
+            raise RuntimeError("event-history overflow repair requires a configured Beads root")
+        if self._cwd is None:
+            raise RuntimeError(
+                "event-history overflow repair requires a configured repository root"
+            )
+        repair_result = await asyncio.to_thread(
+            _legacy_beads_module().repair_issue_event_history_overflow,
+            issue_id,
+            beads_root=beads_root,
+            cwd=self._cwd,
+        )
+        return EventHistoryOverflowRepairResult(
+            issue_id=repair_result.issue_id,
+            repaired=repair_result.repaired,
+            verified_mutable=repair_result.verified_mutable,
+            snapshot_bytes_before=repair_result.snapshot_bytes_before,
+            snapshot_bytes_after=repair_result.snapshot_bytes_after,
+            retained_notes_chars=repair_result.retained_notes_chars,
+        )
 
     async def inspect_environment(self) -> BeadsEnvironment:
         if self._environment_cache is not None:

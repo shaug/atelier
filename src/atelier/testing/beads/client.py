@@ -24,6 +24,7 @@ from atelier.lib.beads import (
     UnsupportedOperationError,
     UpdateIssueRequest,
 )
+from atelier.lib.beads.overflow import EventHistoryOverflowRepairResult
 
 from .contract import IN_MEMORY_BEADS_VERSION
 from .core_issues import InMemoryCoreIssuesHandler
@@ -128,6 +129,18 @@ class InMemoryBeadsClient(Beads):
         """
 
         return self._issue_store.description_history(issue_id)
+
+
+    def is_event_history_overflow_detail(self, detail: str | None) -> bool:
+        del detail
+        return False
+
+    async def repair_event_history_overflow(
+        self, issue_id: str
+    ) -> EventHistoryOverflowRepairResult:
+        raise UnsupportedOperationError(
+            f"in-memory Tier 0 backend does not support overflow repair for {issue_id}"
+        )
 
     async def show(self, request: ShowIssueRequest) -> IssueRecord:
         await self._ensure_operation_supported(SupportedOperation.SHOW)

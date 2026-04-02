@@ -2094,14 +2094,15 @@ def test_update_review_repairs_event_history_overflow_and_retries(
         return await original_update(request)
 
     monkeypatch.setattr(client, "update", update_with_overflow)
-    monkeypatch.setattr(store, "_overflow_repair_context", lambda: (Path("/beads"), Path("/repo")))
     monkeypatch.setattr(
-        "atelier.beads.repair_issue_event_history_overflow",
-        lambda issue_id, *, beads_root, cwd: (
-            repairs.append(f"{issue_id}:{beads_root}:{cwd}")
-            or SimpleNamespace(issue_id=issue_id, verified_mutable=True)
-        ),
+        client, "is_event_history_overflow_detail", lambda detail: "old_value" in detail
     )
+
+    async def repair_event_history_overflow(issue_id: str):
+        repairs.append(issue_id)
+        return SimpleNamespace(issue_id=issue_id, verified_mutable=True)
+
+    monkeypatch.setattr(client, "repair_event_history_overflow", repair_event_history_overflow)
 
     review = _RUN(
         store.update_review(
@@ -2115,7 +2116,7 @@ def test_update_review_repairs_event_history_overflow_and_retries(
 
     assert review.review.pr_state is ReviewState.IN_REVIEW
     assert attempts == 2
-    assert repairs == ["at-change:/beads:/repo"]
+    assert repairs == ["at-change"]
 
 
 def test_update_review_fails_closed_when_overflow_repair_lacks_convergence_evidence(
@@ -2140,16 +2141,14 @@ def test_update_review_fails_closed_when_overflow_repair_lacks_convergence_evide
         )
 
     monkeypatch.setattr(client, "update", update_with_overflow)
-    monkeypatch.setattr(store, "_overflow_repair_context", lambda: (Path("/beads"), Path("/repo")))
     monkeypatch.setattr(
-        "atelier.beads.repair_issue_event_history_overflow",
-        lambda _issue_id, *, beads_root, cwd: SimpleNamespace(
-            issue_id="wrong-issue",
-            verified_mutable=False,
-            beads_root=beads_root,
-            cwd=cwd,
-        ),
+        client, "is_event_history_overflow_detail", lambda detail: "old_value" in detail
     )
+
+    async def repair_event_history_overflow(_issue_id: str):
+        return SimpleNamespace(issue_id="wrong-issue", verified_mutable=False)
+
+    monkeypatch.setattr(client, "repair_event_history_overflow", repair_event_history_overflow)
 
     with pytest.raises(RuntimeError, match="repair evidence did not prove convergence"):
         _RUN(

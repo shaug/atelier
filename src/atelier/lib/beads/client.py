@@ -19,6 +19,7 @@ from .models import (
     ShowIssueRequest,
     UpdateIssueRequest,
 )
+from .overflow import EventHistoryOverflowRepairResult
 
 
 @runtime_checkable
@@ -38,6 +39,12 @@ class Beads(Protocol):
     async def inspect_environment(self) -> BeadsEnvironment: ...
 
     async def inspect_startup_state(self) -> BeadsStartupState: ...
+
+    def is_event_history_overflow_detail(self, detail: str | None) -> bool: ...
+
+    async def repair_event_history_overflow(
+        self, issue_id: str
+    ) -> EventHistoryOverflowRepairResult: ...
 
     async def show(self, request: ShowIssueRequest) -> IssueRecord: ...
 

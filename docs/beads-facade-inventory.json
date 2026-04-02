@@ -35,7 +35,7 @@
           "dotted_refs": 0
         },
         {
-          "path": "src/atelier/store/beads_store.py",
+          "path": "src/atelier/lib/beads/process.py",
           "imports": [
             {
               "alias": "legacy_beads",
@@ -110,11 +110,6 @@
             }
           ],
           "dotted_refs": 327
-        },
-        {
-          "path": "tests/atelier/test_store_contract.py",
-          "imports": [],
-          "dotted_refs": 2
         }
       ]
     }

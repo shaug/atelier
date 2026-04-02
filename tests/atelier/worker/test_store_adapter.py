@@ -486,6 +486,13 @@ def test_mark_issue_blocked_repairs_event_history_overflow_and_retries(monkeypat
     repairs: list[str] = []
 
     class _FakeSyncClient:
+        def is_event_history_overflow_detail(self, detail):
+            return "old_value" in detail
+
+        def repair_event_history_overflow(self, issue_id):
+            repairs.append(issue_id)
+            return SimpleNamespace(issue_id=issue_id, verified_mutable=True)
+
         def update(self, request):
             nonlocal attempts
             attempts += 1
@@ -518,14 +525,6 @@ def test_mark_issue_blocked_repairs_event_history_overflow_and_retries(monkeypat
             "description": "",
         },
     )
-    monkeypatch.setattr(
-        worker_store.beads,
-        "repair_issue_event_history_overflow",
-        lambda issue_id, *, beads_root, cwd: (
-            repairs.append(f"{issue_id}:{beads_root}:{cwd}")
-            or SimpleNamespace(issue_id=issue_id, verified_mutable=True)
-        ),
-    )
     worker_store.clear_bundle_cache()
 
     try:
@@ -539,7 +538,7 @@ def test_mark_issue_blocked_repairs_event_history_overflow_and_retries(monkeypat
         worker_store.clear_bundle_cache()
 
     assert attempts == 2
-    assert repairs == ["at-epic.1:/beads:/repo"]
+    assert repairs == ["at-epic.1"]
 
 
 def test_update_changeset_review_preserves_existing_review_fields(monkeypatch) -> None:

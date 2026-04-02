@@ -20,6 +20,7 @@ from .models import (
     ShowIssueRequest,
     UpdateIssueRequest,
 )
+from .overflow import EventHistoryOverflowRepairResult
 from .process import SubprocessBeadsClient
 
 
@@ -30,6 +31,10 @@ class SyncBeadsProtocol(Protocol):
     def inspect_environment(self) -> BeadsEnvironment: ...
 
     def inspect_startup_state(self) -> BeadsStartupState: ...
+
+    def is_event_history_overflow_detail(self, detail: str | None) -> bool: ...
+
+    def repair_event_history_overflow(self, issue_id: str) -> EventHistoryOverflowRepairResult: ...
 
     def show(self, request: ShowIssueRequest) -> IssueRecord: ...
 
@@ -71,6 +76,12 @@ class SyncBeadsClient:
 
     def inspect_startup_state(self) -> BeadsStartupState:
         return asyncio.run(self._async_client.inspect_startup_state())
+
+    def is_event_history_overflow_detail(self, detail: str | None) -> bool:
+        return self._async_client.is_event_history_overflow_detail(detail)
+
+    def repair_event_history_overflow(self, issue_id: str) -> EventHistoryOverflowRepairResult:
+        return asyncio.run(self._async_client.repair_event_history_overflow(issue_id))
 
     def show(self, request: ShowIssueRequest) -> IssueRecord:
         return asyncio.run(self._async_client.show(request))
