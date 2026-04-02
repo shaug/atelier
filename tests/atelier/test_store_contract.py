@@ -5,6 +5,7 @@ import json
 import sqlite3
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from typing import get_args, get_origin, get_type_hints
 
 import pytest
@@ -2061,6 +2062,105 @@ def test_beads_store_fails_closed() -> None:
         )
     with pytest.raises(UnsupportedOperationError, match="dep-add"):
         _RUN(store.add_dependency(DependencyMutation(issue_id="at-change", depends_on_id="at-dep")))
+
+
+def test_update_review_repairs_event_history_overflow_and_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _ = build_in_memory_beads_client(
+        issues=(
+            BUILDER.issue("at-epic", issue_type="epic", labels=("at:epic",)),
+            BUILDER.issue(
+                "at-change",
+                parent="at-epic",
+                status="open",
+                description="pr_state: draft-pr\n",
+            ),
+        )
+    )
+    store = build_atelier_store(beads=client)
+    original_update = client.update
+    attempts = 0
+    repairs: list[str] = []
+
+    async def update_with_overflow(request):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise BeadsCommandError(
+                "failed to record event: Error 1105 (HY000): string is too large "
+                "for column 'old_value'"
+            )
+        return await original_update(request)
+
+    monkeypatch.setattr(client, "update", update_with_overflow)
+    monkeypatch.setattr(store, "_overflow_repair_context", lambda: (Path("/beads"), Path("/repo")))
+    monkeypatch.setattr(
+        "atelier.beads.repair_issue_event_history_overflow",
+        lambda issue_id, *, beads_root, cwd: (
+            repairs.append(f"{issue_id}:{beads_root}:{cwd}")
+            or SimpleNamespace(issue_id=issue_id, verified_mutable=True)
+        ),
+    )
+
+    review = _RUN(
+        store.update_review(
+            UpdateReviewRequest(
+                changeset_id="at-change",
+                review=ReviewMetadata(pr_state=ReviewState.IN_REVIEW),
+                preserve_existing=True,
+            )
+        )
+    )
+
+    assert review.review.pr_state is ReviewState.IN_REVIEW
+    assert attempts == 2
+    assert repairs == ["at-change:/beads:/repo"]
+
+
+def test_update_review_fails_closed_when_overflow_repair_lacks_convergence_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _ = build_in_memory_beads_client(
+        issues=(
+            BUILDER.issue("at-epic", issue_type="epic", labels=("at:epic",)),
+            BUILDER.issue(
+                "at-change",
+                parent="at-epic",
+                status="open",
+                description="pr_state: draft-pr\n",
+            ),
+        )
+    )
+    store = build_atelier_store(beads=client)
+
+    async def update_with_overflow(_request):
+        raise BeadsCommandError(
+            "failed to record event: Error 1105 (HY000): string is too large for column 'old_value'"
+        )
+
+    monkeypatch.setattr(client, "update", update_with_overflow)
+    monkeypatch.setattr(store, "_overflow_repair_context", lambda: (Path("/beads"), Path("/repo")))
+    monkeypatch.setattr(
+        "atelier.beads.repair_issue_event_history_overflow",
+        lambda _issue_id, *, beads_root, cwd: SimpleNamespace(
+            issue_id="wrong-issue",
+            verified_mutable=False,
+            beads_root=beads_root,
+            cwd=cwd,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="repair evidence did not prove convergence"):
+        _RUN(
+            store.update_review(
+                UpdateReviewRequest(
+                    changeset_id="at-change",
+                    review=ReviewMetadata(pr_state=ReviewState.IN_REVIEW),
+                    preserve_existing=True,
+                )
+            )
+        )
 
 
 def test_beads_store_public_message_listing_skips_compatibility_routing() -> None:

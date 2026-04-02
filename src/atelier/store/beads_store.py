@@ -6,6 +6,7 @@ import datetime as dt
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import cast
 
 from atelier import changesets, external_ticket_reconcile, lifecycle, messages
@@ -180,6 +181,12 @@ def _event_history_overflow_failure_detail(
 
 def _same_description_value(left: str | None, right: str | None) -> bool:
     return (left or "") == (right or "")
+
+
+def _overflow_repair_result_proves_convergence(issue_id: str, result: object) -> bool:
+    repaired_issue_id = _clean_text(getattr(result, "issue_id", None))
+    verified_mutable = getattr(result, "verified_mutable", None)
+    return repaired_issue_id == issue_id and verified_mutable is True
 
 
 async def _read_issue_slots(beads: Beads, issue_id: str) -> dict[str, str]:
@@ -1426,10 +1433,16 @@ class AtelierStore:
                 reason=request.reason,
             )
         if request.target_status is LifecycleStatus.CLOSED:
-            await self._close_issue_until_verified(
-                request.issue_id,
-                reason=request.reason,
+            updated = await self._close_issue_with_overflow_repair(
+                CloseIssueRequest(issue_id=request.issue_id, reason=request.reason),
+                mutation_label="lifecycle close",
             )
+            if lifecycle.canonical_lifecycle_status(updated.status) != LifecycleStatus.CLOSED.value:
+                refreshed = await self._show_issue(request.issue_id)
+                if lifecycle.canonical_lifecycle_status(refreshed.status) != "closed":
+                    raise RuntimeError(
+                        f"lifecycle close could not be verified for {request.issue_id}"
+                    )
         else:
             expected_from = request.expected_current
 
@@ -1467,31 +1480,53 @@ class AtelierStore:
             reason=request.reason,
         )
 
-    async def _close_issue_until_verified(
+    async def _close_issue_with_overflow_repair(
         self,
-        issue_id: str,
+        request: CloseIssueRequest,
         *,
-        reason: str | None,
+        mutation_label: str,
     ) -> IssueRecord:
-        try:
-            updated = await self._beads.close(CloseIssueRequest(issue_id=issue_id, reason=reason))
-        except BeadsParseError as exc:
-            refreshed = await self._show_issue(issue_id)
-            if (
-                lifecycle.canonical_lifecycle_status(refreshed.status)
-                == LifecycleStatus.CLOSED.value
-            ):
+        repaired_after_overflow = False
+        while True:
+            try:
+                updated = await self._beads.close(request)
+            except BeadsParseError as exc:
+                if self._repair_issue_after_overflow(
+                    issue_id=request.issue_id,
+                    failure=exc,
+                    mutation_label=mutation_label,
+                    already_repaired=repaired_after_overflow,
+                ):
+                    repaired_after_overflow = True
+                    continue
+                refreshed = await self._show_issue(request.issue_id)
+                if (
+                    lifecycle.canonical_lifecycle_status(refreshed.status)
+                    == LifecycleStatus.CLOSED.value
+                ):
+                    return refreshed
+                raise RuntimeError(
+                    f"lifecycle close could not be verified for {request.issue_id}"
+                ) from exc
+            except Exception as exc:
+                if not self._repair_issue_after_overflow(
+                    issue_id=request.issue_id,
+                    failure=exc,
+                    mutation_label=mutation_label,
+                    already_repaired=repaired_after_overflow,
+                ):
+                    raise
+                repaired_after_overflow = True
+                continue
+
+            if lifecycle.canonical_lifecycle_status(updated.status) == LifecycleStatus.CLOSED.value:
+                return updated
+
+            refreshed = await self._show_issue(request.issue_id)
+            if lifecycle.canonical_lifecycle_status(refreshed.status) == LifecycleStatus.CLOSED.value:
                 return refreshed
-            raise RuntimeError(f"lifecycle close could not be verified for {issue_id}") from exc
 
-        if lifecycle.canonical_lifecycle_status(updated.status) == LifecycleStatus.CLOSED.value:
-            return updated
-
-        refreshed = await self._show_issue(issue_id)
-        if lifecycle.canonical_lifecycle_status(refreshed.status) == LifecycleStatus.CLOSED.value:
-            return refreshed
-
-        raise RuntimeError(f"lifecycle close could not be verified for {issue_id}")
+            raise RuntimeError(f"lifecycle close could not be verified for {request.issue_id}")
 
     async def _show_issue(self, issue_id: str) -> IssueRecord:
         try:
@@ -1524,6 +1559,7 @@ class AtelierStore:
         """
         conflict_retries = 0
         last_failure_detail: str | None = None
+        repaired_after_overflow = False
         for _attempt in range(_MAX_UPDATE_ATTEMPTS):
             current = await self._show_issue(issue_id)
             if verify(current):
@@ -1562,7 +1598,24 @@ class AtelierStore:
                     )
                     return refreshed
                 continue
+                if not self._repair_issue_after_overflow(
+                    issue_id=issue_id,
+                    failure=exc,
+                    mutation_label="issue update",
+                    already_repaired=repaired_after_overflow,
+                ):
+                    raise
+                repaired_after_overflow = True
+                continue
             except BeadsParseError as exc:
+                if self._repair_issue_after_overflow(
+                    issue_id=issue_id,
+                    failure=exc,
+                    mutation_label="issue update",
+                    already_repaired=repaired_after_overflow,
+                ):
+                    repaired_after_overflow = True
+                    continue
                 if not _is_empty_output_update_parse_error(exc):
                     raise
                 refreshed = await self._show_issue(issue_id)
@@ -1671,6 +1724,49 @@ class AtelierStore:
         )
         return candidate
 
+    def _repair_issue_after_overflow(
+        self,
+        *,
+        issue_id: str,
+        failure: BaseException,
+        mutation_label: str,
+        already_repaired: bool,
+    ) -> bool:
+        from atelier import beads as legacy_beads
+
+        detail = str(failure).strip()
+        if not legacy_beads.is_event_history_overflow_detail(detail):
+            return False
+        if already_repaired:
+            raise RuntimeError(
+                f"{mutation_label} for {issue_id} still hit event-history overflow "
+                "after deterministic repair"
+            ) from failure
+        repair_context = self._overflow_repair_context()
+        if repair_context is None:
+            raise RuntimeError(
+                f"{mutation_label} for {issue_id} hit event-history overflow, "
+                "but repair context is unavailable"
+            ) from failure
+        repair_result = legacy_beads.repair_issue_event_history_overflow(
+            issue_id,
+            beads_root=repair_context[0],
+            cwd=repair_context[1],
+        )
+        if not _overflow_repair_result_proves_convergence(issue_id, repair_result):
+            raise RuntimeError(
+                f"{mutation_label} for {issue_id} hit event-history overflow, "
+                "but repair evidence did not prove convergence"
+            ) from failure
+        return True
+
+    def _overflow_repair_context(self) -> tuple[Path, Path] | None:
+        beads_root = getattr(self._beads, "_beads_root", None)
+        cwd = getattr(self._beads, "_cwd", None)
+        if not isinstance(beads_root, Path) or not isinstance(cwd, Path):
+            return None
+        return beads_root, cwd
+
     async def _fail_closed_created_issue(
         self,
         *,
@@ -1680,7 +1776,10 @@ class AtelierStore:
     ) -> None:
         transition_detail = str(transition_error).strip() or "status update failed"
         try:
-            await self._close_issue_until_verified(issue_id, reason=_FAIL_CLOSED_REASON)
+            await self._close_issue_with_overflow_repair(
+                CloseIssueRequest(issue_id=issue_id, reason=_FAIL_CLOSED_REASON),
+                mutation_label="fail-closed close",
+            )
         except Exception as close_error:
             close_detail = str(close_error).strip() or "close command failed"
             raise RuntimeError(

@@ -463,8 +463,12 @@ def ensure_agent_bead(
     if existing is not None:
         issue_id = str(existing.get("id") or "").strip()
         if issue_id and lifecycle.canonical_lifecycle_status(existing.get("status")) == "closed":
-            bundle.sync_client.update(
-                UpdateIssueRequest(issue_id=issue_id, status=LifecycleStatus.OPEN.value)
+            _update_issue_with_overflow_repair(
+                UpdateIssueRequest(issue_id=issue_id, status=LifecycleStatus.OPEN.value),
+                bundle=bundle,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                mutation_label="agent bead reopen",
             )
             refreshed = _show_issue(issue_id=issue_id, beads_root=beads_root, repo_root=repo_root)
             if (
@@ -501,7 +505,6 @@ def resolve_hooked_epic(
     The returned hook is verified against live issue ownership before it is
     accepted.
     """
-
     hook_id = get_agent_hook(agent_bead_id, beads_root=beads_root, repo_root=repo_root)
     if hook_id is None:
         return None
@@ -597,6 +600,67 @@ def _issue_lifecycle_status(issue: IssueRecord) -> LifecycleStatus:
     return LifecycleStatus(normalized)
 
 
+def _overflow_repair_result_proves_convergence(issue_id: str, result: object) -> bool:
+    repaired_issue_id = _normalize_text(getattr(result, "issue_id", None))
+    verified_mutable = getattr(result, "verified_mutable", None)
+    return repaired_issue_id == issue_id and verified_mutable is True
+
+
+def _repair_issue_after_overflow(
+    issue_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+    failure: BaseException,
+    mutation_label: str,
+    already_repaired: bool,
+) -> bool:
+    detail = str(failure).strip()
+    if not beads.is_event_history_overflow_detail(detail):
+        return False
+    if already_repaired:
+        raise RuntimeError(
+            f"{mutation_label} for {issue_id} still hit event-history overflow "
+            "after deterministic repair"
+        ) from failure
+    repair_result = beads.repair_issue_event_history_overflow(
+        issue_id,
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    if not _overflow_repair_result_proves_convergence(issue_id, repair_result):
+        raise RuntimeError(
+            f"{mutation_label} for {issue_id} hit event-history overflow, "
+            "but repair evidence did not prove convergence"
+        ) from failure
+    return True
+
+
+def _update_issue_with_overflow_repair(
+    request: UpdateIssueRequest,
+    *,
+    bundle: _StoreBundle,
+    beads_root: Path,
+    repo_root: Path,
+    mutation_label: str,
+) -> IssueRecord:
+    repaired_after_overflow = False
+    while True:
+        try:
+            return bundle.sync_client.update(request)
+        except Exception as exc:
+            if not _repair_issue_after_overflow(
+                request.issue_id,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                failure=exc,
+                mutation_label=mutation_label,
+                already_repaired=repaired_after_overflow,
+            ):
+                raise
+            repaired_after_overflow = True
+
+
 def _append_issue_notes(description: str | None, *, notes: tuple[str, ...]) -> str:
     base = description.rstrip("\n") if description else ""
     joined = "\n".join(note for note in notes if note)
@@ -662,8 +726,12 @@ def _fallback_issue_status_update(
             )
         if _normalize_text(current.get("status")) == target_status:
             return
-        updated = bundle.sync_client.update(
-            UpdateIssueRequest(issue_id=issue_id, status=target_status)
+        updated = _update_issue_with_overflow_repair(
+            UpdateIssueRequest(issue_id=issue_id, status=target_status),
+            bundle=bundle,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            mutation_label="lifecycle fallback update",
         )
         if _normalize_text(updated.status) == target_status:
             return
@@ -808,12 +876,16 @@ def mark_issue_blocked(
         ):
             return
 
-        updated = bundle.sync_client.update(
+        updated = _update_issue_with_overflow_repair(
             UpdateIssueRequest(
                 issue_id=issue_id,
                 status=LifecycleStatus.BLOCKED.value,
                 description=desired_description,
-            )
+            ),
+            bundle=bundle,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            mutation_label="blocked transition update",
         )
         payload = _issue_payload(updated)
         payload_description = _normalize_text(payload.get("description"))
@@ -941,8 +1013,12 @@ def update_issue_labels(
         desired_labels = tuple(sorted((current_labels | desired_add) - desired_remove))
         if current_labels == set(desired_labels):
             return current
-        updated = bundle.sync_client.update(
-            UpdateIssueRequest(issue_id=issue_id, labels=desired_labels)
+        updated = _update_issue_with_overflow_repair(
+            UpdateIssueRequest(issue_id=issue_id, labels=desired_labels),
+            bundle=bundle,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            mutation_label="label update",
         )
         payload = _issue_payload(updated)
         updated_labels = _labels_from_payload(payload.get("labels"))
@@ -988,13 +1064,17 @@ def release_epic_assignment(
     desired_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
     if desired_status not in {"closed", "done"}:
         desired_status = "open"
-    updated = bundle.sync_client.update(
+    updated = _update_issue_with_overflow_repair(
         UpdateIssueRequest(
             issue_id=epic_id,
             assignee="",
             status=desired_status,
             labels=desired_labels,
-        )
+        ),
+        bundle=bundle,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        mutation_label="epic release update",
     )
     payload = _issue_payload(updated)
     if str(payload.get("assignee") or "").strip():
@@ -1085,13 +1165,17 @@ def claim_epic(
     ):
         desired_labels.add(beads.issue_label("epic", beads_root=beads_root))
 
-    updated = bundle.sync_client.update(
+    updated = _update_issue_with_overflow_repair(
         UpdateIssueRequest(
             issue_id=epic_id,
             assignee=agent_id,
             status=LifecycleStatus.IN_PROGRESS.value,
             labels=tuple(sorted(desired_labels)),
-        )
+        ),
+        bundle=bundle,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        mutation_label="epic claim update",
     )
     payload = _issue_payload(updated)
     if _claim_complete(payload, agent_id=agent_id, beads_root=beads_root):
