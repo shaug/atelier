@@ -567,6 +567,28 @@ def test_update_review_fails_closed_when_later_history_entry_diverges(
         )
 
 
+def test_update_review_fails_closed_with_event_history_overflow_detail() -> None:
+    command_backend = InMemoryBeadsBackend(seeded_issues=_parity_seed_issues())
+    transport = _EventOverflowSubprocessTransport(command_backend)
+    client = SubprocessBeadsClient(transport=transport)
+    store = build_atelier_store(beads=client)
+    with pytest.raises(
+        RuntimeError,
+        match="event-history overflow blocked the mutation.*too large for column 'old_value'",
+    ):
+        _RUN(
+            store.update_review(
+                UpdateReviewRequest(
+                    changeset_id="at-change",
+                    review=ReviewMetadata(pr_state=ReviewState.MERGED),
+                    preserve_existing=True,
+                )
+            )
+        )
+
+    assert transport.overflow_attempts == 1
+
+
 def test_append_notes_retries_after_concurrent_description_conflict(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -882,6 +904,34 @@ class _InMemorySubprocessTransport:
             stdout=completed.stdout,
             stderr=completed.stderr,
         )
+
+
+class _EventOverflowSubprocessTransport(_InMemorySubprocessTransport):
+    """Simulate a subprocess update blocked by event-history overflow."""
+
+    def __init__(self, backend: InMemoryBeadsBackend, *, issue_id: str = "at-change") -> None:
+        super().__init__(backend)
+        self._issue_id = issue_id
+        self.repaired = False
+        self.overflow_attempts = 0
+
+    async def execute(self, request: BeadsCommandRequest) -> BeadsCommandResult:
+        if (
+            request.argv[:4] == ("bd", "update", self._issue_id, "--json")
+            and "--description" in request.argv
+            and not self.repaired
+        ):
+            self.overflow_attempts += 1
+            return BeadsCommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="",
+                stderr=(
+                    f"Error updating {self._issue_id}: failed to record event: "
+                    "Error 1105 (HY000): string is too large for column 'old_value'"
+                ),
+            )
+        return await super().execute(request)
 
 
 def _parity_seed_issues() -> tuple[dict[str, object], ...]:
