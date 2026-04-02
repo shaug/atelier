@@ -4956,6 +4956,10 @@ def _mysql_utf8mb4_literal(value: str) -> str:
     return f"CONVERT(0x{encoded} USING utf8mb4)"
 
 
+def _uses_direct_sqlite_overflow_repair_backend(backend: str | None) -> bool:
+    return backend != "dolt"
+
+
 def _repair_overflowed_issue_notes_sql(
     *,
     issue_id: str,
@@ -4966,7 +4970,7 @@ def _repair_overflowed_issue_notes_sql(
 ) -> None:
     issue_literal = _sql_issue_id_literal(issue_id)
     backend = _configured_beads_backend(beads_root)
-    if backend == "dolt":
+    if not _uses_direct_sqlite_overflow_repair_backend(backend):
         sql = (
             "UPDATE issues "
             f"SET notes = {_mysql_utf8mb4_literal(repaired_notes)}, "
@@ -5039,7 +5043,7 @@ def _read_overflow_repair_backend_readback(
     beads_root: Path,
     cwd: Path,
 ) -> _OverflowRepairBackendReadback | None:
-    if backend == "sqlite":
+    if _uses_direct_sqlite_overflow_repair_backend(backend):
         db_path = beads_root / "beads.db"
         if not db_path.exists():
             return None

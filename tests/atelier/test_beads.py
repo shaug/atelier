@@ -6666,6 +6666,34 @@ def test_event_history_overflow_recovery_guidance_is_backend_specific() -> None:
     assert "does not support `bd history` or `bd restore`" in sqlite_guidance
 
 
+def _create_overflow_repair_sqlite_issue(
+    beads_root: Path,
+    *,
+    issue_id: str,
+    notes: str,
+) -> None:
+    with sqlite3.connect(beads_root / "beads.db") as connection:
+        connection.execute(
+            """
+            CREATE TABLE issues (
+                id TEXT PRIMARY KEY,
+                notes TEXT,
+                compaction_level INTEGER DEFAULT 0,
+                compacted_at TEXT,
+                original_size INTEGER
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO issues (id, notes, compaction_level, compacted_at, original_size)
+            VALUES (?, ?, 0, NULL, NULL)
+            """,
+            (issue_id, notes),
+        )
+        connection.commit()
+
+
 def test_repair_issue_event_history_overflow_compacts_notes_and_restores_mutability() -> None:
     initial_notes = "old note line\n" * 5000
     issue_state = {
@@ -6857,6 +6885,96 @@ def test_repair_issue_event_history_overflow_accepts_backend_readback_when_show_
     assert sql_calls
 
 
+def test_repair_issue_event_history_overflow_accepts_sqlite_readback_when_metadata_is_missing(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    initial_notes = "old note line\n" * 5000
+    issue_state = {
+        "id": "at-overflow",
+        "title": "Overflowed issue",
+        "description": "scope: repair event overflow\n",
+        "acceptance_criteria": "restore issue mutability\n",
+        "notes": initial_notes,
+        "status": "in_progress",
+        "priority": 2,
+        "issue_type": "task",
+        "owner": "scott",
+        "created_at": "2026-03-26T00:00:00Z",
+        "created_by": "planner",
+        "updated_at": "2026-03-26T00:00:00Z",
+    }
+    _create_overflow_repair_sqlite_issue(
+        beads_root,
+        issue_id="at-overflow",
+        notes=initial_notes,
+    )
+    status_attempts = 0
+    show_calls = 0
+
+    def fake_run_bd_json(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        nonlocal show_calls
+        if args[:2] == ["show", "at-overflow"]:
+            show_calls += 1
+            return [dict(issue_state)]
+        raise AssertionError(f"unexpected bd json command: {args}")
+
+    def fake_run_bd_command(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+    ) -> CompletedProcess[str]:
+        del beads_root, cwd, allow_failure
+        nonlocal status_attempts
+        if args[:3] == ["update", "at-overflow", "--status"]:
+            status_attempts += 1
+            return CompletedProcess(args=["bd", *args], returncode=0, stdout="", stderr="")
+        raise AssertionError(f"unexpected bd command: {args}")
+
+    result = None
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch(
+            "atelier.beads.run_bd_command",
+            side_effect=fake_run_bd_command,
+        ),
+    ):
+        result = beads.repair_issue_event_history_overflow(
+            "at-overflow",
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+
+    assert result is not None
+    assert result.repaired is True
+    assert result.verified_mutable is True
+    assert result.snapshot_bytes_before > result.snapshot_bytes_after
+    assert status_attempts == 1
+    assert show_calls == 2
+    with sqlite3.connect(beads_root / "beads.db") as connection:
+        row = connection.execute(
+            "SELECT notes, compaction_level, original_size FROM issues WHERE id = ?",
+            ("at-overflow",),
+        ).fetchone()
+    assert row is not None
+    assert isinstance(row[0], str)
+    assert row[0].startswith("overflow_repair:")
+    assert row[1] == 1
+    assert isinstance(row[2], int)
+    assert row[2] >= result.snapshot_bytes_before
+
+
 def test_repair_issue_event_history_overflow_fails_closed_for_backend_readback_mismatch() -> None:
     initial_notes = "old note line\n" * 5000
     issue_state = {
@@ -6923,6 +7041,34 @@ def test_repair_issue_event_history_overflow_fails_closed_for_backend_readback_m
                 beads_root=Path("/beads"),
                 cwd=Path("/repo"),
             )
+
+
+def test_read_overflow_repair_backend_readback_uses_sqlite_when_metadata_is_invalid(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    (beads_root / "metadata.json").write_text("{not-json", encoding="utf-8")
+    _create_overflow_repair_sqlite_issue(
+        beads_root,
+        issue_id="at-overflow",
+        notes="overflow_repair: repaired notes\n",
+    )
+
+    backend = beads._configured_beads_backend(beads_root)  # pyright: ignore[reportPrivateUsage]
+    readback = beads._read_overflow_repair_backend_readback(  # pyright: ignore[reportPrivateUsage]
+        issue_id="at-overflow",
+        backend=backend,
+        beads_root=beads_root,
+        cwd=cwd,
+    )
+
+    assert backend is None
+    assert readback == beads._OverflowRepairBackendReadback(  # pyright: ignore[reportPrivateUsage]
+        notes="overflow_repair: repaired notes\n"
+    )
 
 
 def test_repair_issue_event_history_overflow_is_rerunnable_when_issue_is_already_safe() -> None:
