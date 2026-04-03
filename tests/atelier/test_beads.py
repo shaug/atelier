@@ -6722,8 +6722,6 @@ def test_repair_issue_event_history_overflow_compacts_notes_and_restores_mutabil
         del beads_root, cwd
         if args[:2] == ["show", "at-overflow"]:
             return [dict(issue_state)]
-        if args[0] == "sql":
-            return [{"notes": issue_state["notes"]}]
         raise AssertionError(f"unexpected bd json command: {args}")
 
     def fake_run_bd_command(
@@ -6748,27 +6746,46 @@ def test_repair_issue_event_history_overflow_compacts_notes_and_restores_mutabil
                     ),
                 )
             return CompletedProcess(args=["bd", *args], returncode=0, stdout="", stderr="")
-        if args[0] == "sql":
-            sql_calls.append(list(args))
-            issue_state["notes"] = beads._render_overflow_repair_notes(
-                backend="dolt",
-                issue_id="at-overflow",
-                original_notes=initial_notes,
-                snapshot_bytes_before=beads._issue_snapshot_bytes(issue_state),
-                retained_notes_chars=beads._find_overflow_repair_notes(
-                    "at-overflow",
-                    issue_state,
-                    backend="dolt",
-                )[2],
-            )
-            issue_state["updated_at"] = "2026-03-26T00:01:00Z"
-            return CompletedProcess(args=["bd", *args], returncode=0, stdout="", stderr="")
         raise AssertionError(f"unexpected bd command: {args}")
+
+    def fake_direct_dolt_sql_command(*, query: str, beads_root: Path) -> exec_util.CommandResult:
+        del beads_root
+        sql_calls.append(["dolt", "sql", "-q", query])
+        issue_state["notes"] = beads._render_overflow_repair_notes(
+            backend="dolt",
+            issue_id="at-overflow",
+            original_notes=initial_notes,
+            snapshot_bytes_before=beads._issue_snapshot_bytes(issue_state),
+            retained_notes_chars=beads._find_overflow_repair_notes(
+                "at-overflow",
+                issue_state,
+                backend="dolt",
+            )[2],
+        )
+        issue_state["updated_at"] = "2026-03-26T00:01:00Z"
+        return exec_util.CommandResult(
+            argv=("dolt", "sql", "-q", query),
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    def fake_direct_dolt_sql_json(*, query: str, beads_root: Path) -> list[dict[str, object]]:
+        del query, beads_root
+        return [{"notes": issue_state["notes"]}]
 
     with (
         patch("atelier.beads._configured_beads_backend", return_value="dolt"),
         patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command),
+        patch(
+            "atelier.beads._run_direct_dolt_sql_command",
+            side_effect=fake_direct_dolt_sql_command,
+        ),
+        patch(
+            "atelier.beads._run_direct_dolt_sql_json",
+            side_effect=fake_direct_dolt_sql_json,
+        ),
     ):
         result = beads.repair_issue_event_history_overflow(
             "at-overflow",
@@ -6786,7 +6803,7 @@ def test_repair_issue_event_history_overflow_compacts_notes_and_restores_mutabil
     )
     assert status_attempts == 1
     assert sql_calls
-    assert sql_calls[0][:3] == ["sql", "--dolt-auto-commit", "on"]
+    assert sql_calls[0][:3] == ["dolt", "sql", "-q"]
     assert "UPDATE issues" in sql_calls[0][3]
     repaired_notes = str(issue_state["notes"])
     assert repaired_notes.startswith("overflow_repair:")
@@ -6836,8 +6853,6 @@ def test_repair_issue_event_history_overflow_accepts_backend_readback_when_show_
         if args[:2] == ["show", "at-overflow"]:
             show_calls += 1
             return [dict(issue_state)]
-        if args[0] == "sql":
-            return [{"notes": repaired_notes}]
         raise AssertionError(f"unexpected bd json command: {args}")
 
     def fake_run_bd_command(
@@ -6862,15 +6877,34 @@ def test_repair_issue_event_history_overflow_accepts_backend_readback_when_show_
                     ),
                 )
             return CompletedProcess(args=["bd", *args], returncode=0, stdout="", stderr="")
-        if args[0] == "sql":
-            sql_calls.append(list(args))
-            return CompletedProcess(args=["bd", *args], returncode=0, stdout="", stderr="")
         raise AssertionError(f"unexpected bd command: {args}")
+
+    def fake_direct_dolt_sql_command(*, query: str, beads_root: Path) -> exec_util.CommandResult:
+        del beads_root
+        sql_calls.append(["dolt", "sql", "-q", query])
+        return exec_util.CommandResult(
+            argv=("dolt", "sql", "-q", query),
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    def fake_direct_dolt_sql_json(*, query: str, beads_root: Path) -> list[dict[str, object]]:
+        del query, beads_root
+        return [{"notes": repaired_notes}]
 
     with (
         patch("atelier.beads._configured_beads_backend", return_value="dolt"),
         patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command),
+        patch(
+            "atelier.beads._run_direct_dolt_sql_command",
+            side_effect=fake_direct_dolt_sql_command,
+        ),
+        patch(
+            "atelier.beads._run_direct_dolt_sql_json",
+            side_effect=fake_direct_dolt_sql_json,
+        ),
     ):
         result = beads.repair_issue_event_history_overflow(
             "at-overflow",
@@ -6884,7 +6918,7 @@ def test_repair_issue_event_history_overflow_accepts_backend_readback_when_show_
     assert status_attempts == 1
     assert show_calls == 2
     assert sql_calls
-    assert sql_calls[0][:3] == ["sql", "--dolt-auto-commit", "on"]
+    assert sql_calls[0][:3] == ["dolt", "sql", "-q"]
 
 
 def test_repair_issue_event_history_overflow_accepts_sqlite_readback_when_metadata_is_missing(
@@ -7003,8 +7037,6 @@ def test_repair_issue_event_history_overflow_fails_closed_for_backend_readback_m
         del beads_root, cwd
         if args[:2] == ["show", "at-overflow"]:
             return [dict(issue_state)]
-        if args[0] == "sql":
-            return [{"notes": initial_notes}]
         raise AssertionError(f"unexpected bd json command: {args}")
 
     def fake_run_bd_command(
@@ -7025,15 +7057,34 @@ def test_repair_issue_event_history_overflow_fails_closed_for_backend_readback_m
                     "is too large for column 'old_value'"
                 ),
             )
-        if args[0] == "sql":
-            assert args[:3] == ["sql", "--dolt-auto-commit", "on"]
-            return CompletedProcess(args=["bd", *args], returncode=0, stdout="", stderr="")
         raise AssertionError(f"unexpected bd command: {args}")
+
+    def fake_direct_dolt_sql_command(*, query: str, beads_root: Path) -> exec_util.CommandResult:
+        del beads_root
+        assert query.startswith("UPDATE issues")
+        return exec_util.CommandResult(
+            argv=("dolt", "sql", "-q", query),
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    def fake_direct_dolt_sql_json(*, query: str, beads_root: Path) -> list[dict[str, object]]:
+        del query, beads_root
+        return [{"notes": initial_notes}]
 
     with (
         patch("atelier.beads._configured_beads_backend", return_value="dolt"),
         patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command),
+        patch(
+            "atelier.beads._run_direct_dolt_sql_command",
+            side_effect=fake_direct_dolt_sql_command,
+        ),
+        patch(
+            "atelier.beads._run_direct_dolt_sql_json",
+            side_effect=fake_direct_dolt_sql_json,
+        ),
     ):
         with pytest.raises(
             RuntimeError,
@@ -7088,9 +7139,6 @@ def test_repair_issue_event_history_overflow_fails_closed_when_verification_writ
         nonlocal readback_notes
         if args[:2] == ["show", "at-overflow"]:
             return [dict(issue_state)]
-        if args[0] == "sql":
-            current_notes = readback_notes.pop(0) if readback_notes else initial_notes
-            return [{"notes": current_notes}]
         raise AssertionError(f"unexpected bd json command: {args}")
 
     def fake_run_bd_command(
@@ -7105,15 +7153,35 @@ def test_repair_issue_event_history_overflow_fails_closed_when_verification_writ
         if args[:3] == ["update", "at-overflow", "--status"]:
             status_attempts += 1
             return CompletedProcess(args=["bd", *args], returncode=0, stdout="", stderr="")
-        if args[0] == "sql":
-            assert args[:3] == ["sql", "--dolt-auto-commit", "on"]
-            return CompletedProcess(args=["bd", *args], returncode=0, stdout="", stderr="")
         raise AssertionError(f"unexpected bd command: {args}")
+
+    def fake_direct_dolt_sql_command(*, query: str, beads_root: Path) -> exec_util.CommandResult:
+        del beads_root
+        assert query.startswith("UPDATE issues")
+        return exec_util.CommandResult(
+            argv=("dolt", "sql", "-q", query),
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    def fake_direct_dolt_sql_json(*, query: str, beads_root: Path) -> list[dict[str, object]]:
+        del query, beads_root
+        current_notes = readback_notes.pop(0) if readback_notes else initial_notes
+        return [{"notes": current_notes}]
 
     with (
         patch("atelier.beads._configured_beads_backend", return_value="dolt"),
         patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command),
+        patch(
+            "atelier.beads._run_direct_dolt_sql_command",
+            side_effect=fake_direct_dolt_sql_command,
+        ),
+        patch(
+            "atelier.beads._run_direct_dolt_sql_json",
+            side_effect=fake_direct_dolt_sql_json,
+        ),
     ):
         with pytest.raises(
             RuntimeError,
@@ -7129,13 +7197,16 @@ def test_repair_issue_event_history_overflow_fails_closed_when_verification_writ
     assert not readback_notes
 
 
-def test_repair_issue_event_history_overflow_requires_dolt_sql_auto_commit_for_durable_readback(
+def test_repair_issue_event_history_overflow_uses_direct_dolt_sql_for_durable_readback(
     tmp_path: Path,
 ) -> None:
     beads_root = tmp_path / ".beads"
     repo_root = tmp_path / "repo"
     beads_root.mkdir()
     repo_root.mkdir()
+    dolt_root = beads_root / "dolt"
+    dolt_repo = dolt_root / "beads_at"
+    (dolt_repo / ".dolt").mkdir(parents=True)
     initial_notes = "old note line\n" * 5000
     issue_state = {
         "id": "at-overflow",
@@ -7188,32 +7259,42 @@ def test_repair_issue_event_history_overflow_requires_dolt_sql_auto_commit_for_d
                 stdout="",
                 stderr="",
             )
-        if len(argv) >= 3 and argv[1] == "sql":
-            sql_commands.append(argv[1:])
-            query = next(
-                (token for token in reversed(argv[2:]) if not token.startswith("--")),
-                "",
-            )
+        if argv[:3] == ["dolt", "sql", "-q"]:
+            sql_commands.append(argv)
+            query = argv[-1]
             if query.startswith("UPDATE issues"):
-                if argv[2:4] == ["--dolt-auto-commit", "on"]:
-                    persisted_notes = repaired_notes
+                persisted_notes = repaired_notes
                 return exec_util.CommandResult(
                     argv=request.argv,
                     returncode=0,
                     stdout="",
                     stderr="",
                 )
+        if argv[:4] == ["dolt", "sql", "-r", "json"]:
+            sql_commands.append(argv)
+            query = argv[-1]
             if query.startswith("SELECT notes FROM issues"):
                 return exec_util.CommandResult(
                     argv=request.argv,
                     returncode=0,
-                    stdout=json.dumps([{"notes": persisted_notes}]),
+                    stdout=json.dumps({"rows": [{"notes": persisted_notes}]}),
                     stderr="",
                 )
         raise AssertionError(f"unexpected command: {argv}")
 
     with (
         patch("atelier.beads._configured_beads_backend", return_value="dolt"),
+        patch(
+            "atelier.beads._resolve_dolt_server_runtime",
+            return_value=beads.DoltServerRuntime(
+                dolt_root=dolt_root,
+                pid_path=dolt_root / "dolt-server.pid",
+                host="127.0.0.1",
+                port=3311,
+                database="beads_at",
+                ownership_error=None,
+            ),
+        ),
         patch("atelier.beads.bd_invocation.ensure_supported_bd_version", return_value=None),
         patch("atelier.beads._resolve_dolt_commit_decision", return_value=None),
         patch("atelier.beads._attempt_startup_auto_migration", return_value=None),
@@ -7234,8 +7315,8 @@ def test_repair_issue_event_history_overflow_requires_dolt_sql_auto_commit_for_d
     assert result.snapshot_bytes_before > result.snapshot_bytes_after
     assert status_attempts == 1
     assert persisted_notes == repaired_notes
-    assert sql_commands[0][:3] == ["sql", "--dolt-auto-commit", "on"]
-    assert sql_commands[1][0] == "sql"
+    assert sql_commands[0][:3] == ["dolt", "sql", "-q"]
+    assert any(command[:4] == ["dolt", "sql", "-r", "json"] for command in sql_commands)
 
 
 def test_read_overflow_repair_backend_readback_uses_sqlite_when_metadata_is_invalid(
