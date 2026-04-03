@@ -701,14 +701,35 @@ def _blocked_reason_from_line(line: str) -> str | None:
     return _normalize_text(match.group("reason"))
 
 
-def _description_contains_blocked_reason(description: str | None, *, reason: str) -> bool:
+def _description_contains_line(description: str | None, *, line: str) -> bool:
+    target = line.strip()
+    if not target:
+        return False
+    return any(candidate.strip() == target for candidate in (description or "").splitlines())
+
+
+def _latest_blocked_reason(description: str | None) -> str | None:
+    latest_reason = None
+    for line in (description or "").splitlines():
+        blocked_reason = _blocked_reason_from_line(line)
+        if blocked_reason is not None:
+            latest_reason = blocked_reason
+    return latest_reason
+
+
+def _blocked_transition_has_convergence_evidence(
+    *,
+    status: object,
+    description: str | None,
+    reason: str,
+    note: str,
+) -> bool:
     normalized_reason = _normalize_text(reason)
     if normalized_reason is None:
         return False
-    for line in (description or "").splitlines():
-        if _blocked_reason_from_line(line) == normalized_reason:
-            return True
-    return False
+    if _normalize_status(status) == LifecycleStatus.BLOCKED.value:
+        return _latest_blocked_reason(description) == normalized_reason
+    return _description_contains_line(description, line=note)
 
 
 def _labels_from_payload(value: object) -> set[str]:
@@ -895,12 +916,14 @@ def mark_issue_blocked(
         if current is None:
             die(f"issue not found: {issue_id}")
         current_description = _normalize_text(current.get("description"))
-        current_has_reason = _description_contains_blocked_reason(
-            current_description,
+        current_has_convergence_evidence = _blocked_transition_has_convergence_evidence(
+            status=current.get("status"),
+            description=current_description,
             reason=normalized_reason,
+            note=note,
         )
         desired_description = current_description or ""
-        if not current_has_reason:
+        if not current_has_convergence_evidence:
             desired_description = _append_issue_notes(
                 current_description,
                 notes=(note,),
@@ -908,7 +931,7 @@ def mark_issue_blocked(
 
         if (
             _normalize_status(current.get("status")) == LifecycleStatus.BLOCKED.value
-            and current_has_reason
+            and current_has_convergence_evidence
         ):
             return
 
@@ -923,24 +946,22 @@ def mark_issue_blocked(
         )
         payload = _issue_payload(updated)
         payload_description = _normalize_text(payload.get("description"))
-        if _normalize_status(
-            payload.get("status")
-        ) == LifecycleStatus.BLOCKED.value and _description_contains_blocked_reason(
-            payload_description,
+        if _blocked_transition_has_convergence_evidence(
+            status=payload.get("status"),
+            description=payload_description,
             reason=normalized_reason,
+            note=note,
         ):
             return
         refreshed = _show_issue(issue_id=issue_id, beads_root=beads_root, repo_root=repo_root)
         refreshed_description = None
         if refreshed is not None:
             refreshed_description = _normalize_text(refreshed.get("description"))
-        if (
-            refreshed is not None
-            and _normalize_status(refreshed.get("status")) == LifecycleStatus.BLOCKED.value
-            and _description_contains_blocked_reason(
-                refreshed_description,
-                reason=normalized_reason,
-            )
+        if refreshed is not None and _blocked_transition_has_convergence_evidence(
+            status=refreshed.get("status"),
+            description=refreshed_description,
+            reason=normalized_reason,
+            note=note,
         ):
             return
     raise RuntimeError(f"blocked transition could not be verified for {issue_id}")
