@@ -4960,6 +4960,53 @@ def _uses_direct_sqlite_overflow_repair_backend(backend: str | None) -> bool:
     return backend != "dolt"
 
 
+def _resolve_direct_dolt_sql_repo_path(beads_root: Path) -> Path:
+    runtime = _resolve_dolt_server_runtime(beads_root)
+    if runtime.ownership_error:
+        raise RuntimeError(runtime.ownership_error)
+    repo_path = runtime.dolt_root / runtime.database
+    if not (repo_path / ".dolt").is_dir():
+        raise RuntimeError(f"direct Dolt database not found for repair: {repo_path}")
+    return repo_path
+
+
+def _run_direct_dolt_sql_command(*, query: str, beads_root: Path) -> exec.CommandResult:
+    env = beads_env(beads_root)
+    repo_path = _resolve_direct_dolt_sql_repo_path(beads_root)
+    result = _run_raw_bd_command(["dolt", "sql", "-q", query], cwd=repo_path, env=env)
+    if result is None:
+        raise RuntimeError("missing required command: dolt")
+    return result
+
+
+def _run_direct_dolt_sql_json(*, query: str, beads_root: Path) -> list[dict[str, object]]:
+    env = beads_env(beads_root)
+    repo_path = _resolve_direct_dolt_sql_repo_path(beads_root)
+    result = _run_raw_bd_command(
+        ["dolt", "sql", "-r", "json", "-q", query],
+        cwd=repo_path,
+        env=env,
+    )
+    if result is None:
+        raise RuntimeError("missing required command: dolt")
+    if result.returncode != 0:
+        detail = _command_output_detail(result)
+        raise RuntimeError(detail or "direct Dolt readback failed")
+    raw = (result.stdout or "").strip()
+    if not raw:
+        return []
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"invalid direct Dolt readback payload ({exc})") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("invalid direct Dolt readback payload type")
+    rows = payload.get("rows")
+    if not isinstance(rows, list):
+        raise RuntimeError("invalid direct Dolt readback rows payload")
+    return [row for row in rows if isinstance(row, dict)]
+
+
 def _repair_overflowed_issue_notes_sql(
     *,
     issue_id: str,
@@ -4981,23 +5028,11 @@ def _repair_overflowed_issue_notes_sql(
             f"{snapshot_bytes_before} THEN {snapshot_bytes_before} ELSE original_size END "
             f"WHERE id = {issue_literal}"
         )
-        result = run_bd_command(
-            ["sql", "--dolt-auto-commit", "on", sql],
-            beads_root=beads_root,
-            cwd=cwd,
-            allow_failure=True,
-        )
+        result = _run_direct_dolt_sql_command(query=sql, beads_root=beads_root)
         if result.returncode == 0:
             return
-        detail = _command_output_detail(
-            exec.CommandResult(
-                argv=tuple(result.args),
-                returncode=result.returncode,
-                stdout=result.stdout,
-                stderr=result.stderr,
-            )
-        )
-        raise RuntimeError(detail or f"direct SQL repair failed for {issue_id}")
+        detail = _command_output_detail(result)
+        raise RuntimeError(detail or f"direct Dolt repair failed for {issue_id}")
 
     db_path = beads_root / "beads.db"
     if not db_path.exists():
@@ -5060,7 +5095,7 @@ def _read_overflow_repair_backend_readback(
         notes_value = row[0] if isinstance(row[0], str) else None
         return _OverflowRepairBackendReadback(notes=notes_value)
     query = f"SELECT notes FROM issues WHERE id = {_sql_issue_id_literal(issue_id)}"
-    rows = run_bd_json(["sql", query], beads_root=beads_root, cwd=cwd)
+    rows = _run_direct_dolt_sql_json(query=query, beads_root=beads_root)
     if not rows:
         return None
     notes_value = rows[0].get("notes")
