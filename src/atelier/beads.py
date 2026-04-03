@@ -19,7 +19,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Literal, TextIO
+from typing import Literal, TextIO, cast
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -40,6 +40,19 @@ from .lib.beads.description_fields import (
 from .lib.beads.description_fields import (
     parse_external_tickets as _parse_external_tickets_from_description,
 )
+from .lib.beads.overflow import (
+    EventHistoryOverflowRepairResult as _EventHistoryOverflowRepairResult,
+)
+from .lib.beads.overflow import detail_matches_event_history_overflow
+from .store.models import EpicDiscoveryParity as _StoreEpicDiscoveryParity
+from .store.models import EpicIdentityViolation as _StoreEpicIdentityViolation
+from .store.models import (
+    ExternalTicketMetadataRepairResult as _StoreExternalTicketMetadataRepairResult,
+)
+from .store.models import (
+    ExternalTicketReconcileResult as _StoreExternalTicketReconcileResult,
+)
+from .store.models import LifecycleStatus as _StoreLifecycleStatus
 from .worker.models_boundary import BeadsIssueBoundary, parse_issue_boundary
 
 _LABEL_AGENT = "agent"
@@ -166,7 +179,7 @@ _DRY_RUN_RENAME_PREFIX_SUMMARY = re.compile(
 
 
 @dataclass(frozen=True)
-class IssuePrefixRenamePreview:
+class _IssuePrefixRenamePreview:
     count: int
     current_prefix: str
     target_prefix: str
@@ -399,7 +412,7 @@ class BeadsClient:
         return run_bd_issue_records(args, beads_root=self.beads_root, cwd=self.cwd, source=source)
 
     def issues(self, args: list[str], *, source: str) -> list[BeadsIssueBoundary]:
-        return run_bd_issues(args, beads_root=self.beads_root, cwd=self.cwd, source=source)
+        return _run_bd_issues(args, beads_root=self.beads_root, cwd=self.cwd, source=source)
 
     def show_issue(self, issue_id: str, *, source: str) -> BeadsIssueRecord | None:
         records = self.issue_records(["show", issue_id], source=source)
@@ -434,65 +447,9 @@ class ChangesetSummary:
 
 
 @dataclass(frozen=True)
-class ExternalTicketMetadataGap:
+class _ExternalTicketMetadataGap:
     issue_id: str
     providers: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class ExternalTicketMetadataRepairResult:
-    issue_id: str
-    providers: tuple[str, ...]
-    recovered: bool
-    repaired: bool
-    ticket_count: int
-
-
-@dataclass(frozen=True)
-class EventHistoryOverflowRepairResult:
-    issue_id: str
-    repaired: bool
-    verified_mutable: bool
-    snapshot_bytes_before: int
-    snapshot_bytes_after: int
-    retained_notes_chars: int
-    verified_mutation_classes: tuple[str, ...]
-    convergence_evidence: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class ExternalTicketReconcileResult:
-    issue_id: str
-    stale_exported_github_tickets: int
-    reconciled_tickets: int
-    updated: bool
-    needs_decision_notes: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class EpicIdentityViolation:
-    """Active top-level work missing executable epic identity metadata."""
-
-    issue_id: str
-    status: str | None
-    issue_type: str | None
-    labels: tuple[str, ...]
-    remediation_command: str
-
-
-@dataclass(frozen=True)
-class EpicDiscoveryParityReport:
-    """Parity diagnostics between active top-level work and epic index discovery."""
-
-    active_top_level_work_count: int
-    indexed_active_epic_count: int
-    missing_executable_identity: tuple[EpicIdentityViolation, ...]
-    missing_from_index: tuple[str, ...]
-
-    @property
-    def in_parity(self) -> bool:
-        """Return whether active top-level work and epic index are aligned."""
-        return not self.missing_executable_identity and not self.missing_from_index
 
 
 @dataclass(frozen=True)
@@ -3135,7 +3092,7 @@ def mark_issue_in_progress(
     *,
     beads_root: Path,
     cwd: Path,
-) -> ExternalTicketReconcileResult:
+) -> _StoreExternalTicketReconcileResult:
     """Set a Beads issue to in-progress and reconcile reopened tickets.
 
     Args:
@@ -3299,7 +3256,7 @@ def run_bd_issue_records(
     return parse_issue_records(run_bd_json(args, beads_root=beads_root, cwd=cwd), source=source)
 
 
-def run_bd_issues(
+def _run_bd_issues(
     args: list[str], *, beads_root: Path, cwd: Path, source: str
 ) -> list[BeadsIssueBoundary]:
     """Run a Beads query and return validated issue boundary models."""
@@ -3384,7 +3341,7 @@ def epic_discovery_parity_report(
     beads_root: Path,
     cwd: Path,
     indexed_epics: list[dict[str, object]] | None = None,
-) -> EpicDiscoveryParityReport:
+) -> _StoreEpicDiscoveryParity:
     """Return startup/doctor parity diagnostics for top-level epic discovery.
 
     Args:
@@ -3402,7 +3359,7 @@ def epic_discovery_parity_report(
         - executable active top-level work IDs missing from the epic index.
     """
     active_top_level = _active_top_level_work_issues(beads_root=beads_root, cwd=cwd)
-    missing_identity: list[EpicIdentityViolation] = []
+    missing_identity: list[_StoreEpicIdentityViolation] = []
     executable_active_ids: set[str] = set()
     for issue in active_top_level:
         issue_id = str(issue.get("id") or "").strip()
@@ -3423,9 +3380,12 @@ def epic_discovery_parity_report(
             executable_active_ids.add(issue_id)
             continue
         missing_identity.append(
-            EpicIdentityViolation(
+            _StoreEpicIdentityViolation(
                 issue_id=issue_id,
-                status=lifecycle.canonical_lifecycle_status(issue.get("status")),
+                status=cast(
+                    _StoreLifecycleStatus | None,
+                    lifecycle.canonical_lifecycle_status(issue.get("status")),
+                ),
                 issue_type=lifecycle.normalize_status_value(issue_type),
                 labels=tuple(sorted(labels)),
                 remediation_command=_identity_remediation_command(issue_id, beads_root=beads_root),
@@ -3460,7 +3420,7 @@ def epic_discovery_parity_report(
         indexed_active_ids.add(issue_id)
 
     missing_from_index = tuple(sorted(executable_active_ids - indexed_active_ids))
-    return EpicDiscoveryParityReport(
+    return _StoreEpicDiscoveryParity(
         active_top_level_work_count=len(active_top_level),
         indexed_active_epic_count=len(indexed_active_ids),
         missing_executable_identity=tuple(
@@ -3673,7 +3633,7 @@ def preview_issue_prefix_rename(
     *,
     beads_root: Path,
     cwd: Path,
-) -> IssuePrefixRenamePreview | None:
+) -> _IssuePrefixRenamePreview | None:
     expected = prefix.strip().lower()
     if not expected:
         return None
@@ -3697,7 +3657,7 @@ def preview_issue_prefix_rename(
     count = int(match.group(1))
     current_prefix = match.group(2)
     target_prefix = match.group(3)
-    return IssuePrefixRenamePreview(
+    return _IssuePrefixRenamePreview(
         count=count,
         current_prefix=current_prefix,
         target_prefix=target_prefix,
@@ -3738,7 +3698,7 @@ def ensure_atelier_issue_prefix(*, beads_root: Path, cwd: Path) -> bool:
     )
 
 
-def ensure_custom_types(
+def _ensure_custom_types(
     required: list[str],
     *,
     beads_root: Path,
@@ -3778,7 +3738,7 @@ def ensure_custom_types(
 
 def ensure_atelier_types(*, beads_root: Path, cwd: Path) -> bool:
     """Ensure Atelier-required custom issue types are configured."""
-    return ensure_custom_types(list(ATELIER_CUSTOM_TYPES), beads_root=beads_root, cwd=cwd)
+    return _ensure_custom_types(list(ATELIER_CUSTOM_TYPES), beads_root=beads_root, cwd=cwd)
 
 
 def _issue_labels(issue: dict[str, object]) -> set[str]:
@@ -4328,12 +4288,7 @@ def workspace_label(root_branch: str) -> str:
     return f"workspace:{root_branch}"
 
 
-def external_label(provider: str) -> str:
-    """Return the external ticket label for a provider."""
-    return f"ext:{provider}"
-
-
-def policy_role_label(role: str) -> str:
+def _policy_role_label(role: str) -> str:
     """Return the policy role label."""
     return f"role:{role}"
 
@@ -4463,7 +4418,7 @@ def reconcile_closed_issue_exported_github_tickets(
     *,
     beads_root: Path,
     cwd: Path,
-) -> ExternalTicketReconcileResult:
+) -> _StoreExternalTicketReconcileResult:
     """Reconcile stale exported GitHub ticket metadata for a closed bead.
 
     Exported GitHub links default to close-on-bead-close unless the ticket is
@@ -4471,7 +4426,7 @@ def reconcile_closed_issue_exported_github_tickets(
     """
     issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
     if not issues:
-        return ExternalTicketReconcileResult(
+        return _StoreExternalTicketReconcileResult(
             issue_id=issue_id,
             stale_exported_github_tickets=0,
             reconciled_tickets=0,
@@ -4481,7 +4436,7 @@ def reconcile_closed_issue_exported_github_tickets(
     issue = issues[0]
     status = str(issue.get("status") or "").strip().lower()
     if status not in {"closed", "done"}:
-        return ExternalTicketReconcileResult(
+        return _StoreExternalTicketReconcileResult(
             issue_id=issue_id,
             stale_exported_github_tickets=0,
             reconciled_tickets=0,
@@ -4491,7 +4446,7 @@ def reconcile_closed_issue_exported_github_tickets(
     description = issue.get("description")
     existing_tickets = parse_external_tickets(description if isinstance(description, str) else None)
     if not existing_tickets:
-        return ExternalTicketReconcileResult(
+        return _StoreExternalTicketReconcileResult(
             issue_id=issue_id,
             stale_exported_github_tickets=0,
             reconciled_tickets=0,
@@ -4562,7 +4517,7 @@ def reconcile_closed_issue_exported_github_tickets(
         unique_notes.append(note)
         _append_external_close_note(issue_id, note, beads_root=beads_root, cwd=cwd)
 
-    return ExternalTicketReconcileResult(
+    return _StoreExternalTicketReconcileResult(
         issue_id=issue_id,
         stale_exported_github_tickets=stale,
         reconciled_tickets=reconciled,
@@ -4576,7 +4531,7 @@ def reconcile_reopened_issue_exported_github_tickets(
     *,
     beads_root: Path,
     cwd: Path,
-) -> ExternalTicketReconcileResult:
+) -> _StoreExternalTicketReconcileResult:
     """Reopen stale exported GitHub tickets when a local bead reopens.
 
     Args:
@@ -4590,7 +4545,7 @@ def reconcile_reopened_issue_exported_github_tickets(
     """
     issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
     if not issues:
-        return ExternalTicketReconcileResult(
+        return _StoreExternalTicketReconcileResult(
             issue_id=issue_id,
             stale_exported_github_tickets=0,
             reconciled_tickets=0,
@@ -4600,7 +4555,7 @@ def reconcile_reopened_issue_exported_github_tickets(
     issue = issues[0]
     status = str(issue.get("status") or "").strip().lower()
     if status in {"closed", "done"}:
-        return ExternalTicketReconcileResult(
+        return _StoreExternalTicketReconcileResult(
             issue_id=issue_id,
             stale_exported_github_tickets=0,
             reconciled_tickets=0,
@@ -4610,7 +4565,7 @@ def reconcile_reopened_issue_exported_github_tickets(
     description = issue.get("description")
     existing_tickets = parse_external_tickets(description if isinstance(description, str) else None)
     if not existing_tickets:
-        return ExternalTicketReconcileResult(
+        return _StoreExternalTicketReconcileResult(
             issue_id=issue_id,
             stale_exported_github_tickets=0,
             reconciled_tickets=0,
@@ -4674,7 +4629,7 @@ def reconcile_reopened_issue_exported_github_tickets(
         unique_notes.append(note)
         _append_external_reopen_note(issue_id, note, beads_root=beads_root, cwd=cwd)
 
-    return ExternalTicketReconcileResult(
+    return _StoreExternalTicketReconcileResult(
         issue_id=issue_id,
         stale_exported_github_tickets=stale,
         reconciled_tickets=reconciled,
@@ -4715,7 +4670,7 @@ def list_external_ticket_metadata_gaps(
     beads_root: Path,
     cwd: Path,
     issue_ids: list[str] | None = None,
-) -> list[ExternalTicketMetadataGap]:
+) -> list[_ExternalTicketMetadataGap]:
     """List issues with ext:* labels but missing external_tickets metadata."""
     if issue_ids:
         issues: list[dict[str, object]] = []
@@ -4724,7 +4679,7 @@ def list_external_ticket_metadata_gaps(
     else:
         issues = run_bd_json(["list", "--all"], beads_root=beads_root, cwd=cwd)
 
-    gaps: list[ExternalTicketMetadataGap] = []
+    gaps: list[_ExternalTicketMetadataGap] = []
     for issue in issues:
         issue_id = issue.get("id")
         if not isinstance(issue_id, str) or not issue_id.strip():
@@ -4735,7 +4690,7 @@ def list_external_ticket_metadata_gaps(
         description = issue.get("description")
         if parse_external_tickets(description if isinstance(description, str) else None):
             continue
-        gaps.append(ExternalTicketMetadataGap(issue_id=issue_id.strip(), providers=providers))
+        gaps.append(_ExternalTicketMetadataGap(issue_id=issue_id.strip(), providers=providers))
     return sorted(gaps, key=lambda gap: gap.issue_id)
 
 
@@ -4792,9 +4747,9 @@ def repair_external_ticket_metadata_from_history(
     cwd: Path,
     issue_ids: list[str] | None = None,
     apply: bool = False,
-) -> list[ExternalTicketMetadataRepairResult]:
+) -> list[_StoreExternalTicketMetadataRepairResult]:
     """Recover dropped external_tickets metadata from event history."""
-    results: list[ExternalTicketMetadataRepairResult] = []
+    results: list[_StoreExternalTicketMetadataRepairResult] = []
     gaps = list_external_ticket_metadata_gaps(
         beads_root=beads_root,
         cwd=cwd,
@@ -4808,7 +4763,7 @@ def repair_external_ticket_metadata_from_history(
             update_external_tickets(gap.issue_id, tickets, beads_root=beads_root, cwd=cwd)
             repaired = True
         results.append(
-            ExternalTicketMetadataRepairResult(
+            _StoreExternalTicketMetadataRepairResult(
                 issue_id=gap.issue_id,
                 providers=gap.providers,
                 recovered=recovered,
@@ -4820,24 +4775,7 @@ def repair_external_ticket_metadata_from_history(
 
 
 def _is_event_history_overflow_detail(detail: str | None) -> bool:
-    if not detail:
-        return False
-    normalized = detail.lower()
-    return all(marker in normalized for marker in _EVENT_HISTORY_OVERFLOW_MARKERS)
-
-
-def is_event_history_overflow_detail(detail: str | None) -> bool:
-    """Return whether command detail matches the event-history overflow shape.
-
-    Args:
-        detail: Combined stderr/stdout detail emitted by a failed `bd`
-            mutation command.
-
-    Returns:
-        `True` when the detail matches the known Beads event-history overflow
-        signature that requires deterministic repair before retrying mutation.
-    """
-    return _is_event_history_overflow_detail(detail)
+    return detail_matches_event_history_overflow(detail)
 
 
 def _issue_snapshot_bytes(issue: dict[str, object]) -> int:
@@ -5280,7 +5218,7 @@ def repair_issue_event_history_overflow(
     *,
     beads_root: Path,
     cwd: Path,
-) -> EventHistoryOverflowRepairResult:
+) -> _EventHistoryOverflowRepairResult:
     """Repair issue notes when Beads event-history overflow blocks mutation.
 
     The repair path is explicit and rerunnable:
@@ -5331,7 +5269,7 @@ def repair_issue_event_history_overflow(
                 allow_failure=True,
             )
             if noop_result.returncode == 0:
-                return EventHistoryOverflowRepairResult(
+                return _EventHistoryOverflowRepairResult(
                     issue_id=cleaned_issue_id,
                     repaired=False,
                     verified_mutable=True,
@@ -5439,7 +5377,7 @@ def repair_issue_event_history_overflow(
                 "but the persisted issue snapshot remained above the safe mutation size "
                 f"({snapshot_bytes_after} > {_EVENT_HISTORY_REPAIR_TARGET_BYTES})"
             )
-        return EventHistoryOverflowRepairResult(
+        return _EventHistoryOverflowRepairResult(
             issue_id=cleaned_issue_id,
             repaired=True,
             verified_mutable=True,
@@ -5456,7 +5394,7 @@ def repair_issue_event_history_overflow(
         )
 
 
-def list_epics_by_workspace_label(
+def _list_epics_by_workspace_label(
     root_branch: str, *, beads_root: Path, cwd: Path
 ) -> list[dict[str, object]]:
     """List epic beads with the workspace label."""
@@ -5478,7 +5416,7 @@ def find_epics_by_root_branch(
     root_branch: str, *, beads_root: Path, cwd: Path
 ) -> list[dict[str, object]]:
     """Find epic beads by root branch label or description."""
-    issues = list_epics_by_workspace_label(root_branch, beads_root=beads_root, cwd=cwd)
+    issues = _list_epics_by_workspace_label(root_branch, beads_root=beads_root, cwd=cwd)
     if issues:
         return issues
     all_epics = list_epics(beads_root=beads_root, cwd=cwd, include_closed=True)
@@ -5719,7 +5657,7 @@ def list_policy_beads(role: str | None, *, beads_root: Path, cwd: Path) -> list[
         POLICY_SCOPE_LABEL,
     ]
     if role:
-        args.extend(["--label", policy_role_label(role)])
+        args.extend(["--label", _policy_role_label(role)])
     return run_bd_json(args, beads_root=beads_root, cwd=cwd)
 
 
@@ -5748,7 +5686,7 @@ def create_policy_bead(
             [
                 issue_label(POLICY_LABEL, beads_root=beads_root),
                 POLICY_SCOPE_LABEL,
-                policy_role_label(role),
+                _policy_role_label(role),
             ]
         )
         args = [

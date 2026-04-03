@@ -10,10 +10,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import atelier.config as config
+from atelier.lib.beads import EventHistoryOverflowRepairResult
 from tests.atelier.helpers import DummyResult
 
 repair_cmd = importlib.import_module("atelier.commands.repair_event_history")
-beads_module = importlib.import_module("atelier.beads")
 
 
 def test_repair_event_history_overflow_json_reports_sqlite_backup() -> None:
@@ -29,7 +29,7 @@ def test_repair_event_history_overflow_json_reports_sqlite_backup() -> None:
         project_config = config.ProjectConfig.model_validate(
             {"project": {"enlistment": str(repo_root), "origin": "github.com/org/repo"}}
         )
-        result = beads_module.EventHistoryOverflowRepairResult(
+        result = EventHistoryOverflowRepairResult(
             issue_id="at-overflow",
             repaired=True,
             verified_mutable=True,
@@ -100,7 +100,7 @@ def test_repair_event_history_overflow_table_uses_dolt_guidance_without_backup()
         project_config = config.ProjectConfig.model_validate(
             {"project": {"enlistment": str(repo_root), "origin": "github.com/org/repo"}}
         )
-        result = beads_module.EventHistoryOverflowRepairResult(
+        result = EventHistoryOverflowRepairResult(
             issue_id="at-overflow",
             repaired=False,
             verified_mutable=True,

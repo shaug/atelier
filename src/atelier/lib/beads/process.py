@@ -40,7 +40,7 @@ from .models import (
     SupportedOperation,
     UpdateIssueRequest,
 )
-from .overflow import EventHistoryOverflowRepairResult
+from .overflow import EventHistoryOverflowRepairResult, detail_matches_event_history_overflow
 
 _SEMVER_SEARCH: Pattern[str] = compile(r"\bv?(\d+)\.(\d+)\.(\d+)\b")
 _FLAG_SEARCH: Pattern[str] = compile(r"--[a-z0-9][a-z0-9-]*")
@@ -302,7 +302,7 @@ class SubprocessBeadsClient(Beads):
         return self._compatibility_policy
 
     def is_event_history_overflow_detail(self, detail: str | None) -> bool:
-        return _legacy_beads_module().is_event_history_overflow_detail(detail)
+        return detail_matches_event_history_overflow(detail)
 
     async def repair_event_history_overflow(
         self, issue_id: str
