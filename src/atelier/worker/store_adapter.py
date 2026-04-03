@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import json
+import re
 import subprocess
 from dataclasses import dataclass
 from functools import lru_cache
@@ -55,6 +56,7 @@ _READY_JSON_ARGS = ("ready",)
 _LIST_JSON_PREFIX = ("list",)
 _EPIC_LABEL_SCAN_LIMIT = 10_000
 _AGENT_LABEL_SCAN_LIMIT = 10_000
+_BLOCKED_REASON_LINE_RE = re.compile(r"^blocked_at:\s+\S+\s+reason:\s*(?P<reason>.+?)\s*$")
 
 
 @dataclass(frozen=True)
@@ -692,6 +694,23 @@ def _description_ends_with_notes(description: str | None, *, notes: tuple[str, .
     return tuple(lines[-len(notes) :]) == notes
 
 
+def _blocked_reason_from_line(line: str) -> str | None:
+    match = _BLOCKED_REASON_LINE_RE.fullmatch(line.strip())
+    if match is None:
+        return None
+    return _normalize_text(match.group("reason"))
+
+
+def _description_contains_blocked_reason(description: str | None, *, reason: str) -> bool:
+    normalized_reason = _normalize_text(reason)
+    if normalized_reason is None:
+        return False
+    for line in (description or "").splitlines():
+        if _blocked_reason_from_line(line) == normalized_reason:
+            return True
+    return False
+
+
 def _labels_from_payload(value: object) -> set[str]:
     if not isinstance(value, list):
         return set()
@@ -866,22 +885,30 @@ def mark_issue_blocked(
     """Persist blocked lifecycle and audit note as one verified issue update."""
 
     bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    normalized_reason = _normalize_text(reason)
+    if normalized_reason is None:
+        die("blocked reason must not be empty")
     timestamp = dt.datetime.now(tz=dt.timezone.utc).isoformat()
-    note = f"blocked_at: {timestamp} reason: {reason}"
+    note = f"blocked_at: {timestamp} reason: {normalized_reason}"
     for _attempt in range(5):
         current = _show_issue(issue_id=issue_id, beads_root=beads_root, repo_root=repo_root)
         if current is None:
             die(f"issue not found: {issue_id}")
         current_description = _normalize_text(current.get("description"))
-        desired_description = _append_issue_notes(
+        current_has_reason = _description_contains_blocked_reason(
             current_description,
-            notes=(note,),
+            reason=normalized_reason,
         )
+        desired_description = current_description or ""
+        if not current_has_reason:
+            desired_description = _append_issue_notes(
+                current_description,
+                notes=(note,),
+            )
 
-        if _normalize_status(
-            current.get("status")
-        ) == LifecycleStatus.BLOCKED.value and _description_ends_with_notes(
-            current_description, notes=(note,)
+        if (
+            _normalize_status(current.get("status")) == LifecycleStatus.BLOCKED.value
+            and current_has_reason
         ):
             return
 
@@ -898,8 +925,9 @@ def mark_issue_blocked(
         payload_description = _normalize_text(payload.get("description"))
         if _normalize_status(
             payload.get("status")
-        ) == LifecycleStatus.BLOCKED.value and _description_ends_with_notes(
-            payload_description, notes=(note,)
+        ) == LifecycleStatus.BLOCKED.value and _description_contains_blocked_reason(
+            payload_description,
+            reason=normalized_reason,
         ):
             return
         refreshed = _show_issue(issue_id=issue_id, beads_root=beads_root, repo_root=repo_root)
@@ -909,7 +937,10 @@ def mark_issue_blocked(
         if (
             refreshed is not None
             and _normalize_status(refreshed.get("status")) == LifecycleStatus.BLOCKED.value
-            and _description_ends_with_notes(refreshed_description, notes=(note,))
+            and _description_contains_blocked_reason(
+                refreshed_description,
+                reason=normalized_reason,
+            )
         ):
             return
     raise RuntimeError(f"blocked transition could not be verified for {issue_id}")

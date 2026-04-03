@@ -550,6 +550,104 @@ def test_mark_issue_blocked_reuses_same_note_when_retry_reads_partial_state(
     assert requests[1].description.count("blocked_at:") == 1
 
 
+def test_mark_issue_blocked_reuses_matching_reason_when_retry_has_trailing_notes(
+    monkeypatch,
+) -> None:
+    requests = []
+
+    class _FakeSyncClient:
+        def update(self, request):
+            requests.append(request)
+            return IssueRecord(
+                id=request.issue_id,
+                title="Blocked",
+                status="blocked",
+                description=request.description,
+            )
+
+    monkeypatch.setattr(
+        worker_store,
+        "_build_store_bundle",
+        lambda **_kwargs: worker_store._StoreBundle(  # pyright: ignore[reportPrivateUsage]
+            store=build_atelier_store(beads=build_in_memory_beads_client()[0]),
+            sync_client=_FakeSyncClient(),
+        ),
+    )
+    monkeypatch.setattr(
+        worker_store,
+        "_show_issue",
+        lambda **_kwargs: {
+            "id": "at-epic.1",
+            "status": "open",
+            "description": (
+                "blocked_at: 2026-03-15T18:28:04+00:00 reason: missing integration\n"
+                "north_star_review.2026-03-15T18:29:00+00:00: checklist pending\n"
+            ),
+        },
+    )
+    worker_store.clear_bundle_cache()
+
+    try:
+        worker_store.mark_issue_blocked(
+            "at-epic.1",
+            reason="missing integration",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+    finally:
+        worker_store.clear_bundle_cache()
+
+    assert len(requests) == 1
+    assert requests[0].description is not None
+    assert requests[0].description.count("blocked_at:") == 1
+    assert "north_star_review" in requests[0].description
+
+
+def test_mark_issue_blocked_noops_when_matching_reason_exists_with_trailing_notes(
+    monkeypatch,
+) -> None:
+    requests = []
+
+    class _FakeSyncClient:
+        def update(self, request):
+            requests.append(request)
+            return IssueRecord(id=request.issue_id, title="Blocked", status="blocked")
+
+    monkeypatch.setattr(
+        worker_store,
+        "_build_store_bundle",
+        lambda **_kwargs: worker_store._StoreBundle(  # pyright: ignore[reportPrivateUsage]
+            store=build_atelier_store(beads=build_in_memory_beads_client()[0]),
+            sync_client=_FakeSyncClient(),
+        ),
+    )
+    monkeypatch.setattr(
+        worker_store,
+        "_show_issue",
+        lambda **_kwargs: {
+            "id": "at-epic.1",
+            "status": "blocked",
+            "description": (
+                "blocked_at: 2026-03-15T18:28:04+00:00 reason: missing integration\n"
+                "planner_note: waiting on dependency metadata\n"
+            ),
+        },
+    )
+    worker_store.clear_bundle_cache()
+
+    try:
+        worker_store.mark_issue_blocked(
+            "at-epic.1",
+            reason="missing integration",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+    finally:
+        worker_store.clear_bundle_cache()
+
+    assert requests == []
+
+
 def test_mark_issue_blocked_repairs_event_history_overflow_and_retries(monkeypatch) -> None:
     attempts = 0
     repairs: list[str] = []

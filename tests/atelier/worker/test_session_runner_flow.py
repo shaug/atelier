@@ -11,6 +11,10 @@ import pytest
 
 from atelier import config
 from atelier.agent_home import AgentHome
+from atelier.lib.beads import IssueRecord
+from atelier.store import build_atelier_store
+from atelier.testing.beads.client import build_in_memory_beads_client
+from atelier.worker import store_adapter as worker_store
 from atelier.worker.context import WorkerRunContext
 from atelier.worker.models import (
     FinalizeResult,
@@ -178,6 +182,91 @@ def test_changeset_block_handler_marks_and_notifies() -> None:
     assert call["thread_id"] == "at-epic.1"
     assert "Stage: start agent session" in call["body"]
     assert "Diagnostics: missing required command: codex" in call["body"]
+
+
+def test_changeset_block_handler_accepts_verified_blocked_reason_after_startup_failure(
+    monkeypatch,
+) -> None:
+    requests = []
+    real_datetime = dt.datetime
+    descriptions = iter(
+        (
+            {"id": "at-epic.1", "status": "open", "description": ""},
+            {
+                "id": "at-epic.1",
+                "status": "blocked",
+                "description": (
+                    "blocked_at: 2026-03-15T18:28:04+00:00 reason: command failed: codex exec "
+                    "hello\nplanner_note: captured startup diagnostics\n"
+                ),
+            },
+        )
+    )
+
+    class _FakeSyncClient:
+        def is_event_history_overflow_detail(self, _detail):
+            return False
+
+        def update(self, request):
+            requests.append(request)
+            return IssueRecord(
+                id=request.issue_id,
+                title="Stale",
+                status="open",
+                description="stale update payload",
+            )
+
+    monkeypatch.setattr(
+        worker_store,
+        "_build_store_bundle",
+        lambda **_kwargs: worker_store._StoreBundle(  # pyright: ignore[reportPrivateUsage]
+            store=build_atelier_store(beads=build_in_memory_beads_client()[0]),
+            sync_client=_FakeSyncClient(),
+        ),
+    )
+    monkeypatch.setattr(worker_store, "_show_issue", lambda **_kwargs: next(descriptions))
+    monkeypatch.setattr(
+        worker_store.dt,
+        "datetime",
+        type(
+            "_FixedDateTime",
+            (),
+            {
+                "now": staticmethod(
+                    lambda tz=None: real_datetime.fromisoformat("2026-03-15T18:28:04+00:00")
+                )
+            },
+        ),
+    )
+    worker_store.clear_bundle_cache()
+    lifecycle = SimpleNamespace(
+        mark_changeset_blocked=lambda changeset_id, *, beads_root, repo_root, reason: (
+            worker_store.mark_issue_blocked(
+                changeset_id,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                reason=reason,
+            )
+        ),
+        send_planner_notification=Mock(),
+    )
+    handler = runner._ChangesetBlockHandler(  # pyright: ignore[reportPrivateUsage]
+        lifecycle=lifecycle,
+        agent_id="atelier/worker/codex/p9",
+        changeset_id="at-epic.1",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    try:
+        handler.mark_changeset_blocked("command failed: codex exec hello")
+    finally:
+        worker_store.clear_bundle_cache()
+
+    assert len(requests) == 1
+    assert requests[0].description is not None
+    assert requests[0].description.count("blocked_at:") == 1
+    lifecycle.send_planner_notification.assert_called_once()
 
 
 def test_run_worker_once_returns_startup_exit_summary() -> None:
