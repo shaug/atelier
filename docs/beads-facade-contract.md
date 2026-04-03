@@ -22,17 +22,15 @@ boundary that blocks new public facade growth.
 
 ## Retired symbols in this slice
 
-- `IssuePrefixRenamePreview`, `ExternalTicketMetadataGap`, and
-  `run_bd_issues` were internal helpers that no longer needed public module
-  visibility.
+- `IssuePrefixRenamePreview`, `ExternalTicketMetadataGap`, and `run_bd_issues`
+  were internal helpers that no longer needed public module visibility.
 - `ensure_custom_types`, `external_label`, `policy_role_label`, and
   `list_epics_by_workspace_label` were dead public helpers with only internal
   call sites.
-- `EventHistoryOverflowRepairResult`,
-  `ExternalTicketMetadataRepairResult`,
-  `ExternalTicketReconcileResult`,
-  `EpicIdentityViolation`, and `EpicDiscoveryParityReport` were duplicate model
-  definitions that are now owned by `atelier.lib.beads` or `atelier.store`.
+- `EventHistoryOverflowRepairResult`, `ExternalTicketMetadataRepairResult`,
+  `ExternalTicketReconcileResult`, `EpicIdentityViolation`, and
+  `EpicDiscoveryParityReport` were duplicate model definitions that are now
+  owned by `atelier.lib.beads` or `atelier.store`.
 
 ## Remaining shim boundary
 

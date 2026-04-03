@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import json
+import re
 import subprocess
 from dataclasses import dataclass
 from functools import lru_cache
@@ -55,6 +56,7 @@ _READY_JSON_ARGS = ("ready",)
 _LIST_JSON_PREFIX = ("list",)
 _EPIC_LABEL_SCAN_LIMIT = 10_000
 _AGENT_LABEL_SCAN_LIMIT = 10_000
+_BLOCKED_REASON_LINE_RE = re.compile(r"^blocked_at:\s+\S+\s+reason:\s*(?P<reason>.+?)\s*$")
 
 
 @dataclass(frozen=True)
@@ -692,6 +694,44 @@ def _description_ends_with_notes(description: str | None, *, notes: tuple[str, .
     return tuple(lines[-len(notes) :]) == notes
 
 
+def _blocked_reason_from_line(line: str) -> str | None:
+    match = _BLOCKED_REASON_LINE_RE.fullmatch(line.strip())
+    if match is None:
+        return None
+    return _normalize_text(match.group("reason"))
+
+
+def _description_contains_line(description: str | None, *, line: str) -> bool:
+    target = line.strip()
+    if not target:
+        return False
+    return any(candidate.strip() == target for candidate in (description or "").splitlines())
+
+
+def _latest_blocked_reason(description: str | None) -> str | None:
+    latest_reason = None
+    for line in (description or "").splitlines():
+        blocked_reason = _blocked_reason_from_line(line)
+        if blocked_reason is not None:
+            latest_reason = blocked_reason
+    return latest_reason
+
+
+def _blocked_transition_has_convergence_evidence(
+    *,
+    status: object,
+    description: str | None,
+    reason: str,
+    note: str,
+) -> bool:
+    normalized_reason = _normalize_text(reason)
+    if normalized_reason is None:
+        return False
+    if _normalize_status(status) == LifecycleStatus.BLOCKED.value:
+        return _latest_blocked_reason(description) == normalized_reason
+    return _description_contains_line(description, line=note)
+
+
 def _labels_from_payload(value: object) -> set[str]:
     if not isinstance(value, list):
         return set()
@@ -866,22 +906,32 @@ def mark_issue_blocked(
     """Persist blocked lifecycle and audit note as one verified issue update."""
 
     bundle = _bundle(beads_root=beads_root, repo_root=repo_root)
+    normalized_reason = _normalize_text(reason)
+    if normalized_reason is None:
+        die("blocked reason must not be empty")
     timestamp = dt.datetime.now(tz=dt.timezone.utc).isoformat()
-    note = f"blocked_at: {timestamp} reason: {reason}"
+    note = f"blocked_at: {timestamp} reason: {normalized_reason}"
     for _attempt in range(5):
         current = _show_issue(issue_id=issue_id, beads_root=beads_root, repo_root=repo_root)
         if current is None:
             die(f"issue not found: {issue_id}")
         current_description = _normalize_text(current.get("description"))
-        desired_description = _append_issue_notes(
-            current_description,
-            notes=(note,),
+        current_has_convergence_evidence = _blocked_transition_has_convergence_evidence(
+            status=current.get("status"),
+            description=current_description,
+            reason=normalized_reason,
+            note=note,
         )
+        desired_description = current_description or ""
+        if not current_has_convergence_evidence:
+            desired_description = _append_issue_notes(
+                current_description,
+                notes=(note,),
+            )
 
-        if _normalize_status(
-            current.get("status")
-        ) == LifecycleStatus.BLOCKED.value and _description_ends_with_notes(
-            current_description, notes=(note,)
+        if (
+            _normalize_status(current.get("status")) == LifecycleStatus.BLOCKED.value
+            and current_has_convergence_evidence
         ):
             return
 
@@ -896,20 +946,22 @@ def mark_issue_blocked(
         )
         payload = _issue_payload(updated)
         payload_description = _normalize_text(payload.get("description"))
-        if _normalize_status(
-            payload.get("status")
-        ) == LifecycleStatus.BLOCKED.value and _description_ends_with_notes(
-            payload_description, notes=(note,)
+        if _blocked_transition_has_convergence_evidence(
+            status=payload.get("status"),
+            description=payload_description,
+            reason=normalized_reason,
+            note=note,
         ):
             return
         refreshed = _show_issue(issue_id=issue_id, beads_root=beads_root, repo_root=repo_root)
         refreshed_description = None
         if refreshed is not None:
             refreshed_description = _normalize_text(refreshed.get("description"))
-        if (
-            refreshed is not None
-            and _normalize_status(refreshed.get("status")) == LifecycleStatus.BLOCKED.value
-            and _description_ends_with_notes(refreshed_description, notes=(note,))
+        if refreshed is not None and _blocked_transition_has_convergence_evidence(
+            status=refreshed.get("status"),
+            description=refreshed_description,
+            reason=normalized_reason,
+            note=note,
         ):
             return
     raise RuntimeError(f"blocked transition could not be verified for {issue_id}")
