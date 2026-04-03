@@ -4806,6 +4806,11 @@ def _event_history_repair_convergence_evidence(
             (
                 f"helper_session_mode={helper_session_evidence.mode}",
                 f"helper_session_json_payload_count={helper_session_evidence.json_payload_count}",
+                "helper_session_restarted_backend_session=true"
+                if helper_session_evidence.restarted_backend_session
+                else "helper_session_restarted_backend_session=false",
+                "helper_session_stopped_server_pid_count="
+                f"{helper_session_evidence.stopped_server_pid_count}",
                 "helper_session_notes_match=true",
             )
         )
@@ -4978,6 +4983,8 @@ def _run_direct_dolt_sql_json(*, query: str, beads_root: Path) -> list[dict[str,
 class _OverflowRepairHelperSessionEvidence:
     mode: str
     json_payload_count: int
+    restarted_backend_session: bool = False
+    stopped_server_pid_count: int = 0
 
 
 def _extract_dolt_sql_json_payloads(raw: str) -> tuple[dict[str, object], ...]:
@@ -4999,6 +5006,77 @@ def _extract_dolt_sql_json_payloads(raw: str) -> tuple[dict[str, object], ...]:
     return tuple(payloads)
 
 
+def _run_local_dolt_sql_command(
+    *,
+    argv_suffix: list[str],
+    repo_path: Path,
+    beads_root: Path,
+) -> exec.CommandResult:
+    result = _run_raw_bd_command(
+        ["dolt", "sql", *argv_suffix],
+        cwd=repo_path,
+        env=beads_env(beads_root),
+    )
+    if result is None:
+        raise RuntimeError("missing required command: dolt")
+    return result
+
+
+def _run_local_dolt_sql_json(
+    *,
+    issue_id: str,
+    query: str,
+    repo_path: Path,
+    beads_root: Path,
+) -> list[dict[str, object]]:
+    result = _run_local_dolt_sql_command(
+        argv_suffix=["-r", "json", "-q", query],
+        repo_path=repo_path,
+        beads_root=beads_root,
+    )
+    if result.returncode != 0:
+        detail = _command_output_detail(result)
+        raise RuntimeError(detail or "local Dolt readback failed")
+    payloads = _extract_dolt_sql_json_payloads(result.stdout or "")
+    if not payloads:
+        raise RuntimeError(
+            f"overflow repair helper-session evidence missing for {issue_id}: no JSON payloads"
+        )
+    final_payload = payloads[-1]
+    rows = final_payload.get("rows")
+    if not isinstance(rows, list):
+        raise RuntimeError(
+            f"overflow repair helper-session evidence malformed for {issue_id}: "
+            "final payload did not contain rows"
+        )
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def _restart_managed_dolt_server_after_helper_session(
+    *,
+    runtime: DoltServerRuntime,
+    beads_root: Path,
+) -> None:
+    env = beads_env(beads_root)
+    started, start_detail = _start_dolt_server(runtime, env=env)
+    if not started:
+        detail = start_detail or "failed to start dolt sql-server"
+        raise RuntimeError(f"failed to restart managed Dolt backend session ({detail})")
+    deadline = time.monotonic() + _DOLT_SERVER_STARTUP_TIMEOUT_SECONDS
+    last_detail = "dolt server health check failed"
+    cwd = beads_root.parent if beads_root.parent.exists() else runtime.dolt_root
+    while time.monotonic() < deadline:
+        healthy, detail = _probe_dolt_server_health(runtime, cwd=cwd, env=env)
+        if healthy:
+            return
+        last_detail = detail or last_detail
+        time.sleep(_DOLT_SERVER_STARTUP_POLL_INTERVAL_SECONDS)
+    raise RuntimeError(
+        "failed to restart managed Dolt backend session "
+        f"(health check did not converge: {last_detail})"
+    )
+
+
 def _run_overflow_repair_helper_session(
     *,
     issue_id: str,
@@ -5008,7 +5086,8 @@ def _run_overflow_repair_helper_session(
 ) -> _OverflowRepairHelperSessionEvidence:
     runtime = _resolve_direct_dolt_sql_runtime(beads_root)
     issue_literal = _sql_issue_id_literal(issue_id)
-    sql_script = (
+    repo_path = runtime.dolt_root / runtime.database
+    update_sql = (
         "UPDATE issues "
         f"SET notes = {_mysql_utf8mb4_literal(repaired_notes)}, "
         "compaction_level = CASE WHEN compaction_level < 1 THEN 1 "
@@ -5016,60 +5095,55 @@ def _run_overflow_repair_helper_session(
         "compacted_at = CURRENT_TIMESTAMP, "
         f"original_size = CASE WHEN original_size IS NULL OR original_size < "
         f"{snapshot_bytes_before} THEN {snapshot_bytes_before} ELSE original_size END "
-        f"WHERE id = {issue_literal};\n"
-        "COMMIT;\n"
-        f"SELECT notes FROM issues WHERE id = {issue_literal};\n"
+        f"WHERE id = {issue_literal};"
     )
-    with NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        suffix=".sql",
-        delete=False,
-    ) as handle:
-        handle.write(sql_script)
-        script_path = Path(handle.name)
+    readback_query = f"SELECT notes FROM issues WHERE id = {issue_literal};"
+    stopped_server_pids = _stop_dolt_server_processes(
+        runtime,
+        cwd=runtime.dolt_root,
+        env=beads_env(beads_root),
+    )
+    local_rows: list[dict[str, object]] | None = None
+    local_failure: RuntimeError | None = None
     try:
-        argv = [
-            "dolt",
-            "--host",
-            runtime.host,
-            "--port",
-            str(runtime.port),
-            "--no-tls",
-            "--use-db",
-            runtime.database,
-            "sql",
-            "-r",
-            "json",
-            "--file",
-            str(script_path),
-        ]
-        result = _run_raw_bd_command(argv, cwd=runtime.dolt_root, env=beads_env(beads_root))
-        if result is None:
-            raise RuntimeError("missing required command: dolt")
-        if result.returncode != 0:
-            detail = _command_output_detail(result)
-            raise RuntimeError(detail or f"direct Dolt repair failed for {issue_id}")
-        payloads = _extract_dolt_sql_json_payloads(result.stdout or "")
-    finally:
-        try:
-            script_path.unlink()
-        except OSError:
-            pass
-
-    if not payloads:
-        raise RuntimeError(
-            f"overflow repair helper-session evidence missing for {issue_id}: "
-            "no JSON payloads returned"
+        update_result = _run_local_dolt_sql_command(
+            argv_suffix=["-q", update_sql],
+            repo_path=repo_path,
+            beads_root=beads_root,
         )
-    final_payload = payloads[-1]
-    rows = final_payload.get("rows")
-    if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+        if update_result.returncode != 0:
+            detail = _command_output_detail(update_result)
+            raise RuntimeError(detail or f"direct Dolt repair failed for {issue_id}")
+        local_rows = _run_local_dolt_sql_json(
+            issue_id=issue_id,
+            query=readback_query,
+            repo_path=repo_path,
+            beads_root=beads_root,
+        )
+    except RuntimeError as exc:
+        local_failure = exc
+    restart_failure: RuntimeError | None = None
+    try:
+        _restart_managed_dolt_server_after_helper_session(
+            runtime=runtime,
+            beads_root=beads_root,
+        )
+    except RuntimeError as exc:
+        restart_failure = exc
+
+    if local_failure is not None and restart_failure is not None:
+        raise RuntimeError(f"{local_failure}; additionally {restart_failure}") from local_failure
+    if local_failure is not None:
+        raise local_failure
+    if restart_failure is not None:
+        raise restart_failure
+
+    if not local_rows:
         raise RuntimeError(
             f"overflow repair helper-session evidence malformed for {issue_id}: "
             "final payload did not contain rows"
         )
-    notes_value = rows[0].get("notes")
+    notes_value = local_rows[0].get("notes")
     if not isinstance(notes_value, str):
         raise RuntimeError(
             f"overflow repair helper-session evidence malformed for {issue_id}: "
@@ -5081,8 +5155,10 @@ def _run_overflow_repair_helper_session(
             f"{issue_id}: helper session readback did not preserve the repaired notes payload"
         )
     return _OverflowRepairHelperSessionEvidence(
-        mode="dolt_sql_file",
-        json_payload_count=len(payloads),
+        mode="dolt_local_sql_restart",
+        json_payload_count=1,
+        restarted_backend_session=True,
+        stopped_server_pid_count=len(stopped_server_pids),
     )
 
 
@@ -5322,6 +5398,11 @@ def repair_issue_event_history_overflow(
             beads_root=beads_root,
             cwd=cwd,
         )
+        if backend == "dolt" and helper_session_evidence is None:
+            raise RuntimeError(
+                f"overflow repair helper-session evidence missing for {cleaned_issue_id}: "
+                "durable Dolt repair requires helper-session convergence proof"
+            )
         backend_readback = _verify_overflow_repair_backend_readback(
             issue_id=cleaned_issue_id,
             backend=backend,

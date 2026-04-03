@@ -6756,7 +6756,7 @@ def test_repair_issue_event_history_overflow_compacts_notes_and_restores_mutabil
         beads_root: Path,
     ) -> beads._OverflowRepairHelperSessionEvidence:  # pyright: ignore[reportPrivateUsage]
         del issue_id, repaired_notes, snapshot_bytes_before, beads_root
-        sql_calls.append(["dolt", "sql", "--file"])
+        sql_calls.append(["dolt", "sql", "-q"])
         issue_state["notes"] = beads._render_overflow_repair_notes(
             backend="dolt",
             issue_id="at-overflow",
@@ -6770,8 +6770,9 @@ def test_repair_issue_event_history_overflow_compacts_notes_and_restores_mutabil
         )
         issue_state["updated_at"] = "2026-03-26T00:01:00Z"
         return beads._OverflowRepairHelperSessionEvidence(  # pyright: ignore[reportPrivateUsage]
-            mode="dolt_sql_file",
-            json_payload_count=2,
+            mode="dolt_local_sql_restart",
+            json_payload_count=1,
+            restarted_backend_session=True,
         )
 
     def fake_direct_dolt_sql_json(*, query: str, beads_root: Path) -> list[dict[str, object]]:
@@ -6807,8 +6808,9 @@ def test_repair_issue_event_history_overflow_compacts_notes_and_restores_mutabil
     )
     assert status_attempts == 1
     assert sql_calls
-    assert sql_calls[0] == ["dolt", "sql", "--file"]
-    assert "helper_session_mode=dolt_sql_file" in result.convergence_evidence
+    assert sql_calls[0] == ["dolt", "sql", "-q"]
+    assert "helper_session_mode=dolt_local_sql_restart" in result.convergence_evidence
+    assert "helper_session_restarted_backend_session=true" in result.convergence_evidence
     repaired_notes = str(issue_state["notes"])
     assert repaired_notes.startswith("overflow_repair:")
     assert "bd history at-overflow" in repaired_notes
@@ -6891,10 +6893,11 @@ def test_repair_issue_event_history_overflow_accepts_backend_readback_when_show_
         beads_root: Path,
     ) -> beads._OverflowRepairHelperSessionEvidence:  # pyright: ignore[reportPrivateUsage]
         del issue_id, repaired_notes, snapshot_bytes_before, beads_root
-        sql_calls.append(["dolt", "sql", "--file"])
+        sql_calls.append(["dolt", "sql", "-q"])
         return beads._OverflowRepairHelperSessionEvidence(  # pyright: ignore[reportPrivateUsage]
-            mode="dolt_sql_file",
-            json_payload_count=2,
+            mode="dolt_local_sql_restart",
+            json_payload_count=1,
+            restarted_backend_session=True,
         )
 
     def fake_direct_dolt_sql_json(*, query: str, beads_root: Path) -> list[dict[str, object]]:
@@ -6926,7 +6929,7 @@ def test_repair_issue_event_history_overflow_accepts_backend_readback_when_show_
     assert status_attempts == 1
     assert show_calls == 2
     assert sql_calls
-    assert sql_calls[0] == ["dolt", "sql", "--file"]
+    assert sql_calls[0] == ["dolt", "sql", "-q"]
 
 
 def test_repair_issue_event_history_overflow_accepts_sqlite_readback_when_metadata_is_missing(
@@ -7078,8 +7081,9 @@ def test_repair_issue_event_history_overflow_fails_closed_for_backend_readback_m
         patch(
             "atelier.beads._run_overflow_repair_helper_session",
             return_value=beads._OverflowRepairHelperSessionEvidence(  # pyright: ignore[reportPrivateUsage]
-                mode="dolt_sql_file",
-                json_payload_count=2,
+                mode="dolt_local_sql_restart",
+                json_payload_count=1,
+                restarted_backend_session=True,
             ),
         ),
         patch(
@@ -7168,8 +7172,9 @@ def test_repair_issue_event_history_overflow_fails_closed_when_verification_writ
         patch(
             "atelier.beads._run_overflow_repair_helper_session",
             return_value=beads._OverflowRepairHelperSessionEvidence(  # pyright: ignore[reportPrivateUsage]
-                mode="dolt_sql_file",
-                json_payload_count=2,
+                mode="dolt_local_sql_restart",
+                json_payload_count=1,
+                restarted_backend_session=True,
             ),
         ),
         patch(
@@ -7191,7 +7196,7 @@ def test_repair_issue_event_history_overflow_fails_closed_when_verification_writ
     assert not readback_notes
 
 
-def test_repair_issue_event_history_overflow_uses_helper_session_file_for_durable_readback(
+def test_repair_issue_event_history_overflow_restarts_backend_session_for_durable_readback(
     tmp_path: Path,
 ) -> None:
     beads_root = tmp_path / ".beads"
@@ -7228,58 +7233,75 @@ def test_repair_issue_event_history_overflow_uses_helper_session_file_for_durabl
         )[2],
     )
     persisted_notes = initial_notes
-    sql_commands: list[list[str]] = []
-    helper_scripts: list[str] = []
     status_attempts = 0
+    raw_commands: list[tuple[list[str], Path]] = []
+    stopped_server_pids: list[tuple[int, ...]] = []
+    started_server_ports: list[int] = []
+    probe_calls = 0
 
-    def fake_run_with_runner(
-        request: exec_util.CommandRequest,
-    ) -> exec_util.CommandResult | None:
-        nonlocal persisted_notes, status_attempts
-        argv = list(request.argv)
-        if argv[:3] == ["bd", "show", "at-overflow"]:
-            payload = dict(issue_state)
-            payload["notes"] = persisted_notes
-            return exec_util.CommandResult(
-                argv=request.argv,
-                returncode=0,
-                stdout=json.dumps([payload]),
-                stderr="",
-            )
-        if argv[:5] == ["bd", "update", "at-overflow", "--status", "in_progress"]:
+    def fake_run_bd_json(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        if args[:2] == ["show", "at-overflow"]:
+            return [dict(issue_state)]
+        raise AssertionError(f"unexpected bd json command: {args}")
+
+    def fake_run_bd_command(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+    ) -> CompletedProcess[str]:
+        del beads_root, cwd, allow_failure
+        nonlocal status_attempts
+        if args[:3] == ["update", "at-overflow", "--status"]:
             status_attempts += 1
+            if status_attempts == 1 and not raw_commands:
+                return CompletedProcess(
+                    args=["bd", *args],
+                    returncode=1,
+                    stdout="",
+                    stderr=(
+                        "failed to record event: Error 1105 (HY000): string "
+                        "is too large for column 'old_value'"
+                    ),
+                )
+            return CompletedProcess(args=["bd", *args], returncode=0, stdout="", stderr="")
+        raise AssertionError(f"unexpected bd command: {args}")
+
+    def fake_run_raw_bd_command(
+        argv: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+    ) -> exec_util.CommandResult | None:
+        del env
+        nonlocal persisted_notes
+        raw_commands.append((list(argv), cwd))
+        if argv[:3] == ["dolt", "sql", "-q"]:
+            assert cwd == dolt_repo
+            assert argv[-1].startswith("UPDATE issues ")
+            persisted_notes = repaired_notes
             return exec_util.CommandResult(
-                argv=request.argv,
+                argv=tuple(argv),
                 returncode=0,
                 stdout="",
                 stderr="",
             )
-        if argv[:9] == [
-            "dolt",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            "3311",
-            "--no-tls",
-            "--use-db",
-            "beads_at",
-            "sql",
-        ] and argv[9:12] == ["-r", "json", "--file"]:
-            sql_commands.append(argv)
-            script = Path(argv[-1]).read_text(encoding="utf-8")
-            helper_scripts.append(script)
-            if (
-                script.startswith("UPDATE issues")
-                and "COMMIT;" in script
-                and "SELECT notes FROM issues" in script
-            ):
-                persisted_notes = repaired_notes
-                return exec_util.CommandResult(
-                    argv=request.argv,
-                    returncode=0,
-                    stdout="{}\n" + json.dumps({"rows": [{"notes": persisted_notes}]}) + "\n",
-                    stderr="",
-                )
+        if argv[:4] == ["dolt", "sql", "-r", "json"]:
+            assert cwd == dolt_repo
+            assert argv[-1].startswith("SELECT notes FROM issues ")
+            return exec_util.CommandResult(
+                argv=tuple(argv),
+                returncode=0,
+                stdout=json.dumps({"rows": [{"notes": persisted_notes}]}),
+                stderr="",
+            )
         if argv[:9] == [
             "dolt",
             "--host",
@@ -7291,19 +7313,49 @@ def test_repair_issue_event_history_overflow_uses_helper_session_file_for_durabl
             "beads_at",
             "sql",
         ] and argv[9:12] == ["-r", "json", "-q"]:
-            sql_commands.append(argv)
-            query = argv[-1]
-            if query.startswith("SELECT notes FROM issues"):
-                return exec_util.CommandResult(
-                    argv=request.argv,
-                    returncode=0,
-                    stdout=json.dumps({"rows": [{"notes": persisted_notes}]}),
-                    stderr="",
-                )
+            assert cwd == dolt_root
+            return exec_util.CommandResult(
+                argv=tuple(argv),
+                returncode=0,
+                stdout=json.dumps({"rows": [{"notes": persisted_notes}]}),
+                stderr="",
+            )
         raise AssertionError(f"unexpected command: {argv}")
+
+    def fake_stop_dolt_server_processes(
+        runtime: beads.DoltServerRuntime,
+        *,
+        cwd: Path,
+        env: dict[str, str],
+    ) -> tuple[int, ...]:
+        del runtime, cwd, env
+        stopped_server_pids.append((111,))
+        return (111,)
+
+    def fake_start_dolt_server(
+        runtime: beads.DoltServerRuntime,
+        *,
+        env: dict[str, str],
+    ) -> tuple[bool, str | None]:
+        del env
+        started_server_ports.append(runtime.port)
+        return True, None
+
+    def fake_probe_dolt_server_health(
+        runtime: beads.DoltServerRuntime,
+        *,
+        cwd: Path,
+        env: dict[str, str],
+    ) -> tuple[bool, str | None]:
+        del runtime, cwd, env
+        nonlocal probe_calls
+        probe_calls += 1
+        return True, None
 
     with (
         patch("atelier.beads._configured_beads_backend", return_value="dolt"),
+        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command),
         patch(
             "atelier.beads._resolve_dolt_server_runtime",
             return_value=beads.DoltServerRuntime(
@@ -7315,14 +7367,16 @@ def test_repair_issue_event_history_overflow_uses_helper_session_file_for_durabl
                 ownership_error=None,
             ),
         ),
-        patch("atelier.beads.bd_invocation.ensure_supported_bd_version", return_value=None),
-        patch("atelier.beads._resolve_dolt_commit_decision", return_value=None),
-        patch("atelier.beads._attempt_startup_auto_migration", return_value=None),
-        patch("atelier.beads._normalize_dolt_runtime_metadata_once", return_value=None),
-        patch("atelier.beads._should_emit_startup_auto_migration_diagnostic", return_value=False),
-        patch("atelier.beads._ensure_dolt_server_preflight", return_value=None),
-        patch("atelier.beads._enforce_in_progress_dependency_gate", return_value=None),
-        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads._run_raw_bd_command", side_effect=fake_run_raw_bd_command),
+        patch(
+            "atelier.beads._stop_dolt_server_processes",
+            side_effect=fake_stop_dolt_server_processes,
+        ),
+        patch("atelier.beads._start_dolt_server", side_effect=fake_start_dolt_server),
+        patch(
+            "atelier.beads._probe_dolt_server_health",
+            side_effect=fake_probe_dolt_server_health,
+        ),
     ):
         result = beads.repair_issue_event_history_overflow(
             "at-overflow",
@@ -7335,7 +7389,14 @@ def test_repair_issue_event_history_overflow_uses_helper_session_file_for_durabl
     assert result.snapshot_bytes_before > result.snapshot_bytes_after
     assert status_attempts == 1
     assert persisted_notes == repaired_notes
-    assert sql_commands[0][:9] == [
+    assert stopped_server_pids == [(111,)]
+    assert started_server_ports == [3311]
+    assert probe_calls == 1
+    assert raw_commands[0][0][:3] == ["dolt", "sql", "-q"]
+    assert raw_commands[0][1] == dolt_repo
+    assert raw_commands[1][0][:4] == ["dolt", "sql", "-r", "json"]
+    assert raw_commands[1][1] == dolt_repo
+    assert raw_commands[2][0][:9] == [
         "dolt",
         "--host",
         "127.0.0.1",
@@ -7346,12 +7407,9 @@ def test_repair_issue_event_history_overflow_uses_helper_session_file_for_durabl
         "beads_at",
         "sql",
     ]
-    assert sql_commands[0][9:12] == ["-r", "json", "--file"]
-    assert helper_scripts[0].startswith("UPDATE issues")
-    assert "COMMIT;" in helper_scripts[0]
-    assert "SELECT notes FROM issues" in helper_scripts[0]
-    assert any(command[9:12] == ["-r", "json", "-q"] for command in sql_commands)
-    assert "helper_session_mode=dolt_sql_file" in result.convergence_evidence
+    assert "helper_session_mode=dolt_local_sql_restart" in result.convergence_evidence
+    assert "helper_session_restarted_backend_session=true" in result.convergence_evidence
+    assert "helper_session_stopped_server_pid_count=1" in result.convergence_evidence
     assert "helper_session_notes_match=true" in result.convergence_evidence
 
 
@@ -7381,30 +7439,54 @@ def test_repair_issue_event_history_overflow_fails_closed_for_malformed_helper_s
         "updated_at": "2026-03-26T00:00:00Z",
     }
 
-    def fake_run_with_runner(
-        request: exec_util.CommandRequest,
+    def fake_run_bd_json(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        if args[:2] == ["show", "at-overflow"]:
+            return [dict(issue_state)]
+        raise AssertionError(f"unexpected bd json command: {args}")
+
+    def fake_run_bd_command(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+    ) -> CompletedProcess[str]:
+        del beads_root, cwd, allow_failure
+        if args[:3] == ["update", "at-overflow", "--status"]:
+            return CompletedProcess(
+                args=["bd", *args],
+                returncode=1,
+                stdout="",
+                stderr=(
+                    "failed to record event: Error 1105 (HY000): string "
+                    "is too large for column 'old_value'"
+                ),
+            )
+        raise AssertionError(f"unexpected bd command: {args}")
+
+    def fake_run_raw_bd_command(
+        argv: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
     ) -> exec_util.CommandResult | None:
-        argv = list(request.argv)
-        if argv[:3] == ["bd", "show", "at-overflow"]:
+        del cwd, env
+        if argv[:3] == ["dolt", "sql", "-q"]:
             return exec_util.CommandResult(
-                argv=request.argv,
+                argv=tuple(argv),
                 returncode=0,
-                stdout=json.dumps([dict(issue_state)]),
+                stdout="",
                 stderr="",
             )
-        if argv[:9] == [
-            "dolt",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            "3311",
-            "--no-tls",
-            "--use-db",
-            "beads_at",
-            "sql",
-        ] and argv[9:12] == ["-r", "json", "--file"]:
+        if argv[:4] == ["dolt", "sql", "-r", "json"]:
             return exec_util.CommandResult(
-                argv=request.argv,
+                argv=tuple(argv),
                 returncode=0,
                 stdout='{"ok":true}\n',
                 stderr="",
@@ -7413,6 +7495,8 @@ def test_repair_issue_event_history_overflow_fails_closed_for_malformed_helper_s
 
     with (
         patch("atelier.beads._configured_beads_backend", return_value="dolt"),
+        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command),
         patch(
             "atelier.beads._resolve_dolt_server_runtime",
             return_value=beads.DoltServerRuntime(
@@ -7424,14 +7508,10 @@ def test_repair_issue_event_history_overflow_fails_closed_for_malformed_helper_s
                 ownership_error=None,
             ),
         ),
-        patch("atelier.beads.bd_invocation.ensure_supported_bd_version", return_value=None),
-        patch("atelier.beads._resolve_dolt_commit_decision", return_value=None),
-        patch("atelier.beads._attempt_startup_auto_migration", return_value=None),
-        patch("atelier.beads._normalize_dolt_runtime_metadata_once", return_value=None),
-        patch("atelier.beads._should_emit_startup_auto_migration_diagnostic", return_value=False),
-        patch("atelier.beads._ensure_dolt_server_preflight", return_value=None),
-        patch("atelier.beads._enforce_in_progress_dependency_gate", return_value=None),
-        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads._run_raw_bd_command", side_effect=fake_run_raw_bd_command),
+        patch("atelier.beads._stop_dolt_server_processes", return_value=(111,)),
+        patch("atelier.beads._start_dolt_server", return_value=(True, None)),
+        patch("atelier.beads._probe_dolt_server_health", return_value=(True, None)),
     ):
         with pytest.raises(
             RuntimeError,
@@ -7441,6 +7521,73 @@ def test_repair_issue_event_history_overflow_fails_closed_for_malformed_helper_s
                 "at-overflow",
                 beads_root=beads_root,
                 cwd=repo_root,
+            )
+
+
+def test_repair_issue_event_history_overflow_fails_closed_for_missing_helper_session_evidence() -> (
+    None
+):
+    initial_notes = "old note line\n" * 5000
+    issue_state = {
+        "id": "at-overflow",
+        "title": "Overflowed issue",
+        "description": "scope: repair event overflow\n",
+        "acceptance_criteria": "restore issue mutability\n",
+        "notes": initial_notes,
+        "status": "in_progress",
+        "priority": 2,
+        "issue_type": "task",
+        "owner": "scott",
+        "created_at": "2026-03-26T00:00:00Z",
+        "created_by": "planner",
+        "updated_at": "2026-03-26T00:00:00Z",
+    }
+
+    def fake_run_bd_json(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        if args[:2] == ["show", "at-overflow"]:
+            return [dict(issue_state)]
+        raise AssertionError(f"unexpected bd json command: {args}")
+
+    def fake_run_bd_command(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+    ) -> CompletedProcess[str]:
+        del beads_root, cwd, allow_failure
+        if args[:3] == ["update", "at-overflow", "--status"]:
+            return CompletedProcess(
+                args=["bd", *args],
+                returncode=1,
+                stdout="",
+                stderr=(
+                    "failed to record event: Error 1105 (HY000): string "
+                    "is too large for column 'old_value'"
+                ),
+            )
+        raise AssertionError(f"unexpected bd command: {args}")
+
+    with (
+        patch("atelier.beads._configured_beads_backend", return_value="dolt"),
+        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command),
+        patch("atelier.beads._repair_overflowed_issue_notes_sql", return_value=None),
+    ):
+        with pytest.raises(
+            RuntimeError,
+            match=r"helper-session evidence missing for at-overflow",
+        ):
+            beads.repair_issue_event_history_overflow(
+                "at-overflow",
+                beads_root=Path("/beads"),
+                cwd=Path("/repo"),
             )
 
 
