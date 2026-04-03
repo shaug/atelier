@@ -6,8 +6,12 @@ boundary that blocks new public facade growth.
 
 ## Contract rules
 
+- The checked-in contract tracks the full top-level public namespace exposed by
+  `src/atelier/beads.py`, including names introduced by imports or assignments.
+  That makes accidental facade regrowth visible even when it does not come from
+  a new `def` or `class`.
 - `src/atelier/beads.py` keeps only the public functions and classes listed in
-  the checked-in contract.
+  the retained-surface section of the checked-in contract.
 - New top-level public symbols in `atelier.beads` are not allowed unless the
   retirement contract is intentionally updated in the same change.
 - Result models that now belong to newer abstractions stay owned there:
