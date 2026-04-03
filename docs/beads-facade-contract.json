@@ -45,7 +45,6 @@
     "create_message_bead",
     "create_policy_bead",
     "dataclass",
-    "detail_matches_event_history_overflow",
     "detect_startup_beads_state",
     "die",
     "dt",

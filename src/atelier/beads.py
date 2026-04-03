@@ -43,7 +43,9 @@ from .lib.beads.description_fields import (
 from .lib.beads.overflow import (
     EventHistoryOverflowRepairResult as _EventHistoryOverflowRepairResult,
 )
-from .lib.beads.overflow import detail_matches_event_history_overflow
+from .lib.beads.overflow import (
+    detail_matches_event_history_overflow as _detail_matches_event_history_overflow,
+)
 from .store.models import EpicDiscoveryParity as _StoreEpicDiscoveryParity
 from .store.models import EpicIdentityViolation as _StoreEpicIdentityViolation
 from .store.models import (
@@ -4775,7 +4777,7 @@ def repair_external_ticket_metadata_from_history(
 
 
 def _is_event_history_overflow_detail(detail: str | None) -> bool:
-    return detail_matches_event_history_overflow(detail)
+    return _detail_matches_event_history_overflow(detail)
 
 
 def _issue_snapshot_bytes(issue: dict[str, object]) -> int:
