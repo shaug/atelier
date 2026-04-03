@@ -4854,13 +4854,23 @@ def _event_history_repair_convergence_evidence(
     snapshot_bytes_before: int,
     snapshot_bytes_after: int,
     verified_mutation_classes: tuple[str, ...],
+    helper_session_evidence: _OverflowRepairHelperSessionEvidence | None = None,
 ) -> tuple[str, ...]:
-    return (
+    evidence = [
         f"snapshot_bytes_before={snapshot_bytes_before}",
         f"snapshot_bytes_after={snapshot_bytes_after}",
         f"safe_snapshot_target_bytes={_EVENT_HISTORY_REPAIR_TARGET_BYTES}",
-        f"verified_mutation_classes={','.join(verified_mutation_classes)}",
-    )
+    ]
+    if helper_session_evidence is not None:
+        evidence.extend(
+            (
+                f"helper_session_mode={helper_session_evidence.mode}",
+                f"helper_session_json_payload_count={helper_session_evidence.json_payload_count}",
+                "helper_session_notes_match=true",
+            )
+        )
+    evidence.append(f"verified_mutation_classes={','.join(verified_mutation_classes)}")
+    return tuple(evidence)
 
 
 def event_history_overflow_recovery_guidance(*, issue_id: str, backend: str | None) -> str:
@@ -5024,6 +5034,118 @@ def _run_direct_dolt_sql_json(*, query: str, beads_root: Path) -> list[dict[str,
     return [row for row in rows if isinstance(row, dict)]
 
 
+@dataclass(frozen=True)
+class _OverflowRepairHelperSessionEvidence:
+    mode: str
+    json_payload_count: int
+
+
+def _extract_dolt_sql_json_payloads(raw: str) -> tuple[dict[str, object], ...]:
+    payloads: list[dict[str, object]] = []
+    decoder = json.JSONDecoder()
+    cursor = 0
+    while cursor < len(raw):
+        start = raw.find("{", cursor)
+        if start == -1:
+            break
+        try:
+            parsed, end = decoder.raw_decode(raw, start)
+        except json.JSONDecodeError:
+            cursor = start + 1
+            continue
+        if isinstance(parsed, dict):
+            payloads.append(parsed)
+        cursor = end
+    return tuple(payloads)
+
+
+def _run_overflow_repair_helper_session(
+    *,
+    issue_id: str,
+    repaired_notes: str,
+    snapshot_bytes_before: int,
+    beads_root: Path,
+) -> _OverflowRepairHelperSessionEvidence:
+    runtime = _resolve_direct_dolt_sql_runtime(beads_root)
+    issue_literal = _sql_issue_id_literal(issue_id)
+    sql_script = (
+        "UPDATE issues "
+        f"SET notes = {_mysql_utf8mb4_literal(repaired_notes)}, "
+        "compaction_level = CASE WHEN compaction_level < 1 THEN 1 "
+        "ELSE compaction_level END, "
+        "compacted_at = CURRENT_TIMESTAMP, "
+        f"original_size = CASE WHEN original_size IS NULL OR original_size < "
+        f"{snapshot_bytes_before} THEN {snapshot_bytes_before} ELSE original_size END "
+        f"WHERE id = {issue_literal};\n"
+        "COMMIT;\n"
+        f"SELECT notes FROM issues WHERE id = {issue_literal};\n"
+    )
+    with NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        suffix=".sql",
+        delete=False,
+    ) as handle:
+        handle.write(sql_script)
+        script_path = Path(handle.name)
+    try:
+        argv = [
+            "dolt",
+            "--host",
+            runtime.host,
+            "--port",
+            str(runtime.port),
+            "--no-tls",
+            "--use-db",
+            runtime.database,
+            "sql",
+            "-r",
+            "json",
+            "--file",
+            str(script_path),
+        ]
+        result = _run_raw_bd_command(argv, cwd=runtime.dolt_root, env=beads_env(beads_root))
+        if result is None:
+            raise RuntimeError("missing required command: dolt")
+        if result.returncode != 0:
+            detail = _command_output_detail(result)
+            raise RuntimeError(detail or f"direct Dolt repair failed for {issue_id}")
+        payloads = _extract_dolt_sql_json_payloads(result.stdout or "")
+    finally:
+        try:
+            script_path.unlink()
+        except OSError:
+            pass
+
+    if not payloads:
+        raise RuntimeError(
+            f"overflow repair helper-session evidence missing for {issue_id}: "
+            "no JSON payloads returned"
+        )
+    final_payload = payloads[-1]
+    rows = final_payload.get("rows")
+    if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+        raise RuntimeError(
+            f"overflow repair helper-session evidence malformed for {issue_id}: "
+            "final payload did not contain rows"
+        )
+    notes_value = rows[0].get("notes")
+    if not isinstance(notes_value, str):
+        raise RuntimeError(
+            f"overflow repair helper-session evidence malformed for {issue_id}: "
+            "final payload did not contain string notes"
+        )
+    if notes_value != repaired_notes:
+        raise RuntimeError(
+            f"overflow repair helper-session evidence did not prove convergence for "
+            f"{issue_id}: helper session readback did not preserve the repaired notes payload"
+        )
+    return _OverflowRepairHelperSessionEvidence(
+        mode="dolt_sql_file",
+        json_payload_count=len(payloads),
+    )
+
+
 def _repair_overflowed_issue_notes_sql(
     *,
     issue_id: str,
@@ -5031,26 +5153,17 @@ def _repair_overflowed_issue_notes_sql(
     snapshot_bytes_before: int,
     beads_root: Path,
     cwd: Path,
-) -> None:
+) -> _OverflowRepairHelperSessionEvidence | None:
     issue_literal = _sql_issue_id_literal(issue_id)
     backend = _configured_beads_backend(beads_root)
     if not _uses_direct_sqlite_overflow_repair_backend(backend):
-        sql = (
-            "UPDATE issues "
-            f"SET notes = {_mysql_utf8mb4_literal(repaired_notes)}, "
-            "compaction_level = CASE WHEN compaction_level < 1 THEN 1 "
-            "ELSE compaction_level END, "
-            "compacted_at = CURRENT_TIMESTAMP, "
-            f"original_size = CASE WHEN original_size IS NULL OR original_size < "
-            f"{snapshot_bytes_before} THEN {snapshot_bytes_before} ELSE original_size END "
-            f"WHERE id = {issue_literal}; "
-            "COMMIT;"
+        del cwd, issue_literal
+        return _run_overflow_repair_helper_session(
+            issue_id=issue_id,
+            repaired_notes=repaired_notes,
+            snapshot_bytes_before=snapshot_bytes_before,
+            beads_root=beads_root,
         )
-        result = _run_direct_dolt_sql_command(query=sql, beads_root=beads_root)
-        if result.returncode == 0:
-            return
-        detail = _command_output_detail(result)
-        raise RuntimeError(detail or f"direct Dolt repair failed for {issue_id}")
 
     db_path = beads_root / "beads.db"
     if not db_path.exists():
@@ -5082,6 +5195,7 @@ def _repair_overflowed_issue_notes_sql(
             connection.commit()
     except sqlite3.Error as exc:
         raise RuntimeError(f"direct SQLite repair failed for {issue_id}: {exc}") from exc
+    return None
 
 
 @dataclass(frozen=True)
@@ -5261,7 +5375,7 @@ def repair_issue_event_history_overflow(
                 "snapshot. Repair unavailable for this mutation class."
             )
         repaired_notes, _estimated_snapshot_bytes_after, retained_notes_chars = repair_notes
-        _repair_overflowed_issue_notes_sql(
+        helper_session_evidence = _repair_overflowed_issue_notes_sql(
             issue_id=cleaned_issue_id,
             repaired_notes=repaired_notes,
             snapshot_bytes_before=snapshot_bytes_before,
@@ -5337,6 +5451,7 @@ def repair_issue_event_history_overflow(
                 snapshot_bytes_before=snapshot_bytes_before,
                 snapshot_bytes_after=snapshot_bytes_after,
                 verified_mutation_classes=verified_mutation_classes,
+                helper_session_evidence=helper_session_evidence,
             ),
         )
 
