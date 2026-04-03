@@ -636,6 +636,8 @@ class StartupBeadsInvocationHelper:
         issues = self._list_startup_messages(queue=queue, unread_only=unread_only)
         matches: list[dict[str, object]] = []
         for issue in issues:
+            if not issue.queue:
+                continue
             normalized_claim = issue.claimed_by
             if unclaimed_only and issue.claimed_by:
                 continue
