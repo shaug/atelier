@@ -4960,32 +4960,49 @@ def _uses_direct_sqlite_overflow_repair_backend(backend: str | None) -> bool:
     return backend != "dolt"
 
 
-def _resolve_direct_dolt_sql_repo_path(beads_root: Path) -> Path:
+def _resolve_direct_dolt_sql_runtime(beads_root: Path) -> DoltServerRuntime:
     runtime = _resolve_dolt_server_runtime(beads_root)
     if runtime.ownership_error:
         raise RuntimeError(runtime.ownership_error)
     repo_path = runtime.dolt_root / runtime.database
     if not (repo_path / ".dolt").is_dir():
         raise RuntimeError(f"direct Dolt database not found for repair: {repo_path}")
-    return repo_path
+    return runtime
 
 
-def _run_direct_dolt_sql_command(*, query: str, beads_root: Path) -> exec.CommandResult:
+def _run_direct_dolt_sql_command(
+    *,
+    query: str,
+    beads_root: Path,
+    result_format: str | None = None,
+) -> exec.CommandResult:
     env = beads_env(beads_root)
-    repo_path = _resolve_direct_dolt_sql_repo_path(beads_root)
-    result = _run_raw_bd_command(["dolt", "sql", "-q", query], cwd=repo_path, env=env)
+    runtime = _resolve_direct_dolt_sql_runtime(beads_root)
+    argv = [
+        "dolt",
+        "--host",
+        runtime.host,
+        "--port",
+        str(runtime.port),
+        "--no-tls",
+        "--use-db",
+        runtime.database,
+        "sql",
+    ]
+    if result_format is not None:
+        argv.extend(["-r", result_format])
+    argv.extend(["-q", query])
+    result = _run_raw_bd_command(argv, cwd=runtime.dolt_root, env=env)
     if result is None:
         raise RuntimeError("missing required command: dolt")
     return result
 
 
 def _run_direct_dolt_sql_json(*, query: str, beads_root: Path) -> list[dict[str, object]]:
-    env = beads_env(beads_root)
-    repo_path = _resolve_direct_dolt_sql_repo_path(beads_root)
-    result = _run_raw_bd_command(
-        ["dolt", "sql", "-r", "json", "-q", query],
-        cwd=repo_path,
-        env=env,
+    result = _run_direct_dolt_sql_command(
+        query=query,
+        beads_root=beads_root,
+        result_format="json",
     )
     if result is None:
         raise RuntimeError("missing required command: dolt")
@@ -5026,7 +5043,8 @@ def _repair_overflowed_issue_notes_sql(
             "compacted_at = CURRENT_TIMESTAMP, "
             f"original_size = CASE WHEN original_size IS NULL OR original_size < "
             f"{snapshot_bytes_before} THEN {snapshot_bytes_before} ELSE original_size END "
-            f"WHERE id = {issue_literal}"
+            f"WHERE id = {issue_literal}; "
+            "COMMIT;"
         )
         result = _run_direct_dolt_sql_command(query=sql, beads_root=beads_root)
         if result.returncode == 0:

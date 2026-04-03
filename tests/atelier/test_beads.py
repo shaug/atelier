@@ -7197,7 +7197,7 @@ def test_repair_issue_event_history_overflow_fails_closed_when_verification_writ
     assert not readback_notes
 
 
-def test_repair_issue_event_history_overflow_uses_direct_dolt_sql_for_durable_readback(
+def test_repair_issue_event_history_overflow_uses_explicit_dolt_server_session_for_durable_readback(
     tmp_path: Path,
 ) -> None:
     beads_root = tmp_path / ".beads"
@@ -7259,10 +7259,20 @@ def test_repair_issue_event_history_overflow_uses_direct_dolt_sql_for_durable_re
                 stdout="",
                 stderr="",
             )
-        if argv[:3] == ["dolt", "sql", "-q"]:
+        if argv[:9] == [
+            "dolt",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "3311",
+            "--no-tls",
+            "--use-db",
+            "beads_at",
+            "sql",
+        ] and argv[9:10] == ["-q"]:
             sql_commands.append(argv)
             query = argv[-1]
-            if query.startswith("UPDATE issues"):
+            if query.startswith("UPDATE issues") and query.endswith("COMMIT;"):
                 persisted_notes = repaired_notes
                 return exec_util.CommandResult(
                     argv=request.argv,
@@ -7270,7 +7280,17 @@ def test_repair_issue_event_history_overflow_uses_direct_dolt_sql_for_durable_re
                     stdout="",
                     stderr="",
                 )
-        if argv[:4] == ["dolt", "sql", "-r", "json"]:
+        if argv[:9] == [
+            "dolt",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "3311",
+            "--no-tls",
+            "--use-db",
+            "beads_at",
+            "sql",
+        ] and argv[9:12] == ["-r", "json", "-q"]:
             sql_commands.append(argv)
             query = argv[-1]
             if query.startswith("SELECT notes FROM issues"):
@@ -7315,8 +7335,19 @@ def test_repair_issue_event_history_overflow_uses_direct_dolt_sql_for_durable_re
     assert result.snapshot_bytes_before > result.snapshot_bytes_after
     assert status_attempts == 1
     assert persisted_notes == repaired_notes
-    assert sql_commands[0][:3] == ["dolt", "sql", "-q"]
-    assert any(command[:4] == ["dolt", "sql", "-r", "json"] for command in sql_commands)
+    assert sql_commands[0][:9] == [
+        "dolt",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "3311",
+        "--no-tls",
+        "--use-db",
+        "beads_at",
+        "sql",
+    ]
+    assert sql_commands[0][-1].endswith("COMMIT;")
+    assert any(command[9:12] == ["-r", "json", "-q"] for command in sql_commands)
 
 
 def test_read_overflow_repair_backend_readback_uses_sqlite_when_metadata_is_invalid(
