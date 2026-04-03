@@ -4987,6 +4987,14 @@ class _OverflowRepairHelperSessionEvidence:
     stopped_server_pid_count: int = 0
 
 
+@dataclass(frozen=True)
+class _OverflowRepairHelperSessionRollbackState:
+    notes: str
+    compaction_level: int | None
+    compacted_at: str | None
+    original_size: int | None
+
+
 def _extract_dolt_sql_json_payloads(raw: str) -> tuple[dict[str, object], ...]:
     payloads: list[dict[str, object]] = []
     decoder = json.JSONDecoder()
@@ -5052,29 +5060,180 @@ def _run_local_dolt_sql_json(
     return [row for row in rows if isinstance(row, dict)]
 
 
+def _coerce_nullable_issue_int(*, issue_id: str, field_name: str, value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise RuntimeError(
+            f"overflow repair helper-session rollback state malformed for {issue_id}: "
+            f"{field_name} was not an integer"
+        )
+    return value
+
+
+def _read_overflow_repair_helper_session_rollback_state(
+    *,
+    issue_id: str,
+    issue_literal: str,
+    repo_path: Path,
+    beads_root: Path,
+) -> _OverflowRepairHelperSessionRollbackState:
+    rows = _run_local_dolt_sql_json(
+        issue_id=issue_id,
+        query=(
+            "SELECT notes, compaction_level, compacted_at, original_size "
+            f"FROM issues WHERE id = {issue_literal};"
+        ),
+        repo_path=repo_path,
+        beads_root=beads_root,
+    )
+    if not rows:
+        raise RuntimeError(
+            f"overflow repair helper-session rollback state missing for {issue_id}: "
+            "issue row missing"
+        )
+    row = rows[0]
+    notes_value = row.get("notes")
+    if not isinstance(notes_value, str):
+        raise RuntimeError(
+            f"overflow repair helper-session rollback state malformed for {issue_id}: "
+            "notes was not a string"
+        )
+    compacted_at_value = row.get("compacted_at")
+    if compacted_at_value is not None and not isinstance(compacted_at_value, str):
+        raise RuntimeError(
+            f"overflow repair helper-session rollback state malformed for {issue_id}: "
+            "compacted_at was not a string"
+        )
+    return _OverflowRepairHelperSessionRollbackState(
+        notes=notes_value,
+        compaction_level=_coerce_nullable_issue_int(
+            issue_id=issue_id,
+            field_name="compaction_level",
+            value=row.get("compaction_level"),
+        ),
+        compacted_at=compacted_at_value,
+        original_size=_coerce_nullable_issue_int(
+            issue_id=issue_id,
+            field_name="original_size",
+            value=row.get("original_size"),
+        ),
+    )
+
+
+def _sql_nullable_literal(value: str | int | None) -> str:
+    if value is None:
+        return "NULL"
+    if isinstance(value, str):
+        return _mysql_utf8mb4_literal(value)
+    return str(value)
+
+
+def _overflow_repair_helper_session_update_sql(
+    *,
+    issue_literal: str,
+    repaired_notes: str,
+    snapshot_bytes_before: int,
+) -> str:
+    return (
+        "UPDATE issues "
+        f"SET notes = {_mysql_utf8mb4_literal(repaired_notes)}, "
+        "compaction_level = CASE WHEN compaction_level < 1 THEN 1 "
+        "ELSE compaction_level END, "
+        "compacted_at = CURRENT_TIMESTAMP, "
+        f"original_size = CASE WHEN original_size IS NULL OR original_size < "
+        f"{snapshot_bytes_before} THEN {snapshot_bytes_before} ELSE original_size END "
+        f"WHERE id = {issue_literal};"
+    )
+
+
+def _overflow_repair_helper_session_rollback_sql(
+    *,
+    issue_literal: str,
+    rollback_state: _OverflowRepairHelperSessionRollbackState,
+) -> str:
+    return (
+        "UPDATE issues "
+        f"SET notes = {_sql_nullable_literal(rollback_state.notes)}, "
+        f"compaction_level = {_sql_nullable_literal(rollback_state.compaction_level)}, "
+        f"compacted_at = {_sql_nullable_literal(rollback_state.compacted_at)}, "
+        f"original_size = {_sql_nullable_literal(rollback_state.original_size)} "
+        f"WHERE id = {issue_literal};"
+    )
+
+
 def _restart_managed_dolt_server_after_helper_session(
     *,
     runtime: DoltServerRuntime,
     beads_root: Path,
 ) -> None:
     env = beads_env(beads_root)
-    started, start_detail = _start_dolt_server(runtime, env=env)
-    if not started:
-        detail = start_detail or "failed to start dolt sql-server"
-        raise RuntimeError(f"failed to restart managed Dolt backend session ({detail})")
-    deadline = time.monotonic() + _DOLT_SERVER_STARTUP_TIMEOUT_SECONDS
-    last_detail = "dolt server health check failed"
     cwd = beads_root.parent if beads_root.parent.exists() else runtime.dolt_root
-    while time.monotonic() < deadline:
-        healthy, detail = _probe_dolt_server_health(runtime, cwd=cwd, env=env)
-        if healthy:
+    last_detail = "dolt restart did not become healthy"
+    for _ in range(_DOLT_SERVER_RECOVERY_MAX_ATTEMPTS):
+        recovered, detail = _restart_dolt_server_with_recovery(
+            beads_root=beads_root,
+            cwd=cwd,
+            env=env,
+        )
+        if recovered:
             return
-        last_detail = detail or last_detail
-        time.sleep(_DOLT_SERVER_STARTUP_POLL_INTERVAL_SECONDS)
-    raise RuntimeError(
-        "failed to restart managed Dolt backend session "
-        f"(health check did not converge: {last_detail})"
+        if detail:
+            last_detail = detail
+    raise RuntimeError(f"failed to restart managed Dolt backend session ({last_detail})")
+
+
+def _recover_from_overflow_repair_helper_restart_failure(
+    *,
+    issue_id: str,
+    issue_literal: str,
+    rollback_state: _OverflowRepairHelperSessionRollbackState,
+    restart_failure: RuntimeError,
+    runtime: DoltServerRuntime,
+    repo_path: Path,
+    beads_root: Path,
+) -> RuntimeError:
+    rollback_failure: RuntimeError | None = None
+    try:
+        rollback_result = _run_local_dolt_sql_command(
+            argv_suffix=[
+                "-q",
+                _overflow_repair_helper_session_rollback_sql(
+                    issue_literal=issue_literal,
+                    rollback_state=rollback_state,
+                ),
+            ],
+            repo_path=repo_path,
+            beads_root=beads_root,
+        )
+        if rollback_result.returncode != 0:
+            detail = _command_output_detail(rollback_result)
+            raise RuntimeError(detail or f"direct Dolt rollback failed for {issue_id}")
+    except RuntimeError as exc:
+        rollback_failure = exc
+
+    recovery_failure: RuntimeError | None = None
+    try:
+        _restart_managed_dolt_server_after_helper_session(
+            runtime=runtime,
+            beads_root=beads_root,
+        )
+    except RuntimeError as exc:
+        recovery_failure = exc
+
+    message = (
+        f"local Dolt repair for {issue_id} succeeded, but managed backend restart failed "
+        f"({restart_failure})"
     )
+    if rollback_failure is None:
+        message = f"{message}; rolled back the direct write"
+    else:
+        message = f"{message}; rollback also failed ({rollback_failure})"
+    if recovery_failure is None:
+        message = f"{message} and recovered the managed backend session"
+    else:
+        message = f"{message}; backend recovery after rollback failed ({recovery_failure})"
+    return RuntimeError(message)
 
 
 def _run_overflow_repair_helper_session(
@@ -5087,15 +5246,10 @@ def _run_overflow_repair_helper_session(
     runtime = _resolve_direct_dolt_sql_runtime(beads_root)
     issue_literal = _sql_issue_id_literal(issue_id)
     repo_path = runtime.dolt_root / runtime.database
-    update_sql = (
-        "UPDATE issues "
-        f"SET notes = {_mysql_utf8mb4_literal(repaired_notes)}, "
-        "compaction_level = CASE WHEN compaction_level < 1 THEN 1 "
-        "ELSE compaction_level END, "
-        "compacted_at = CURRENT_TIMESTAMP, "
-        f"original_size = CASE WHEN original_size IS NULL OR original_size < "
-        f"{snapshot_bytes_before} THEN {snapshot_bytes_before} ELSE original_size END "
-        f"WHERE id = {issue_literal};"
+    update_sql = _overflow_repair_helper_session_update_sql(
+        issue_literal=issue_literal,
+        repaired_notes=repaired_notes,
+        snapshot_bytes_before=snapshot_bytes_before,
     )
     readback_query = f"SELECT notes FROM issues WHERE id = {issue_literal};"
     stopped_server_pids = _stop_dolt_server_processes(
@@ -5104,8 +5258,15 @@ def _run_overflow_repair_helper_session(
         env=beads_env(beads_root),
     )
     local_rows: list[dict[str, object]] | None = None
+    rollback_state: _OverflowRepairHelperSessionRollbackState | None = None
     local_failure: RuntimeError | None = None
     try:
+        rollback_state = _read_overflow_repair_helper_session_rollback_state(
+            issue_id=issue_id,
+            issue_literal=issue_literal,
+            repo_path=repo_path,
+            beads_root=beads_root,
+        )
         update_result = _run_local_dolt_sql_command(
             argv_suffix=["-q", update_sql],
             repo_path=repo_path,
@@ -5136,7 +5297,17 @@ def _run_overflow_repair_helper_session(
     if local_failure is not None:
         raise local_failure
     if restart_failure is not None:
-        raise restart_failure
+        if rollback_state is None:
+            raise restart_failure
+        raise _recover_from_overflow_repair_helper_restart_failure(
+            issue_id=issue_id,
+            issue_literal=issue_literal,
+            rollback_state=rollback_state,
+            restart_failure=restart_failure,
+            runtime=runtime,
+            repo_path=repo_path,
+            beads_root=beads_root,
+        ) from restart_failure
 
     if not local_rows:
         raise RuntimeError(
