@@ -21,6 +21,19 @@ class EventHistoryOverflowRepairResult:
 
 
 _REQUIRED_MUTATION_CLASSES = frozenset({"notes_append", "status_transition"})
+_EVENT_HISTORY_OVERFLOW_MARKERS = (
+    "failed to record event",
+    "too large for column 'old_value'",
+)
+
+
+def detail_matches_event_history_overflow(detail: str | None) -> bool:
+    """Return whether command detail matches the known overflow failure shape."""
+
+    if not detail:
+        return False
+    normalized = detail.lower()
+    return all(marker in normalized for marker in _EVENT_HISTORY_OVERFLOW_MARKERS)
 
 
 def _parse_convergence_evidence(

@@ -3,6 +3,8 @@
 This document records the remaining direct `atelier.beads` usage that is
 intentionally retained while the legacy facade is drained. The checked-in
 [machine-readable inventory] is the regression boundary used by the test suite.
+The retained public shim surface is published separately in the
+[retirement contract].
 
 ## Concern domains
 
@@ -19,3 +21,4 @@ intentionally retained while the legacy facade is drained. The checked-in
 <!-- inline reference link definitions. please keep alphabetized -->
 
 [machine-readable inventory]: ./beads-facade-inventory.json
+[retirement contract]: ./beads-facade-contract.md
