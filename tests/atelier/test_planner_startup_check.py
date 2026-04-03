@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from atelier import messages, planner_startup_check
-from atelier.store import StartupMessageRecord, build_atelier_store
+from atelier.store import MarkMessageReadRequest, StartupMessageRecord, build_atelier_store
 from atelier.testing.beads import (
     IssueFixtureBuilder,
     build_in_memory_beads_client,
@@ -391,10 +392,7 @@ def test_startup_command_plan_handles_legacy_tombstones_with_real_store(
     )
 
     assert [issue["id"] for issue in command_result.inbox_messages] == ["at-msg-routed"]
-    assert {issue["id"] for issue in command_result.queued_messages} == {
-        "at-msg-routed",
-        "at-msg-queue",
-    }
+    assert [issue["id"] for issue in command_result.queued_messages] == ["at-msg-queue"]
     assert [issue["id"] for issue in command_result.epics] == ["at-epic-open"]
     assert command_result.parity_report.active_top_level_work_count == 1
     assert command_result.parity_report.indexed_active_epic_count == 1
@@ -402,6 +400,57 @@ def test_startup_command_plan_handles_legacy_tombstones_with_real_store(
     assert "Epic discovery parity: ok" in planner_startup_check.render_startup_triage_markdown(
         triage
     )
+
+
+def test_startup_command_plan_excludes_queue_messages_after_mark_read(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    repo_root = tmp_path / "repo"
+    beads_root.mkdir()
+    repo_root.mkdir()
+    helper = planner_startup_check.StartupBeadsInvocationHelper(
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    builder = IssueFixtureBuilder()
+    client, _store = build_in_memory_beads_client(
+        issues=(
+            builder.issue(
+                "at-msg-queue",
+                title="Queued planner work",
+                issue_type="message",
+                labels=("at:message", "at:unread"),
+                description=messages.render_message(
+                    {
+                        "from": "atelier/worker/codex/p100",
+                        "thread": "at-epic.1",
+                        "thread_kind": "changeset",
+                        "audience": ["planner"],
+                        "queue": "planner",
+                    },
+                    "Queue this follow-up.",
+                ),
+            ),
+        )
+    )
+    store = build_atelier_store(beads=client)
+    monkeypatch.setattr(planner_startup_check, "_build_store", lambda **_kwargs: store)
+
+    before = planner_startup_check.execute_startup_command_plan(
+        "atelier/planner/codex/p200",
+        helper=helper,
+    )
+    asyncio.run(store.mark_message_read(MarkMessageReadRequest(message_id="at-msg-queue")))
+    after = planner_startup_check.execute_startup_command_plan(
+        "atelier/planner/codex/p200",
+        helper=helper,
+    )
+
+    assert [issue["id"] for issue in before.queued_messages] == ["at-msg-queue"]
+    assert after.queued_messages == []
+    assert after.inbox_messages == []
 
 
 def test_startup_helper_lists_epics_without_changesets() -> None:
