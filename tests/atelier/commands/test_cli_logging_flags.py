@@ -44,3 +44,31 @@ def test_no_color_flag_disables_colorized_output() -> None:
 
     assert result.exit_code == 0
     mock_set_no_color.assert_called_once_with(True)
+
+
+def test_cli_repairs_installed_project_skills_before_dispatch() -> None:
+    runner = CliRunner()
+    with (
+        patch("atelier.cli.status_cmd", lambda _args: None),
+        patch("atelier.cli.skills.repair_installed_project_skills_for_current_version") as repair,
+    ):
+        result = runner.invoke(cli.app, ["status"])
+
+    assert result.exit_code == 0
+    repair.assert_called_once_with()
+
+
+def test_cli_skips_installed_project_repair_during_completion() -> None:
+    runner = CliRunner()
+    with (
+        patch("atelier.cli.status_cmd", lambda _args: None),
+        patch("atelier.cli.skills.repair_installed_project_skills_for_current_version") as repair,
+    ):
+        result = runner.invoke(
+            cli.app,
+            ["status"],
+            env={"_ATELIER_COMPLETE": "bash_complete"},
+        )
+
+    assert result.exit_code == 0
+    repair.assert_not_called()

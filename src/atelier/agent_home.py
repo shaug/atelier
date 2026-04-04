@@ -568,6 +568,24 @@ def _ensure_dir_link(dest: Path, target: Path) -> None:
             return
 
 
+def _looks_like_managed_skill_tree(path: Path) -> bool:
+    if not path.exists() or path.is_symlink() or not path.is_dir():
+        return False
+    shared_bootstrap = path / "shared" / "scripts" / "projected_bootstrap.py"
+    if shared_bootstrap.is_file():
+        return True
+    for child in path.iterdir():
+        if child.is_dir() and (child / "SKILL.md").is_file():
+            return True
+    return False
+
+
+def _ensure_managed_skill_link(dest: Path, target: Path) -> None:
+    if _looks_like_managed_skill_tree(dest):
+        shutil.rmtree(dest)
+    _ensure_dir_link(dest, target)
+
+
 def ensure_agent_links(
     agent: AgentHome,
     *,
@@ -581,14 +599,14 @@ def ensure_agent_links(
     if not root.exists():
         return
     _ensure_dir_link(root / "worktree", worktree_path)
-    _ensure_dir_link(root / "skills", skills_dir)
+    _ensure_managed_skill_link(root / "skills", skills_dir)
     for lookup in project_skill_lookup_paths:
         relative = str(lookup).strip().strip("/")
         if not relative or relative == "skills":
             continue
         alias_path = root / relative
         alias_path.parent.mkdir(parents=True, exist_ok=True)
-        _ensure_dir_link(alias_path, skills_dir)
+        _ensure_managed_skill_link(alias_path, skills_dir)
     _ensure_dir_link(root / "beads", beads_root)
 
 

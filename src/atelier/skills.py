@@ -31,6 +31,7 @@ _SKILLS_LOCAL_LOCKS: dict[str, threading.RLock] = {}
 _PACKAGED_SUPPORT_TREE_NAMES = frozenset({"shared"})
 _PROJECTED_RUNTIME_DIRNAME = ".atelier-runtime"
 _PROJECTED_RUNTIME_MANIFEST_FILENAME = "projected-runtime.json"
+_INSTALLED_RUNTIME_REPAIR_STATE_FILENAME = "projected-runtime-repair-state.json"
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,14 @@ class ProjectSkillsSyncResult:
     skills_dir: Path
     action: str
     detail: str | None = None
+
+
+@dataclass(frozen=True)
+class InstalledProjectRuntimeRepairResult:
+    action: str
+    scanned_projects: tuple[Path, ...]
+    updated_projects: tuple[Path, ...]
+    failed_projects: tuple[tuple[Path, str], ...]
 
 
 def _skills_lock_path(workspace_dir: Path) -> Path:
@@ -430,6 +439,130 @@ def sync_project_skills(
         )
     install_workspace_skills(project_dir)
     return ProjectSkillsSyncResult(skills_dir=skills_dir, action="updated")
+
+
+def _installed_runtime_repair_state_path() -> Path:
+    return paths.atelier_data_dir() / _INSTALLED_RUNTIME_REPAIR_STATE_FILENAME
+
+
+def _load_installed_runtime_repair_state() -> dict[str, object] | None:
+    state_path = _installed_runtime_repair_state_path()
+    if not state_path.is_file():
+        return None
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def _installed_runtime_repair_state_is_current() -> bool:
+    payload = _load_installed_runtime_repair_state()
+    if payload is None:
+        return False
+    version = str(payload.get("atelier_version", "")).strip()
+    return payload.get("schema_version") == 1 and version == __version__
+
+
+def _write_installed_runtime_repair_state() -> None:
+    state_path = _installed_runtime_repair_state_path()
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    serialized = (
+        json.dumps(
+            {
+                "schema_version": 1,
+                "atelier_version": __version__,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=state_path.parent,
+            prefix=f".{state_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            handle.write(serialized)
+            handle.flush()
+            tmp_path = Path(handle.name)
+        tmp_path.replace(state_path)
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+
+
+def _installed_runtime_repair_candidates() -> tuple[Path, ...]:
+    project_dirs_root = paths.projects_root()
+    if not project_dirs_root.exists():
+        return ()
+    candidates: list[Path] = []
+    for candidate in sorted(project_dirs_root.iterdir()):
+        if not candidate.is_dir():
+            continue
+        if not (
+            paths.project_config_sys_path(candidate).exists()
+            or paths.project_config_legacy_path(candidate).exists()
+        ):
+            continue
+        if not (
+            paths.project_skills_dir(candidate).exists()
+            or _projected_runtime_manifest_path(candidate).exists()
+        ):
+            continue
+        candidates.append(candidate)
+    return tuple(candidates)
+
+
+def repair_installed_project_skills_for_current_version() -> InstalledProjectRuntimeRepairResult:
+    """Repair projected runtime state for already-installed project skill trees.
+
+    Returns:
+        Summary of the version-gated repair pass. ``action`` is ``"skipped"``
+        when the current Atelier version already scanned installed projects,
+        otherwise ``"repaired"`` after the repair pass runs.
+    """
+    if _installed_runtime_repair_state_is_current():
+        return InstalledProjectRuntimeRepairResult(
+            action="skipped",
+            scanned_projects=(),
+            updated_projects=(),
+            failed_projects=(),
+        )
+
+    scanned_projects = _installed_runtime_repair_candidates()
+    updated_projects: list[Path] = []
+    failed_projects: list[tuple[Path, str]] = []
+    for project_dir in scanned_projects:
+        try:
+            result = sync_project_skills(
+                project_dir,
+                upgrade_policy="always",
+                yes=True,
+                interactive=False,
+            )
+        except OSError as exc:
+            failed_projects.append((project_dir, str(exc)))
+            continue
+        if result.action != "up_to_date":
+            updated_projects.append(project_dir)
+
+    if not failed_projects:
+        _write_installed_runtime_repair_state()
+
+    return InstalledProjectRuntimeRepairResult(
+        action="repaired",
+        scanned_projects=scanned_projects,
+        updated_projects=tuple(updated_projects),
+        failed_projects=tuple(failed_projects),
+    )
 
 
 def _projected_runtime_manifest_path(workspace_dir: Path) -> Path:
