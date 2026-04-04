@@ -693,6 +693,56 @@ def test_projected_refresh_overview_repairs_stale_manifest_on_first_helper_invoc
     assert repaired["pythonpath_entries"]
 
 
+def test_projected_refresh_overview_repairs_stale_manifest_without_support_manifest(
+    tmp_path: Path,
+) -> None:
+    agent_home, projected_script = _install_projected_script(
+        tmp_path,
+        skill_name="planner-startup-check",
+        script_name="refresh_overview.py",
+    )
+    repo_root = tmp_path / "non-atelier-repo"
+    repo_root.mkdir()
+    manifest_path = _projected_runtime_manifest_path(agent_home)
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    recorded_pythonpath = tuple(payload["pythonpath_entries"])
+    payload["selected_interpreter"] = str(tmp_path / "bin" / "repair-python")
+    payload["helper_session_id"] = "stale-helper-session"
+    payload["atelier_import_root"] = str(tmp_path / "missing-import-root")
+    payload["pythonpath_entries"] = [str(tmp_path / "missing-pythonpath")]
+    manifest_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    _projected_support_manifest_path(agent_home).unlink(missing_ok=True)
+    _write_python_with_pythonpath(
+        Path(payload["selected_interpreter"]),
+        pythonpath=recorded_pythonpath,
+    )
+    isolated_python = tmp_path / "bin" / "python3"
+    _write_python_without_site_packages(isolated_python)
+
+    completed = subprocess.run(
+        [
+            str(isolated_python),
+            str(projected_script),
+            "--repo-dir",
+            str(repo_root),
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=agent_home,
+        env={},
+    )
+
+    assert completed.returncode == 0
+    assert "usage:" in completed.stdout.lower()
+    repaired = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert repaired["status"] == "converged"
+    assert repaired["helper_session_id"]
+    assert (Path(repaired["atelier_import_root"]) / "atelier" / "__init__.py").is_file()
+    assert repaired["pythonpath_entries"]
+
+
 def test_projected_refresh_overview_prefers_canonical_project_runtime_from_stale_agent_home_copy(
     tmp_path: Path,
 ) -> None:

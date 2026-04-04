@@ -50,6 +50,12 @@ class _ProjectedSupportRuntimeManifest:
     pythonpath_entries: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class _ProjectedSupportRuntimeRepairLauncher:
+    selected_interpreter: str
+    pythonpath_entries: tuple[str, ...]
+
+
 def _repo_dir_from_argv(argv: Sequence[str]) -> Path | None:
     """Return an explicit ``--repo-dir`` argument when present.
 
@@ -290,6 +296,106 @@ def _parse_support_runtime_manifest(
     )
 
 
+def _validate_support_runtime_interpreter(
+    selected_interpreter: str,
+    *,
+    subject: str,
+) -> tuple[str | None, str | None]:
+    interpreter = str(selected_interpreter).strip()
+    if not interpreter:
+        return None, f"{subject} is missing selected_interpreter."
+    interpreter_path = Path(interpreter).expanduser()
+    if not (interpreter_path.is_file() and os.access(interpreter_path, os.X_OK)):
+        return (
+            None,
+            f"{subject} selected_interpreter is not executable: {interpreter}",
+        )
+    return interpreter, None
+
+
+def _support_runtime_repair_launcher(
+    *,
+    script_path: Path,
+    manifest_path: Path,
+) -> tuple[_ProjectedSupportRuntimeRepairLauncher | None, str | None]:
+    support_manifest_path = _projected_support_manifest_path(script_path)
+    support_manifest_error: str | None = None
+    if support_manifest_path is None:
+        support_manifest_error = (
+            "projected support manifest path could not be derived from script path."
+        )
+    else:
+        support_payload, support_read_error = _read_support_runtime_manifest(
+            support_manifest_path,
+            subject="projected support manifest",
+        )
+        if support_read_error is not None:
+            support_manifest_error = support_read_error
+        else:
+            support_manifest, parsed_support_error = _parse_support_runtime_manifest(
+                support_payload,
+                subject="projected support manifest",
+            )
+            if parsed_support_error is not None:
+                support_manifest_error = parsed_support_error
+            else:
+                assert support_manifest is not None
+                interpreter, interpreter_error = _validate_support_runtime_interpreter(
+                    support_manifest.selected_interpreter,
+                    subject="projected support manifest",
+                )
+                if interpreter_error is not None:
+                    support_manifest_error = interpreter_error
+                else:
+                    assert interpreter is not None
+                    return (
+                        _ProjectedSupportRuntimeRepairLauncher(
+                            selected_interpreter=interpreter,
+                            pythonpath_entries=support_manifest.pythonpath_entries,
+                        ),
+                        None,
+                    )
+
+    manifest_payload, manifest_read_error = _read_support_runtime_manifest(
+        manifest_path,
+        subject="projected support runtime manifest",
+    )
+    if manifest_read_error is not None:
+        if support_manifest_error is None:
+            return None, manifest_read_error
+        return (
+            None,
+            "projected support runtime self-heal is unavailable: "
+            f"{support_manifest_error}; fallback recorded runtime is unavailable: "
+            f"{manifest_read_error}",
+        )
+    if not isinstance(manifest_payload, dict):
+        recorded_manifest_error = "projected support runtime manifest is not a JSON object."
+    else:
+        interpreter, interpreter_error = _validate_support_runtime_interpreter(
+            str(manifest_payload.get("selected_interpreter", "")),
+            subject="projected support runtime manifest",
+        )
+        if interpreter_error is None:
+            assert interpreter is not None
+            return (
+                _ProjectedSupportRuntimeRepairLauncher(
+                    selected_interpreter=interpreter,
+                    pythonpath_entries=(),
+                ),
+                None,
+            )
+        recorded_manifest_error = interpreter_error
+    if support_manifest_error is None:
+        return None, recorded_manifest_error
+    return (
+        None,
+        "projected support runtime self-heal is unavailable: "
+        f"{support_manifest_error}; fallback recorded runtime is unavailable: "
+        f"{recorded_manifest_error}",
+    )
+
+
 def _repair_support_runtime_manifest(
     *,
     script_path: Path,
@@ -300,47 +406,19 @@ def _repair_support_runtime_manifest(
         return False, None
 
     workspace_dir = manifest_path.parent.parent.resolve()
-    support_manifest_path = _projected_support_manifest_path(script_path)
-    if support_manifest_path is None:
-        return (
-            False,
-            "projected support runtime self-heal is unavailable because the "
-            "projected support manifest path could not be derived from script path.",
-        )
-    support_payload, support_read_error = _read_support_runtime_manifest(
-        support_manifest_path,
-        subject="projected support manifest",
+    launcher, launcher_error = _support_runtime_repair_launcher(
+        script_path=script_path,
+        manifest_path=manifest_path,
     )
-    if support_read_error is not None:
-        return (
-            False,
-            f"projected support runtime self-heal is unavailable: {support_read_error}",
-        )
-    support_manifest, support_manifest_error = _parse_support_runtime_manifest(
-        support_payload,
-        subject="projected support manifest",
-    )
-    if support_manifest_error is not None:
-        return (
-            False,
-            f"projected support runtime self-heal is unavailable: {support_manifest_error}",
-        )
-    assert support_manifest is not None
-
-    support_path = Path(support_manifest.selected_interpreter).expanduser()
-    if not (support_path.is_file() and os.access(support_path, os.X_OK)):
-        return (
-            False,
-            "projected support runtime self-heal is unavailable because the "
-            "projected support manifest selected_interpreter is not executable: "
-            f"{support_manifest.selected_interpreter}",
-        )
+    if launcher_error is not None:
+        return False, launcher_error
+    assert launcher is not None
 
     helper_env = dict(env)
     helper_env[_PROJECTED_SUPPORT_RUNTIME_REPAIR_ATTEMPTED_ENV] = "1"
     helper_env.pop(_PROJECTED_SUPPORT_RUNTIME_SELECTED_ENV, None)
-    if support_manifest.pythonpath_entries:
-        helper_env["PYTHONPATH"] = os.pathsep.join(support_manifest.pythonpath_entries)
+    if launcher.pythonpath_entries:
+        helper_env["PYTHONPATH"] = os.pathsep.join(launcher.pythonpath_entries)
     else:
         helper_env.pop("PYTHONPATH", None)
     repair_program = "\n".join(
@@ -375,7 +453,7 @@ def _repair_support_runtime_manifest(
     )
     try:
         completed = subprocess.run(
-            [support_manifest.selected_interpreter, "-c", repair_program, str(workspace_dir)],
+            [launcher.selected_interpreter, "-c", repair_program, str(workspace_dir)],
             check=False,
             capture_output=True,
             text=True,
