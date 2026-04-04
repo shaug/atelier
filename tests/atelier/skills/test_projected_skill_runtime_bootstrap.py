@@ -38,6 +38,10 @@ def _projected_runtime_manifest_path(agent_home: Path) -> Path:
     return agent_home / ".atelier-runtime" / "projected-runtime.json"
 
 
+def _projected_support_manifest_path(agent_home: Path) -> Path:
+    return agent_home / "skills" / "shared" / "support-manifest.json"
+
+
 def _write_fake_module(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -300,12 +304,17 @@ def test_install_workspace_skills_writes_converged_projected_runtime_manifest(
 
     manifest_path = _projected_runtime_manifest_path(agent_home)
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    support_payload = json.loads(
+        _projected_support_manifest_path(agent_home).read_text(encoding="utf-8")
+    )
 
     assert payload["status"] == "converged"
     assert payload["helper_session_id"]
     assert Path(payload["selected_interpreter"]).exists()
     assert (Path(payload["atelier_import_root"]) / "atelier" / "__init__.py").is_file()
     assert payload["pythonpath_entries"]
+    assert support_payload["status"] == "converged"
+    assert support_payload["pythonpath_entries"]
 
 
 def test_sync_project_skills_backfills_missing_projected_runtime_manifest(
@@ -656,14 +665,7 @@ def test_projected_refresh_overview_repairs_stale_manifest_on_first_helper_invoc
     payload["pythonpath_entries"] = [str(tmp_path / "missing-pythonpath")]
     payload["selected_interpreter"] = str(tmp_path / "bin" / "repair-python")
     manifest_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    helper_pythonpath = [str(_project_repo_root() / "src")]
-    helper_pythonpath.extend(
-        entry for entry in sys.path if isinstance(entry, str) and "site-packages" in entry
-    )
-    _write_python_with_pythonpath(
-        Path(payload["selected_interpreter"]),
-        pythonpath=helper_pythonpath,
-    )
+    _write_python_without_site_packages(Path(payload["selected_interpreter"]))
     isolated_python = tmp_path / "bin" / "python3"
     _write_python_without_site_packages(isolated_python)
 
@@ -787,9 +789,12 @@ def test_projected_refresh_overview_fails_closed_when_self_heal_evidence_is_malf
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     payload["atelier_import_root"] = str(tmp_path / "missing-import-root")
     payload["pythonpath_entries"] = [str(tmp_path / "missing-pythonpath")]
-    payload["selected_interpreter"] = str(tmp_path / "bin" / "repair-python")
     manifest_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    _write_json_echo_python(Path(payload["selected_interpreter"]), "not-json")
+    support_manifest_path = _projected_support_manifest_path(agent_home)
+    support_payload = json.loads(support_manifest_path.read_text(encoding="utf-8"))
+    support_payload["selected_interpreter"] = str(tmp_path / "bin" / "repair-python")
+    support_manifest_path.write_text(json.dumps(support_payload, indent=2) + "\n", encoding="utf-8")
+    _write_json_echo_python(Path(support_payload["selected_interpreter"]), "not-json")
     isolated_python = tmp_path / "bin" / "python3"
     _write_python_without_site_packages(isolated_python)
 

@@ -63,6 +63,7 @@ def test_install_workspace_skills_writes_skill_docs() -> None:
         assert (
             workspace_dir / "skills" / "shared" / "scripts" / "projected_bootstrap.py"
         ).is_file()
+        assert (workspace_dir / "skills" / "shared" / "support-manifest.json").is_file()
         for name in (
             "publish",
             "github",
@@ -302,6 +303,21 @@ def test_sync_project_skills_updates_when_shared_support_tree_missing() -> None:
 
         assert result.action == "updated"
         assert (support_tree / "scripts" / "projected_bootstrap.py").is_file()
+
+
+def test_sync_project_skills_updates_when_projected_support_manifest_missing() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        skills.install_workspace_skills(project_dir)
+        support_manifest = project_dir / "skills" / "shared" / "support-manifest.json"
+        support_manifest.unlink()
+
+        result = skills.sync_project_skills(project_dir)
+
+        assert result.action == "updated"
+        assert support_manifest.is_file()
+        assert skills._projected_runtime_manifest_requires_backfill(project_dir) is False
+        assert skills._projected_support_manifest_requires_backfill(project_dir) is False
 
 
 def test_sync_project_skills_applies_upgrade_with_yes() -> None:

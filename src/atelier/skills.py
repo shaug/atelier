@@ -31,6 +31,7 @@ _SKILLS_LOCAL_LOCKS: dict[str, threading.RLock] = {}
 _PACKAGED_SUPPORT_TREE_NAMES = frozenset({"shared"})
 _PROJECTED_RUNTIME_DIRNAME = ".atelier-runtime"
 _PROJECTED_RUNTIME_MANIFEST_FILENAME = "projected-runtime.json"
+_PROJECTED_SUPPORT_MANIFEST_FILENAME = "support-manifest.json"
 _INSTALLED_RUNTIME_REPAIR_STATE_FILENAME = "projected-runtime-repair-state.json"
 
 
@@ -150,7 +151,13 @@ def _verify_skills_tree(
         skill_dir = skills_dir / name
         if "SKILL.md" in definition.files and not (skill_dir / "SKILL.md").is_file():
             return False
-        if _hash_dir(skill_dir) != definition.digest:
+        if (
+            _hash_dir(
+                skill_dir,
+                ignored_relpaths=_generated_skill_relpaths(name),
+            )
+            != definition.digest
+        ):
             return False
     return True
 
@@ -270,12 +277,20 @@ def packaged_skill_metadata() -> dict[str, dict[str, str]]:
     }
 
 
-def _hash_dir(root: Path) -> str:
+def _generated_skill_relpaths(skill_name: str) -> frozenset[str]:
+    if skill_name == "shared":
+        return frozenset({_PROJECTED_SUPPORT_MANIFEST_FILENAME})
+    return frozenset()
+
+
+def _hash_dir(root: Path, *, ignored_relpaths: frozenset[str] = frozenset()) -> str:
     files: dict[str, bytes] = {}
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
         rel_path = path.relative_to(root).as_posix()
+        if rel_path in ignored_relpaths:
+            continue
         files[rel_path] = path.read_bytes()
     return _hash_files(files)
 
@@ -330,7 +345,10 @@ def workspace_skill_state(
         if not skill_dir.exists():
             needs_install = True
             continue
-        actual_hash = _hash_dir(skill_dir)
+        actual_hash = _hash_dir(
+            skill_dir,
+            ignored_relpaths=_generated_skill_relpaths(name),
+        )
         packaged_hash = definition.digest
         stored_entry = stored.get(name)
         stored_hash = stored_entry.get("hash") if stored_entry else None
@@ -376,6 +394,7 @@ def install_workspace_skills(workspace_dir: Path) -> dict[str, dict[str, str]]:
             staging_dir,
             definitions,
         )
+        _write_projected_support_manifest(workspace_dir)
         _write_projected_runtime_manifest(workspace_dir)
     return {
         name: {"version": __version__, "hash": definition.digest}
@@ -419,17 +438,21 @@ def sync_project_skills(
 
     state = workspace_skill_state(project_dir, None)
     if not state.needs_install:
-        if dry_run and _projected_runtime_manifest_requires_backfill(project_dir):
+        if dry_run and (
+            _projected_support_manifest_requires_backfill(project_dir)
+            or _projected_runtime_manifest_requires_backfill(project_dir)
+        ):
             return ProjectSkillsSyncResult(
                 skills_dir=skills_dir,
                 action="would_update",
-                detail="projected runtime manifest missing or invalid",
+                detail="projected support manifest or runtime manifest missing or invalid",
             )
-        if _repair_projected_runtime_manifest(project_dir):
+        repaired_support, repaired_runtime = _repair_projected_runtime_manifests(project_dir)
+        if repaired_support or repaired_runtime:
             return ProjectSkillsSyncResult(
                 skills_dir=skills_dir,
                 action="updated",
-                detail="projected runtime manifest repaired",
+                detail="projected support manifest or runtime manifest repaired",
             )
         return ProjectSkillsSyncResult(skills_dir=skills_dir, action="up_to_date")
     if dry_run:
@@ -569,6 +592,10 @@ def _projected_runtime_manifest_path(workspace_dir: Path) -> Path:
     return workspace_dir / _PROJECTED_RUNTIME_DIRNAME / _PROJECTED_RUNTIME_MANIFEST_FILENAME
 
 
+def _projected_support_manifest_path(workspace_dir: Path) -> Path:
+    return workspace_dir / paths.SKILLS_DIRNAME / "shared" / _PROJECTED_SUPPORT_MANIFEST_FILENAME
+
+
 def _projected_runtime_helper_session_id() -> str:
     for env_key in ("ATELIER_AGENT_SESSION", "ATELIER_AGENT_ID"):
         value = str(os.environ.get(env_key, "")).strip()
@@ -701,6 +728,48 @@ def _write_projected_runtime_manifest(workspace_dir: Path) -> None:
         raise OSError(f"projected runtime manifest write failed: {exc}") from exc
 
 
+def _write_projected_support_manifest(workspace_dir: Path) -> None:
+    manifest_path = _projected_support_manifest_path(workspace_dir)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = _projected_runtime_manifest_payload()
+    serialized = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=manifest_path.parent,
+            prefix=f".{manifest_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            handle.write(serialized)
+            handle.flush()
+            tmp_path = Path(handle.name)
+        tmp_path.replace(manifest_path)
+        readback = json.loads(manifest_path.read_text(encoding="utf-8"))
+        _validate_projected_runtime_manifest(readback)
+    except Exception as exc:
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+        raise OSError(f"projected support manifest write failed: {exc}") from exc
+
+
+def _projected_support_manifest_requires_backfill(workspace_dir: Path) -> bool:
+    manifest_path = _projected_support_manifest_path(workspace_dir)
+    if not manifest_path.is_file():
+        return True
+    try:
+        readback = json.loads(manifest_path.read_text(encoding="utf-8"))
+        _validate_projected_runtime_manifest(readback)
+    except Exception:
+        return True
+    return False
+
+
 def _projected_runtime_manifest_requires_backfill(workspace_dir: Path) -> bool:
     manifest_path = _projected_runtime_manifest_path(workspace_dir)
     if not manifest_path.is_file():
@@ -713,9 +782,14 @@ def _projected_runtime_manifest_requires_backfill(workspace_dir: Path) -> bool:
     return False
 
 
-def _repair_projected_runtime_manifest(workspace_dir: Path) -> bool:
+def _repair_projected_runtime_manifests(workspace_dir: Path) -> tuple[bool, bool]:
     with _skills_write_lock(workspace_dir):
-        if not _projected_runtime_manifest_requires_backfill(workspace_dir):
-            return False
-        _write_projected_runtime_manifest(workspace_dir)
-        return True
+        repaired_support = False
+        repaired_runtime = False
+        if _projected_support_manifest_requires_backfill(workspace_dir):
+            _write_projected_support_manifest(workspace_dir)
+            repaired_support = True
+        if _projected_runtime_manifest_requires_backfill(workspace_dir):
+            _write_projected_runtime_manifest(workspace_dir)
+            repaired_runtime = True
+        return repaired_support, repaired_runtime
