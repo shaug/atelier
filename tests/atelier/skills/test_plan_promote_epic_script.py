@@ -282,6 +282,58 @@ def test_promote_epic_preview_reads_canonical_notes_for_epic_and_child(
     assert transitions == []
 
 
+def test_promote_epic_accepts_related_context_from_notes(
+    monkeypatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+
+    monkeypatch.setattr(
+        module,
+        "_resolve_context",
+        lambda **_kwargs: (tmp_path / ".beads", tmp_path / "repo", None),
+    )
+
+    epic_issue = _issue(
+        "at-epic",
+        title="Epic",
+        description="promotion_note: ready for confirmation\n",
+        notes="related_context: at-context\ncanonical epic note",
+    )
+
+    class FakeStore:
+        async def get_epic(self, epic_id):
+            assert epic_id == "at-epic"
+            from atelier.store import LifecycleStatus
+
+            return SimpleNamespace(id=epic_id, lifecycle=LifecycleStatus.DEFERRED)
+
+        async def list_changesets(self, query):
+            del query
+            return ()
+
+        async def transition_lifecycle(self, request):  # pragma: no cover - defensive
+            raise AssertionError(request)
+
+    class FakeClient:
+        async def show(self, request):
+            assert request.issue_id == "at-epic"
+            return epic_issue
+
+    monkeypatch.setattr(
+        module, "_build_store_and_client", lambda **_kwargs: (FakeStore(), FakeClient())
+    )
+    monkeypatch.setattr(sys, "argv", ["promote_epic.py", "--epic-id", "at-epic"])
+
+    module.main()
+
+    captured = capsys.readouterr()
+    assert "- at-context" in captured.out
+    assert "Missing detail sections: related-context references" not in captured.out
+    assert "confirmation_required" in captured.out
+
+
 def test_render_issue_preview_prefers_canonical_notes_over_description_markers() -> None:
     module = _load_script_module()
     issue = _issue(
@@ -300,6 +352,64 @@ def test_render_issue_preview_prefers_canonical_notes_over_description_markers()
 
     assert notes_section == "canonical notes field"
     assert "Missing detail sections: notes" not in preview
+
+
+def test_promote_epic_accepts_one_child_rationale_from_notes(
+    monkeypatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+
+    monkeypatch.setattr(
+        module,
+        "_resolve_context",
+        lambda **_kwargs: (tmp_path / ".beads", tmp_path / "repo", None),
+    )
+
+    epic_issue = _issue(
+        "at-epic",
+        title="Epic",
+        description="related_context: at-context\npromotion_note: ready for confirmation\n",
+        notes="rationale: Keep one child because the review slice stays cohesive.",
+    )
+    child_issue = _issue(
+        "at-epic.1",
+        title="Child",
+        description="related_context: at-context\n",
+        notes="canonical child note",
+    )
+
+    class FakeStore:
+        async def get_epic(self, epic_id):
+            assert epic_id == "at-epic"
+            from atelier.store import LifecycleStatus
+
+            return SimpleNamespace(id=epic_id, lifecycle=LifecycleStatus.DEFERRED)
+
+        async def list_changesets(self, query):
+            del query
+            from atelier.store import LifecycleStatus
+
+            return (SimpleNamespace(id="at-epic.1", lifecycle=LifecycleStatus.DEFERRED),)
+
+        async def transition_lifecycle(self, request):  # pragma: no cover - defensive
+            raise AssertionError(request)
+
+    class FakeClient:
+        async def show(self, request):
+            return {"at-epic": epic_issue, "at-epic.1": child_issue}[request.issue_id]
+
+    monkeypatch.setattr(
+        module, "_build_store_and_client", lambda **_kwargs: (FakeStore(), FakeClient())
+    )
+    monkeypatch.setattr(sys, "argv", ["promote_epic.py", "--epic-id", "at-epic"])
+
+    module.main()
+
+    captured = capsys.readouterr()
+    assert "confirmation_required" in captured.out
+    assert "one-child promotion requires explicit decomposition rationale" not in captured.err
 
 
 def test_promote_epic_fails_when_one_child_has_no_decomposition_rationale(
@@ -414,3 +524,58 @@ def test_promote_epic_still_fails_when_notes_are_actually_absent(
 
     assert excinfo.value.code == 1
     assert "epic missing detail sections: notes" in capsys.readouterr().err
+
+
+def test_promote_epic_does_not_treat_external_tickets_as_related_context(
+    monkeypatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+
+    monkeypatch.setattr(
+        module,
+        "_resolve_context",
+        lambda **_kwargs: (tmp_path / ".beads", tmp_path / "repo", None),
+    )
+
+    epic_issue = _issue(
+        "at-epic",
+        title="Epic",
+        description=(
+            "changeset_strategy: Keep review scope small.\nexternal_tickets:\n- github#123\n"
+        ),
+        notes="canonical epic note",
+    )
+
+    class FakeStore:
+        async def get_epic(self, epic_id):
+            assert epic_id == "at-epic"
+            from atelier.store import LifecycleStatus
+
+            return SimpleNamespace(id=epic_id, lifecycle=LifecycleStatus.DEFERRED)
+
+        async def list_changesets(self, query):
+            del query
+            return ()
+
+        async def transition_lifecycle(self, request):  # pragma: no cover - defensive
+            raise AssertionError(request)
+
+    class FakeClient:
+        async def show(self, request):
+            assert request.issue_id == "at-epic"
+            return epic_issue
+
+    monkeypatch.setattr(
+        module, "_build_store_and_client", lambda **_kwargs: (FakeStore(), FakeClient())
+    )
+    monkeypatch.setattr(sys, "argv", ["promote_epic.py", "--epic-id", "at-epic"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.main()
+
+    assert excinfo.value.code == 1
+    captured = capsys.readouterr()
+    assert "- github#123" in captured.out
+    assert "epic missing detail sections: related-context references" in captured.err

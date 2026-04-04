@@ -88,7 +88,10 @@ def validate_authoring_contract(
         executable path has the required context sections.
     """
 
-    combined_fields = _collect_fields([*inherited_context, issue])
+    combined_fields = collect_authoring_contract_fields(
+        issue,
+        inherited_context=inherited_context,
+    )
     missing: list[str] = []
     for field_name, aliases in _REQUIRED_FIELD_ALIASES.items():
         if any(_has_meaningful_value(combined_fields.get(alias, ())) for alias in aliases):
@@ -97,6 +100,62 @@ def validate_authoring_contract(
     if not _has_done_definition([*inherited_context, issue], combined_fields):
         missing.append("done_definition")
     return tuple(missing)
+
+
+def collect_authoring_contract_fields(
+    issue: Mapping[str, object],
+    *,
+    inherited_context: Sequence[Mapping[str, object]] = (),
+) -> dict[str, tuple[str, ...]]:
+    """Return parsed planner authoring contract fields for an executable path.
+
+    Args:
+        issue: Target executable work bead payload.
+        inherited_context: Additional issues that provide shared planner context,
+            typically the parent epic for a child changeset.
+
+    Returns:
+        Mapping of normalized planner authoring contract field names to the
+        parsed values gathered from `description`, `notes`, and `design`.
+    """
+
+    return _collect_fields([*inherited_context, issue])
+
+
+def get_authoring_contract_values(
+    issue: Mapping[str, object],
+    field_name: str,
+    *,
+    inherited_context: Sequence[Mapping[str, object]] = (),
+) -> tuple[str, ...]:
+    """Return parsed values for a canonical planner authoring contract field.
+
+    Args:
+        issue: Target executable work bead payload.
+        field_name: Canonical field name, such as `related_context` or
+            `rationale`.
+        inherited_context: Additional issues that provide shared planner
+            context.
+
+    Returns:
+        Tuple of parsed values for the requested field across all supported
+        aliases. Unknown field names fall back to a direct lookup.
+    """
+
+    combined_fields = collect_authoring_contract_fields(
+        issue,
+        inherited_context=inherited_context,
+    )
+    aliases = _REQUIRED_FIELD_ALIASES.get(field_name)
+    if field_name == "done_definition":
+        aliases = _DONE_DEFINITION_ALIASES
+    if aliases is None:
+        aliases = (field_name,)
+
+    values: list[str] = []
+    for alias in aliases:
+        values.extend(combined_fields.get(alias, ()))
+    return tuple(values)
 
 
 def _collect_fields(issues: Sequence[Mapping[str, object]]) -> dict[str, tuple[str, ...]]:
