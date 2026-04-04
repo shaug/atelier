@@ -410,6 +410,18 @@ def sync_project_skills(
 
     state = workspace_skill_state(project_dir, None)
     if not state.needs_install:
+        if dry_run and _projected_runtime_manifest_requires_backfill(project_dir):
+            return ProjectSkillsSyncResult(
+                skills_dir=skills_dir,
+                action="would_update",
+                detail="projected runtime manifest missing or invalid",
+            )
+        if _repair_projected_runtime_manifest(project_dir):
+            return ProjectSkillsSyncResult(
+                skills_dir=skills_dir,
+                action="updated",
+                detail="projected runtime manifest repaired",
+            )
         return ProjectSkillsSyncResult(skills_dir=skills_dir, action="up_to_date")
     if dry_run:
         return ProjectSkillsSyncResult(
@@ -554,3 +566,23 @@ def _write_projected_runtime_manifest(workspace_dir: Path) -> None:
             except OSError:
                 pass
         raise OSError(f"projected runtime manifest write failed: {exc}") from exc
+
+
+def _projected_runtime_manifest_requires_backfill(workspace_dir: Path) -> bool:
+    manifest_path = _projected_runtime_manifest_path(workspace_dir)
+    if not manifest_path.is_file():
+        return True
+    try:
+        readback = json.loads(manifest_path.read_text(encoding="utf-8"))
+        _validate_projected_runtime_manifest(readback)
+    except Exception:
+        return True
+    return False
+
+
+def _repair_projected_runtime_manifest(workspace_dir: Path) -> bool:
+    with _skills_write_lock(workspace_dir):
+        if not _projected_runtime_manifest_requires_backfill(workspace_dir):
+            return False
+        _write_projected_runtime_manifest(workspace_dir)
+        return True

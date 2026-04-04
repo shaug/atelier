@@ -272,6 +272,27 @@ def test_install_workspace_skills_writes_converged_projected_runtime_manifest(
     assert payload["pythonpath_entries"]
 
 
+def test_sync_project_skills_backfills_missing_projected_runtime_manifest(
+    tmp_path: Path,
+) -> None:
+    agent_home, _projected_script = _install_projected_script(
+        tmp_path,
+        skill_name="planner-startup-check",
+        script_name="refresh_overview.py",
+    )
+
+    manifest_path = _projected_runtime_manifest_path(agent_home)
+    manifest_path.unlink()
+
+    result = packaged_skills.sync_project_skills(agent_home)
+
+    assert result.action == "updated"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert payload["status"] == "converged"
+    assert payload["helper_session_id"]
+    assert payload["pythonpath_entries"]
+
+
 def test_projected_create_epic_prefers_agent_worktree_source(tmp_path: Path) -> None:
     agent_home, projected_script = _install_projected_script(
         tmp_path,
