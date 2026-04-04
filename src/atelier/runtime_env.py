@@ -168,9 +168,12 @@ def projected_runtime_contract(*, repo_root: Path | None) -> ProjectedRuntimeCon
         preferred_mode=preferred_mode,
         repo_root_behavior=repo_root_behavior,
         provenance_selection_rules=(
-            "Resolve repo provenance explicitly from --repo-dir, the local "
-            "./worktree link, projected repo env hints, then cwd/script "
-            "ancestry.",
+            "Resolve repo provenance explicitly from --repo-dir and the local "
+            "./worktree link before consulting projected repo env hints or "
+            "cwd/script ancestry.",
+            "When an explicit --repo-dir disagrees with ambient ATELIER_* "
+            "repo/worktree hints, ignore the ambient hints instead of "
+            "drifting into another project's source tree.",
             "Use repo-source mode only after bootstrap proves a checkout with "
             "src/atelier is available for the projected script.",
             "When repo_root is None, remain in active-interpreter mode and "

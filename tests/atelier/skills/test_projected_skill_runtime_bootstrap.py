@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -31,6 +32,10 @@ def _install_projected_script(
     assert projected_script.exists()
     assert (agent_home / "skills" / "shared" / "scripts" / "projected_bootstrap.py").is_file()
     return agent_home, projected_script
+
+
+def _projected_runtime_manifest_path(agent_home: Path) -> Path:
+    return agent_home / ".atelier-runtime" / "projected-runtime.json"
 
 
 def _write_fake_module(path: Path, content: str) -> None:
@@ -248,6 +253,25 @@ def test_synced_agent_home_includes_shared_bootstrap_dependency_path(
     assert shared_bootstrap.is_file()
 
 
+def test_install_workspace_skills_writes_converged_projected_runtime_manifest(
+    tmp_path: Path,
+) -> None:
+    agent_home, _projected_script = _install_projected_script(
+        tmp_path,
+        skill_name="planner-startup-check",
+        script_name="refresh_overview.py",
+    )
+
+    manifest_path = _projected_runtime_manifest_path(agent_home)
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert payload["status"] == "converged"
+    assert payload["helper_session_id"]
+    assert Path(payload["selected_interpreter"]).exists()
+    assert (Path(payload["atelier_import_root"]) / "atelier" / "__init__.py").is_file()
+    assert payload["pythonpath_entries"]
+
+
 def test_projected_create_epic_prefers_agent_worktree_source(tmp_path: Path) -> None:
     agent_home, projected_script = _install_projected_script(
         tmp_path,
@@ -381,7 +405,7 @@ def test_projected_create_epic_ignores_inherited_pythonpath_when_repo_runtime_ma
     )
 
 
-def test_projected_create_epic_preserves_tool_runtime_when_repo_root_is_unresolved(
+def test_projected_create_epic_prefers_recorded_runtime_when_repo_root_is_unresolved(
     tmp_path: Path,
 ) -> None:
     agent_home, projected_script = _install_projected_script(
@@ -439,12 +463,10 @@ def test_projected_create_epic_preserves_tool_runtime_when_repo_root_is_unresolv
     )
 
     assert completed.returncode == 0
-    assert sentinel_path.read_text(encoding="utf-8") == str(
-        installed_root / "atelier" / "auto_export.py"
-    )
+    assert not sentinel_path.exists()
 
 
-def test_projected_create_epic_preserves_split_tool_runtime_roots_when_repo_root_is_unresolved(
+def test_projected_create_epic_ignores_ambient_split_runtime_roots_when_recorded_runtime_exists(
     tmp_path: Path,
 ) -> None:
     agent_home, projected_script = _install_projected_script(
@@ -525,9 +547,121 @@ def test_projected_create_epic_preserves_split_tool_runtime_roots_when_repo_root
     )
 
     assert completed.returncode == 0
-    assert sentinel_path.read_text(encoding="utf-8") == str(
-        rich_runtime_root / "rich" / "__init__.py"
+    assert not sentinel_path.exists()
+
+
+def test_projected_refresh_overview_uses_recorded_runtime_in_clean_non_atelier_repo(
+    tmp_path: Path,
+) -> None:
+    agent_home, projected_script = _install_projected_script(
+        tmp_path,
+        skill_name="planner-startup-check",
+        script_name="refresh_overview.py",
     )
+    repo_root = tmp_path / "non-atelier-repo"
+    repo_root.mkdir()
+    isolated_python = tmp_path / "bin" / "python3"
+    _write_python_without_site_packages(isolated_python)
+
+    completed = subprocess.run(
+        [
+            str(isolated_python),
+            str(projected_script),
+            "--repo-dir",
+            str(repo_root),
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=agent_home,
+        env={},
+    )
+
+    assert completed.returncode == 0
+    assert "usage:" in completed.stdout.lower()
+
+
+def test_projected_create_epic_ignores_cross_project_env_hints_for_non_atelier_repo(
+    tmp_path: Path,
+) -> None:
+    agent_home, projected_script = _install_projected_script(
+        tmp_path,
+        skill_name="plan-create-epic",
+        script_name="create_epic.py",
+    )
+    target_repo = tmp_path / "target-repo"
+    target_repo.mkdir()
+    contaminated_root = _fake_repo(
+        tmp_path / "foreign-runtime",
+        sentinel_import="auto_export",
+    )
+    isolated_python = tmp_path / "bin" / "python3"
+    _write_python_without_site_packages(isolated_python)
+    sentinel_path = tmp_path / "cross-project-env-leak-sentinel.txt"
+
+    completed = subprocess.run(
+        [
+            str(isolated_python),
+            str(projected_script),
+            "--repo-dir",
+            str(target_repo),
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=agent_home,
+        env={
+            "ATELIER_PROJECT": str(contaminated_root),
+            "ATELIER_WORKSPACE_DIR": str(contaminated_root),
+            "ATELIER_PLANNER_WORKTREE": str(contaminated_root),
+            "BOOTSTRAP_SENTINEL": str(sentinel_path),
+            "PYTHONPATH": str(contaminated_root / "src"),
+        },
+    )
+
+    assert completed.returncode == 0
+    assert not sentinel_path.exists()
+
+
+def test_projected_refresh_overview_fails_closed_when_recorded_runtime_manifest_is_missing(
+    tmp_path: Path,
+) -> None:
+    agent_home, projected_script = _install_projected_script(
+        tmp_path,
+        skill_name="planner-startup-check",
+        script_name="refresh_overview.py",
+    )
+    repo_root = tmp_path / "non-atelier-repo"
+    repo_root.mkdir()
+    manifest_path = _projected_runtime_manifest_path(agent_home)
+    manifest_path.unlink()
+    isolated_python = tmp_path / "bin" / "python3"
+    _write_python_without_site_packages(isolated_python)
+
+    completed = subprocess.run(
+        [
+            str(isolated_python),
+            str(projected_script),
+            "--repo-dir",
+            str(repo_root),
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=agent_home,
+        env={},
+    )
+
+    assert completed.returncode == 1
+    assert "planner helper runtime is unhealthy" in completed.stderr
+    assert "selected_mode: active-interpreter" in completed.stderr
+    assert "repo_runtime_status: unavailable" in completed.stderr
+    assert "projected support runtime manifest missing" in completed.stderr
+    assert "dependency: atelier.runtime_env" in completed.stderr
+    assert "Traceback" not in completed.stderr
 
 
 def test_projected_auto_export_prefers_explicit_repo_dir_source(tmp_path: Path) -> None:
@@ -1154,7 +1288,7 @@ def test_projected_close_epic_reorders_repo_src_ahead_of_installed_package(
     )
 
 
-def test_projected_close_epic_preserves_tool_runtime_when_repo_root_is_unresolved(
+def test_projected_close_epic_prefers_recorded_runtime_when_repo_root_is_unresolved(
     tmp_path: Path,
 ) -> None:
     agent_home, projected_script = _install_projected_script(
@@ -1202,10 +1336,10 @@ def test_projected_close_epic_preserves_tool_runtime_when_repo_root_is_unresolve
     )
 
     assert completed.returncode == 0
-    assert sentinel_path.read_text(encoding="utf-8") == str(installed_root / "rich" / "__init__.py")
+    assert not sentinel_path.exists()
 
 
-def test_projected_close_epic_preserves_split_tool_runtime_roots_when_repo_root_is_unresolved(
+def test_projected_close_epic_ignores_ambient_split_runtime_roots_when_recorded_runtime_exists(
     tmp_path: Path,
 ) -> None:
     agent_home, projected_script = _install_projected_script(
@@ -1272,9 +1406,7 @@ def test_projected_close_epic_preserves_split_tool_runtime_roots_when_repo_root_
     )
 
     assert completed.returncode == 0
-    assert sentinel_path.read_text(encoding="utf-8") == str(
-        rich_runtime_root / "rich" / "__init__.py"
-    )
+    assert not sentinel_path.exists()
 
 
 def test_projected_check_issue_ownership_fails_closed_when_repo_runtime_is_dependency_unhealthy(

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
+import sys
+import tempfile
 import threading
 import time
 from contextlib import contextmanager
@@ -26,6 +29,8 @@ _SKILLS_LOCK_FILENAME = "skills-sync.lock"
 _SKILLS_LOCK_GUARD = threading.Lock()
 _SKILLS_LOCAL_LOCKS: dict[str, threading.RLock] = {}
 _PACKAGED_SUPPORT_TREE_NAMES = frozenset({"shared"})
+_PROJECTED_RUNTIME_DIRNAME = ".atelier-runtime"
+_PROJECTED_RUNTIME_MANIFEST_FILENAME = "projected-runtime.json"
 
 
 @dataclass(frozen=True)
@@ -362,6 +367,7 @@ def install_workspace_skills(workspace_dir: Path) -> dict[str, dict[str, str]]:
             staging_dir,
             definitions,
         )
+        _write_projected_runtime_manifest(workspace_dir)
     return {
         name: {"version": __version__, "hash": definition.digest}
         for name, definition in definitions.items()
@@ -412,3 +418,139 @@ def sync_project_skills(
         )
     install_workspace_skills(project_dir)
     return ProjectSkillsSyncResult(skills_dir=skills_dir, action="updated")
+
+
+def _projected_runtime_manifest_path(workspace_dir: Path) -> Path:
+    return workspace_dir / _PROJECTED_RUNTIME_DIRNAME / _PROJECTED_RUNTIME_MANIFEST_FILENAME
+
+
+def _projected_runtime_helper_session_id() -> str:
+    for env_key in ("ATELIER_AGENT_SESSION", "ATELIER_AGENT_ID"):
+        value = str(os.environ.get(env_key, "")).strip()
+        if value:
+            return value
+    try:
+        resolved = Path(sys.executable).resolve()
+    except OSError:
+        resolved = Path(sys.executable)
+    return f"installer:{resolved}"
+
+
+def _projected_runtime_pythonpath_entries() -> tuple[str, ...]:
+    module_names = (
+        "atelier",
+        "atelier.runtime_env",
+        "pydantic",
+        "pydantic_core",
+        "pydantic_core._pydantic_core",
+        "platformdirs",
+        "questionary",
+        "rich",
+        "typer",
+    )
+    roots: list[str] = []
+    seen: set[str] = set()
+    for module_name in module_names:
+        module = __import__(module_name, fromlist=["*"])
+        raw_origin = getattr(module, "__file__", None)
+        if not isinstance(raw_origin, str) or not raw_origin.strip():
+            spec = getattr(module, "__spec__", None)
+            raw_origin = getattr(spec, "origin", None)
+        if not isinstance(raw_origin, str) or not raw_origin.strip():
+            continue
+        try:
+            module_path = Path(raw_origin).resolve()
+        except OSError:
+            module_path = Path(raw_origin)
+        import_root = module_path
+        if module_path.name == "__init__.py" or module_path.name.startswith("__init__."):
+            import_root = module_path.parent
+        for _ in module_name.split("."):
+            import_root = import_root.parent
+        normalized = str(import_root)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        roots.append(normalized)
+    return tuple(roots)
+
+
+def _projected_runtime_manifest_payload() -> dict[str, object]:
+    atelier_import_root = Path(__file__).resolve().parent.parent
+    package_init = atelier_import_root / "atelier" / "__init__.py"
+    if not package_init.is_file():
+        raise OSError(
+            "projected runtime manifest could not prove the Atelier import root "
+            f"at {atelier_import_root}"
+        )
+    try:
+        selected_interpreter = str(Path(sys.executable).resolve())
+    except OSError:
+        selected_interpreter = str(sys.executable)
+    pythonpath_entries = _projected_runtime_pythonpath_entries()
+    if not pythonpath_entries:
+        pythonpath_entries = (str(atelier_import_root),)
+    return {
+        "schema_version": 1,
+        "status": "converged",
+        "helper_session_id": _projected_runtime_helper_session_id(),
+        "selected_interpreter": selected_interpreter,
+        "atelier_import_root": str(atelier_import_root),
+        "pythonpath_entries": list(pythonpath_entries),
+    }
+
+
+def _validate_projected_runtime_manifest(payload: object) -> dict[str, object]:
+    if not isinstance(payload, dict):
+        raise OSError("projected runtime manifest readback was not a JSON object")
+    if payload.get("status") != "converged":
+        raise OSError("projected runtime manifest readback did not prove convergence")
+    helper_session_id = str(payload.get("helper_session_id", "")).strip()
+    selected_interpreter = str(payload.get("selected_interpreter", "")).strip()
+    import_root = str(payload.get("atelier_import_root", "")).strip()
+    pythonpath_entries = payload.get("pythonpath_entries")
+    if not helper_session_id:
+        raise OSError("projected runtime manifest readback is missing helper_session_id")
+    if not selected_interpreter:
+        raise OSError("projected runtime manifest readback is missing selected_interpreter")
+    if not import_root:
+        raise OSError("projected runtime manifest readback is missing atelier_import_root")
+    if not isinstance(pythonpath_entries, list) or not pythonpath_entries:
+        raise OSError("projected runtime manifest readback is missing pythonpath_entries")
+    package_init = Path(import_root) / "atelier" / "__init__.py"
+    if not package_init.is_file():
+        raise OSError(
+            "projected runtime manifest readback does not point at an importable "
+            f"Atelier root: {import_root}"
+        )
+    return payload
+
+
+def _write_projected_runtime_manifest(workspace_dir: Path) -> None:
+    manifest_path = _projected_runtime_manifest_path(workspace_dir)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = _projected_runtime_manifest_payload()
+    serialized = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=manifest_path.parent,
+            prefix=f".{manifest_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            handle.write(serialized)
+            handle.flush()
+            tmp_path = Path(handle.name)
+        tmp_path.replace(manifest_path)
+        readback = json.loads(manifest_path.read_text(encoding="utf-8"))
+        _validate_projected_runtime_manifest(readback)
+    except Exception as exc:
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+        raise OSError(f"projected runtime manifest write failed: {exc}") from exc

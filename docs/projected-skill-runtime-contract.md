@@ -15,8 +15,14 @@ consumed by `src/atelier/skills/shared/scripts/projected_bootstrap.py`.
 
 ## Provenance selection rules
 
-1. Resolve repo provenance explicitly from `--repo-dir`, the local `./worktree`
-   link, projected repo env hints, then `cwd` and script ancestry.
+1. Resolve repo provenance explicitly from `--repo-dir` and the local
+   `./worktree` link before considering any ambient projected repo env hints.
+1. When an explicit `--repo-dir` does not prove a checkout with `src/atelier`,
+   projected bootstrap must ignore unrelated ambient `ATELIER_*` repo/worktree
+   hints instead of drifting into another project's source tree.
+1. If the selected repo is not itself an Atelier checkout, projected bootstrap
+   may fall back only to the projected skill runtime evidence recorded when the
+   skills were synced into that agent home.
 1. Use `repo-source` mode only after bootstrap proves a checkout with
    `src/atelier` is available to the projected script.
 1. Runtime health checks must prove transitive dependencies, not just partial
@@ -42,6 +48,7 @@ consumed by `src/atelier/skills/shared/scripts/projected_bootstrap.py`.
 ## `repo_root = None`
 
 When `repo_root` is `None`, projected bootstrap does not guess a repo runtime.
-It stays in `active-interpreter` mode, skips repo-runtime re-exec, and reports
+It stays in `active-interpreter` mode, may activate only the recorded projected
+support runtime for that agent home, skips repo-runtime re-exec, and reports
 that operators must pass `--repo-dir <repo-root>` or run from an agent home with
 a local `./worktree` link when repo-source behavior is required.

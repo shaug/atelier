@@ -49,6 +49,11 @@ when launching planner/worker/editor/shell subprocesses.
   fixture copies.
 - Runtime warnings about removed inherited keys are now immediate guidance for
   explicit launch context, not future deprecation notices.
+- Projected skill installs now emit a verified support-runtime manifest in the
+  agent home. When `--repo-dir` points at a non-Atelier repo, shared bootstrap
+  uses that recorded runtime evidence and ignores unrelated ambient
+  cross-project `ATELIER_*` repo/worktree hints instead of importing whichever
+  checkout happened to leak into the shell.
 
 ## Variable inventory
 
