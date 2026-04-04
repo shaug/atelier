@@ -693,6 +693,81 @@ def test_projected_refresh_overview_repairs_stale_manifest_on_first_helper_invoc
     assert repaired["pythonpath_entries"]
 
 
+def test_projected_refresh_overview_prefers_canonical_project_runtime_from_stale_agent_home_copy(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project-data"
+    packaged_skills.install_workspace_skills(project_dir)
+    copied_agent_home = project_dir / "agents" / "worker" / "codex" / "p1-t2"
+    copied_agent_home.mkdir(parents=True)
+    (copied_agent_home / "agent.json").write_text(
+        json.dumps(
+            {
+                "id": "atelier/worker/codex/p1-t2",
+                "name": "codex",
+                "role": "worker",
+                "session_key": "p1-t2",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    shutil.copytree(project_dir / "skills", copied_agent_home / "skills")
+    projected_script = (
+        copied_agent_home / "skills" / "planner-startup-check" / "scripts" / "refresh_overview.py"
+    )
+    copied_manifest = _projected_runtime_manifest_path(copied_agent_home)
+    assert not copied_manifest.exists()
+
+    copied_support_manifest_path = _projected_support_manifest_path(copied_agent_home)
+    copied_support_payload = json.loads(copied_support_manifest_path.read_text(encoding="utf-8"))
+    copied_support_payload["selected_interpreter"] = str(tmp_path / "bin" / "broken-repair-python")
+    copied_support_manifest_path.write_text(
+        json.dumps(copied_support_payload, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    canonical_manifest_path = project_dir / ".atelier-runtime" / "projected-runtime.json"
+    canonical_payload = json.loads(canonical_manifest_path.read_text(encoding="utf-8"))
+    canonical_payload["helper_session_id"] = "stale-project-runtime"
+    canonical_payload["atelier_import_root"] = str(tmp_path / "missing-import-root")
+    canonical_payload["pythonpath_entries"] = [str(tmp_path / "missing-pythonpath")]
+    canonical_payload["selected_interpreter"] = str(tmp_path / "bin" / "broken-project-python")
+    canonical_manifest_path.write_text(
+        json.dumps(canonical_payload, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    _write_python_without_site_packages(Path(canonical_payload["selected_interpreter"]))
+    isolated_python = tmp_path / "bin" / "python3"
+    _write_python_without_site_packages(isolated_python)
+    repo_root = tmp_path / "non-atelier-repo"
+    repo_root.mkdir()
+
+    completed = subprocess.run(
+        [
+            str(isolated_python),
+            str(projected_script),
+            "--repo-dir",
+            str(repo_root),
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=copied_agent_home,
+        env={},
+    )
+
+    assert completed.returncode == 0
+    assert "usage:" in completed.stdout.lower()
+    repaired = json.loads(canonical_manifest_path.read_text(encoding="utf-8"))
+    assert repaired["status"] == "converged"
+    assert repaired["helper_session_id"]
+    assert (Path(repaired["atelier_import_root"]) / "atelier" / "__init__.py").is_file()
+    assert repaired["pythonpath_entries"]
+    assert not copied_manifest.exists()
+
+
 def test_projected_create_epic_ignores_cross_project_env_hints_for_non_atelier_repo(
     tmp_path: Path,
 ) -> None:

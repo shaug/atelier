@@ -19,6 +19,10 @@ _DEFAULT_REPO_DIR_ENV_VARS: tuple[str, ...] = (
 _PROJECTED_RUNTIME_DIRNAME = ".atelier-runtime"
 _PROJECTED_RUNTIME_MANIFEST_FILENAME = "projected-runtime.json"
 _PROJECTED_SUPPORT_MANIFEST_FILENAME = "support-manifest.json"
+_AGENT_METADATA_FILENAME = "agent.json"
+_PROJECT_CONFIG_SYS_FILENAME = "config.sys.json"
+_PROJECT_CONFIG_LEGACY_FILENAME = "config.json"
+_WORKTREES_DIRNAME = "worktrees"
 _PROJECTED_SUPPORT_RUNTIME_SELECTED_ENV = "ATELIER_PROJECTED_SUPPORT_RUNTIME_SELECTED"
 _PROJECTED_SUPPORT_RUNTIME_REPAIR_ATTEMPTED_ENV = (
     "ATELIER_PROJECTED_SUPPORT_RUNTIME_REPAIR_ATTEMPTED"
@@ -105,20 +109,77 @@ def _bootstrap_source_import(
     return None
 
 
-def _support_runtime_manifest_path(script_path: Path) -> Path | None:
+def _is_project_data_dir(path: Path) -> bool:
+    return (
+        (path / _PROJECT_CONFIG_SYS_FILENAME).exists()
+        or (path / _PROJECT_CONFIG_LEGACY_FILENAME).exists()
+        or (path / _WORKTREES_DIRNAME).exists()
+        or (path / "skills").is_dir()
+    )
+
+
+def _projected_skill_roots(script_path: Path) -> tuple[Path, ...]:
     resolved_script = script_path.resolve()
+    current_skill_root: Path | None = None
     for parent in resolved_script.parents:
         if parent.name == "skills":
-            return parent.parent / _PROJECTED_RUNTIME_DIRNAME / _PROJECTED_RUNTIME_MANIFEST_FILENAME
-    return None
+            current_skill_root = parent
+            break
+    if current_skill_root is None:
+        return ()
+
+    candidate_roots: list[Path] = []
+    agent_home_root = current_skill_root.parent
+    if (agent_home_root / _AGENT_METADATA_FILENAME).is_file():
+        for ancestor in agent_home_root.parents:
+            if ancestor.name != "agents":
+                continue
+            project_dir = ancestor.parent
+            if not _is_project_data_dir(project_dir):
+                continue
+            canonical_skills_root = project_dir / "skills"
+            if canonical_skills_root.is_dir():
+                candidate_roots.append(canonical_skills_root)
+            break
+    candidate_roots.append(current_skill_root)
+
+    ordered: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidate_roots:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            resolved = candidate
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        ordered.append(resolved)
+    return tuple(ordered)
+
+
+def _preferred_existing_path(candidates: Sequence[Path]) -> Path | None:
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    if not candidates:
+        return None
+    return candidates[0]
+
+
+def _support_runtime_manifest_path(script_path: Path) -> Path | None:
+    candidates = tuple(
+        skill_root.parent / _PROJECTED_RUNTIME_DIRNAME / _PROJECTED_RUNTIME_MANIFEST_FILENAME
+        for skill_root in _projected_skill_roots(script_path)
+    )
+    return _preferred_existing_path(candidates)
 
 
 def _projected_support_manifest_path(script_path: Path) -> Path | None:
-    resolved_script = script_path.resolve()
-    for parent in resolved_script.parents:
-        if parent.name == "skills":
-            return parent / "shared" / _PROJECTED_SUPPORT_MANIFEST_FILENAME
-    return None
+    candidates = tuple(
+        skill_root / "shared" / _PROJECTED_SUPPORT_MANIFEST_FILENAME
+        for skill_root in _projected_skill_roots(script_path)
+    )
+    return _preferred_existing_path(candidates)
 
 
 def _same_executable(current_executable: str, selected_interpreter: str) -> bool:
