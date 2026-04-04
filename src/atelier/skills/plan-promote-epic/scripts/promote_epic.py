@@ -27,6 +27,7 @@ from atelier.beads_context import (  # noqa: E402
     resolve_skill_beads_context,
 )
 from atelier.lib.beads import description_fields as bead_fields  # noqa: E402
+from atelier.planner_contract import get_authoring_contract_values  # noqa: E402
 
 
 def _build_store_and_client(*, beads_root: Path, repo_root: Path):
@@ -65,6 +66,24 @@ def _clean_text(value: object) -> str | None:
 
 def _issue_text(issue: object, field_name: str) -> str | None:
     return _clean_text(getattr(issue, field_name, None))
+
+
+def _issue_contract_mapping(issue: object) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    description = _issue_text(issue, "description")
+    if description is not None:
+        mapping["description"] = description
+    notes = _issue_notes_text(issue)
+    if notes is not None:
+        mapping["notes"] = notes
+    design = _issue_text(issue, "design")
+    if design is not None:
+        mapping["design"] = design
+    return mapping
+
+
+def _authoring_contract_values(issue: object, field_name: str) -> tuple[str, ...]:
+    return get_authoring_contract_values(_issue_contract_mapping(issue), field_name)
 
 
 def _split_field_values(value: str | None) -> tuple[str, ...]:
@@ -115,8 +134,11 @@ def _issue_notes_text(issue: object) -> str | None:
 
 
 def _related_context(issue: object) -> tuple[str, ...]:
+    related: list[str] = []
+    for value in _authoring_contract_values(issue, "related_context"):
+        related.extend(_split_field_values(value))
+
     fields = bead_fields.parse_description_fields(_issue_text(issue, "description") or "")
-    related = list(_split_field_values(fields.get("related_context")))
     related.extend(_split_field_values(fields.get("external_tickets")))
     deduped: list[str] = []
     seen: set[str] = set()
@@ -136,7 +158,7 @@ def _missing_detail_sections(issue: object) -> tuple[str, ...]:
         missing.append("notes")
     if _issue_text(issue, "acceptance_criteria") is None:
         missing.append("acceptance criteria")
-    if not _related_context(issue):
+    if not _authoring_contract_values(issue, "related_context"):
         missing.append("related-context references")
     return tuple(missing)
 
@@ -145,8 +167,21 @@ def _has_decomposition_rationale(
     epic_issue: object,
     child_issues: tuple[object, ...],
 ) -> bool:
-    haystacks = [_issue_text(epic_issue, "description") or ""]
-    haystacks.extend((_issue_text(child, "description") or "") for child in child_issues)
+    issues = (epic_issue, *child_issues)
+    if any(_authoring_contract_values(issue, "rationale") for issue in issues):
+        return True
+
+    haystacks: list[str] = []
+    for issue in issues:
+        haystacks.extend(
+            text
+            for text in (
+                _issue_text(issue, "description"),
+                _issue_notes_text(issue),
+                _issue_text(issue, "design"),
+            )
+            if text is not None
+        )
     for text in haystacks:
         lowered = text.lower()
         if "changeset_strategy:" in lowered or "decomposition" in lowered or "split " in lowered:
