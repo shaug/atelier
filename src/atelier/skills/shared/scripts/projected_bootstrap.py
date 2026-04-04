@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -18,6 +19,9 @@ _DEFAULT_REPO_DIR_ENV_VARS: tuple[str, ...] = (
 _PROJECTED_RUNTIME_DIRNAME = ".atelier-runtime"
 _PROJECTED_RUNTIME_MANIFEST_FILENAME = "projected-runtime.json"
 _PROJECTED_SUPPORT_RUNTIME_SELECTED_ENV = "ATELIER_PROJECTED_SUPPORT_RUNTIME_SELECTED"
+_PROJECTED_SUPPORT_RUNTIME_REPAIR_ATTEMPTED_ENV = (
+    "ATELIER_PROJECTED_SUPPORT_RUNTIME_REPAIR_ATTEMPTED"
+)
 _INSTALLED_TOOL_RUNTIME_MARKERS: tuple[str, ...] = (
     "/.local/share/uv/tools/atelier/",
     "/Library/Application Support/uv/tools/atelier/",
@@ -31,6 +35,14 @@ class _ProjectedSupportRuntimeResolution:
     detail: str
     command: tuple[str, ...] | None = None
     pythonpath_entries: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _ProjectedSupportRuntimeManifest:
+    helper_session_id: str
+    selected_interpreter: str
+    import_root: Path
+    pythonpath_entries: tuple[str, ...]
 
 
 def _repo_dir_from_argv(argv: Sequence[str]) -> Path | None:
@@ -149,6 +161,179 @@ def _activate_support_runtime_paths(entries: Sequence[str]) -> tuple[str, ...]:
     return ordered
 
 
+def _read_support_runtime_manifest(manifest_path: Path) -> tuple[object | None, str | None]:
+    try:
+        return json.loads(manifest_path.read_text(encoding="utf-8")), None
+    except FileNotFoundError:
+        return None, f"projected support runtime manifest missing: {manifest_path}"
+    except (OSError, json.JSONDecodeError) as exc:
+        return None, f"projected support runtime manifest is malformed: {exc}"
+
+
+def _parse_support_runtime_manifest(
+    payload: object,
+) -> tuple[_ProjectedSupportRuntimeManifest | None, str | None]:
+    if not isinstance(payload, dict):
+        return None, "projected support runtime manifest is not a JSON object."
+    if payload.get("status") != "converged":
+        return None, "projected support runtime manifest did not prove convergence."
+    helper_session_id = str(payload.get("helper_session_id", "")).strip()
+    selected_interpreter = str(payload.get("selected_interpreter", "")).strip()
+    import_root_raw = str(payload.get("atelier_import_root", "")).strip()
+    pythonpath_entries_raw = payload.get("pythonpath_entries")
+    if not helper_session_id:
+        return None, "projected support runtime manifest is missing helper_session_id."
+    if not selected_interpreter:
+        return None, "projected support runtime manifest is missing selected_interpreter."
+    if not import_root_raw:
+        return None, "projected support runtime manifest is missing atelier_import_root."
+    if not isinstance(pythonpath_entries_raw, list) or not pythonpath_entries_raw:
+        return None, "projected support runtime manifest is missing pythonpath_entries."
+    try:
+        import_root = Path(import_root_raw).expanduser().resolve()
+    except OSError as exc:
+        return None, f"projected support runtime manifest import root is invalid: {exc}"
+    if not (import_root / "atelier" / "__init__.py").is_file():
+        return (
+            None,
+            "projected support runtime manifest does not point at an importable "
+            f"Atelier root: {import_root}",
+        )
+    pythonpath_entries = tuple(
+        str(Path(str(entry).strip()).expanduser())
+        for entry in pythonpath_entries_raw
+        if str(entry).strip()
+    )
+    return (
+        _ProjectedSupportRuntimeManifest(
+            helper_session_id=helper_session_id,
+            selected_interpreter=selected_interpreter,
+            import_root=import_root,
+            pythonpath_entries=pythonpath_entries,
+        ),
+        None,
+    )
+
+
+def _repair_support_runtime_manifest(
+    *,
+    manifest_path: Path,
+    payload: object,
+    env: Mapping[str, str],
+) -> tuple[bool, str | None]:
+    if env.get(_PROJECTED_SUPPORT_RUNTIME_REPAIR_ATTEMPTED_ENV) == "1":
+        return False, None
+    if not isinstance(payload, dict):
+        return False, None
+    selected_interpreter = str(payload.get("selected_interpreter", "")).strip()
+    if not selected_interpreter:
+        return False, None
+    selected_path = Path(selected_interpreter).expanduser()
+    if not (selected_path.is_file() and os.access(selected_path, os.X_OK)):
+        return False, None
+
+    workspace_dir = manifest_path.parent.parent.resolve()
+    helper_env = dict(env)
+    helper_env[_PROJECTED_SUPPORT_RUNTIME_REPAIR_ATTEMPTED_ENV] = "1"
+    helper_env.pop(_PROJECTED_SUPPORT_RUNTIME_SELECTED_ENV, None)
+    repair_program = "\n".join(
+        (
+            "import json, sys",
+            "from pathlib import Path",
+            "from atelier import skills",
+            "",
+            "workspace_dir = Path(sys.argv[1]).expanduser().resolve()",
+            "result = skills.sync_project_skills(",
+            "    workspace_dir,",
+            "    upgrade_policy='always',",
+            "    yes=True,",
+            "    interactive=False,",
+            ")",
+            "manifest_path = workspace_dir / '.atelier-runtime' / 'projected-runtime.json'",
+            "payload = json.loads(manifest_path.read_text(encoding='utf-8'))",
+            "validated = skills._validate_projected_runtime_manifest(payload)",
+            "print(",
+            "    json.dumps(",
+            "        {",
+            "            'status': 'converged',",
+            "            'workspace_dir': str(workspace_dir),",
+            "            'manifest_path': str(manifest_path.resolve()),",
+            "            'sync_action': result.action,",
+            "            'manifest': validated,",
+            "        },",
+            "        sort_keys=True,",
+            "    )",
+            ")",
+        )
+    )
+    try:
+        completed = subprocess.run(
+            [selected_interpreter, "-c", repair_program, str(workspace_dir)],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=helper_env,
+            cwd=workspace_dir,
+        )
+    except OSError as exc:
+        return True, f"projected support runtime self-heal failed to start: {exc}"
+    if completed.returncode != 0:
+        detail = " ".join(
+            chunk.strip()
+            for chunk in (completed.stderr, completed.stdout)
+            if isinstance(chunk, str) and chunk.strip()
+        )
+        if not detail:
+            detail = f"exit status {completed.returncode}"
+        return True, f"projected support runtime self-heal failed: {detail}"
+
+    raw_evidence = (completed.stdout or "").strip()
+    if not raw_evidence:
+        return (
+            True,
+            "projected support runtime self-heal did not emit convergence evidence.",
+        )
+    try:
+        evidence = json.loads(raw_evidence)
+    except json.JSONDecodeError as exc:
+        return (
+            True,
+            f"projected support runtime self-heal emitted malformed convergence evidence: {exc}",
+        )
+    if not isinstance(evidence, dict):
+        return (
+            True,
+            "projected support runtime self-heal convergence evidence was not a JSON object.",
+        )
+    if evidence.get("status") != "converged":
+        return (
+            True,
+            "projected support runtime self-heal convergence evidence did not prove convergence.",
+        )
+    evidence_workspace = str(evidence.get("workspace_dir", "")).strip()
+    if evidence_workspace != str(workspace_dir):
+        return (
+            True,
+            "projected support runtime self-heal convergence evidence referenced "
+            f"the wrong workspace: {evidence_workspace or '(missing)'}",
+        )
+    evidence_manifest = str(evidence.get("manifest_path", "")).strip()
+    if evidence_manifest != str(manifest_path.resolve()):
+        return (
+            True,
+            "projected support runtime self-heal convergence evidence referenced "
+            f"the wrong manifest: {evidence_manifest or '(missing)'}",
+        )
+    _manifest, manifest_error = _parse_support_runtime_manifest(evidence.get("manifest"))
+    if manifest_error is not None:
+        return (
+            True,
+            "projected support runtime self-heal convergence evidence did not "
+            f"prove convergence: {manifest_error}",
+        )
+    return True, None
+
+
 def _load_support_runtime_resolution(
     *,
     script_path: Path,
@@ -161,79 +346,57 @@ def _load_support_runtime_resolution(
             status="unavailable",
             detail="projected support runtime manifest path could not be derived from script path.",
         )
-    try:
-        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
+    payload, manifest_read_error = _read_support_runtime_manifest(manifest_path)
+    if manifest_read_error is not None:
         return _ProjectedSupportRuntimeResolution(
             status="unavailable",
-            detail=f"projected support runtime manifest missing: {manifest_path}",
+            detail=manifest_read_error,
         )
-    except (OSError, json.JSONDecodeError) as exc:
-        return _ProjectedSupportRuntimeResolution(
-            status="unavailable",
-            detail=f"projected support runtime manifest is malformed: {exc}",
+
+    manifest, manifest_error = _parse_support_runtime_manifest(payload)
+    if manifest_error is not None:
+        attempted_repair, repair_error = _repair_support_runtime_manifest(
+            manifest_path=manifest_path,
+            payload=payload,
+            env=env,
         )
-    if not isinstance(payload, dict):
-        return _ProjectedSupportRuntimeResolution(
-            status="unavailable",
-            detail="projected support runtime manifest is not a JSON object.",
-        )
-    if payload.get("status") != "converged":
-        return _ProjectedSupportRuntimeResolution(
-            status="unavailable",
-            detail="projected support runtime manifest did not prove convergence.",
-        )
-    helper_session_id = str(payload.get("helper_session_id", "")).strip()
-    selected_interpreter = str(payload.get("selected_interpreter", "")).strip()
-    import_root_raw = str(payload.get("atelier_import_root", "")).strip()
-    pythonpath_entries_raw = payload.get("pythonpath_entries")
-    if not helper_session_id:
-        return _ProjectedSupportRuntimeResolution(
-            status="unavailable",
-            detail="projected support runtime manifest is missing helper_session_id.",
-        )
-    if not selected_interpreter:
-        return _ProjectedSupportRuntimeResolution(
-            status="unavailable",
-            detail="projected support runtime manifest is missing selected_interpreter.",
-        )
-    if not import_root_raw:
-        return _ProjectedSupportRuntimeResolution(
-            status="unavailable",
-            detail="projected support runtime manifest is missing atelier_import_root.",
-        )
-    if not isinstance(pythonpath_entries_raw, list) or not pythonpath_entries_raw:
-        return _ProjectedSupportRuntimeResolution(
-            status="unavailable",
-            detail="projected support runtime manifest is missing pythonpath_entries.",
-        )
-    try:
-        import_root = Path(import_root_raw).expanduser().resolve()
-    except OSError as exc:
-        return _ProjectedSupportRuntimeResolution(
-            status="unavailable",
-            detail=f"projected support runtime manifest import root is invalid: {exc}",
-        )
-    if not (import_root / "atelier" / "__init__.py").is_file():
-        return _ProjectedSupportRuntimeResolution(
-            status="unavailable",
-            detail=(
-                "projected support runtime manifest does not point at an "
-                f"importable Atelier root: {import_root}"
-            ),
-        )
-    pythonpath_entries = tuple(
-        str(Path(str(entry).strip()).expanduser())
-        for entry in pythonpath_entries_raw
-        if str(entry).strip()
-    )
-    if _same_executable(sys.executable, selected_interpreter):
-        activated = _activate_support_runtime_paths(pythonpath_entries)
+        if repair_error is not None:
+            return _ProjectedSupportRuntimeResolution(
+                status="unavailable",
+                detail=repair_error,
+            )
+        if not attempted_repair:
+            return _ProjectedSupportRuntimeResolution(
+                status="unavailable",
+                detail=manifest_error,
+            )
+        payload, manifest_read_error = _read_support_runtime_manifest(manifest_path)
+        if manifest_read_error is not None:
+            return _ProjectedSupportRuntimeResolution(
+                status="unavailable",
+                detail=(
+                    "projected support runtime self-heal completed without readable "
+                    f"manifest evidence: {manifest_read_error}"
+                ),
+            )
+        manifest, manifest_error = _parse_support_runtime_manifest(payload)
+        if manifest_error is not None:
+            return _ProjectedSupportRuntimeResolution(
+                status="unavailable",
+                detail=(
+                    "projected support runtime self-heal completed without "
+                    f"converged manifest evidence: {manifest_error}"
+                ),
+            )
+
+    assert manifest is not None
+    if _same_executable(sys.executable, manifest.selected_interpreter):
+        activated = _activate_support_runtime_paths(manifest.pythonpath_entries)
         return _ProjectedSupportRuntimeResolution(
             status="active",
             detail=(
                 "projected support runtime evidence converged in the current interpreter "
-                f"via helper session {helper_session_id}."
+                f"via helper session {manifest.helper_session_id}."
             ),
             command=None,
             pythonpath_entries=activated,
@@ -245,44 +408,44 @@ def _load_support_runtime_resolution(
                 "projected support runtime re-exec was already attempted, but the "
                 "selected interpreter still did not converge."
             ),
-            command=(selected_interpreter,),
-            pythonpath_entries=pythonpath_entries,
+            command=(manifest.selected_interpreter,),
+            pythonpath_entries=manifest.pythonpath_entries,
         )
-    selected_path = Path(selected_interpreter).expanduser()
+    selected_path = Path(manifest.selected_interpreter).expanduser()
     if not (selected_path.is_file() and os.access(selected_path, os.X_OK)):
         return _ProjectedSupportRuntimeResolution(
             status="unavailable",
             detail=(
                 "projected support runtime manifest selected_interpreter is not executable: "
-                f"{selected_interpreter}"
+                f"{manifest.selected_interpreter}"
             ),
-            command=(selected_interpreter,),
-            pythonpath_entries=pythonpath_entries,
+            command=(manifest.selected_interpreter,),
+            pythonpath_entries=manifest.pythonpath_entries,
         )
     exec_env = dict(env)
     exec_env[_PROJECTED_SUPPORT_RUNTIME_SELECTED_ENV] = "1"
-    if pythonpath_entries:
-        exec_env["PYTHONPATH"] = os.pathsep.join(pythonpath_entries)
+    if manifest.pythonpath_entries:
+        exec_env["PYTHONPATH"] = os.pathsep.join(manifest.pythonpath_entries)
     else:
         exec_env.pop("PYTHONPATH", None)
     try:
         os.execvpe(
-            selected_interpreter,
-            [selected_interpreter, str(script_path), *argv],
+            manifest.selected_interpreter,
+            [manifest.selected_interpreter, str(script_path), *argv],
             exec_env,
         )
     except OSError as exc:
         return _ProjectedSupportRuntimeResolution(
             status="unavailable",
             detail=f"projected support runtime re-exec failed: {exc}",
-            command=(selected_interpreter,),
-            pythonpath_entries=pythonpath_entries,
+            command=(manifest.selected_interpreter,),
+            pythonpath_entries=manifest.pythonpath_entries,
         )
     return _ProjectedSupportRuntimeResolution(
         status="available",
         detail="projected support runtime re-exec was requested.",
-        command=(selected_interpreter,),
-        pythonpath_entries=pythonpath_entries,
+        command=(manifest.selected_interpreter,),
+        pythonpath_entries=manifest.pythonpath_entries,
     )
 
 
