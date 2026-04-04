@@ -709,13 +709,18 @@ def test_projected_refresh_overview_repairs_stale_manifest_without_support_manif
     payload["selected_interpreter"] = str(tmp_path / "bin" / "repair-python")
     payload["helper_session_id"] = "stale-helper-session"
     payload["atelier_import_root"] = str(tmp_path / "missing-import-root")
-    payload["pythonpath_entries"] = [str(tmp_path / "missing-pythonpath")]
+    payload["pythonpath_entries"] = list(recorded_pythonpath)
     manifest_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     _projected_support_manifest_path(agent_home).unlink(missing_ok=True)
-    _write_python_with_pythonpath(
-        Path(payload["selected_interpreter"]),
-        pythonpath=recorded_pythonpath,
+    _write_python_without_site_packages(Path(payload["selected_interpreter"]))
+    wrapper_probe = subprocess.run(
+        [str(payload["selected_interpreter"]), "-c", "import atelier"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={},
     )
+    assert wrapper_probe.returncode != 0
     isolated_python = tmp_path / "bin" / "python3"
     _write_python_without_site_packages(isolated_python)
 

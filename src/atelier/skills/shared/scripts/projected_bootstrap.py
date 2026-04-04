@@ -296,6 +296,39 @@ def _parse_support_runtime_manifest(
     )
 
 
+def _parse_support_runtime_repair_launcher(
+    payload: object,
+    *,
+    subject: str,
+) -> tuple[_ProjectedSupportRuntimeRepairLauncher | None, str | None]:
+    if not isinstance(payload, dict):
+        return None, f"{subject} is not a JSON object."
+    interpreter, interpreter_error = _validate_support_runtime_interpreter(
+        str(payload.get("selected_interpreter", "")),
+        subject=subject,
+    )
+    if interpreter_error is not None:
+        return None, interpreter_error
+    pythonpath_entries_raw = payload.get("pythonpath_entries")
+    if not isinstance(pythonpath_entries_raw, list) or not pythonpath_entries_raw:
+        return None, f"{subject} is missing pythonpath_entries."
+    pythonpath_entries = tuple(
+        str(Path(str(entry).strip()).expanduser())
+        for entry in pythonpath_entries_raw
+        if str(entry).strip()
+    )
+    if not pythonpath_entries:
+        return None, f"{subject} is missing pythonpath_entries."
+    assert interpreter is not None
+    return (
+        _ProjectedSupportRuntimeRepairLauncher(
+            selected_interpreter=interpreter,
+            pythonpath_entries=pythonpath_entries,
+        ),
+        None,
+    )
+
+
 def _validate_support_runtime_interpreter(
     selected_interpreter: str,
     *,
@@ -369,23 +402,13 @@ def _support_runtime_repair_launcher(
             f"{support_manifest_error}; fallback recorded runtime is unavailable: "
             f"{manifest_read_error}",
         )
-    if not isinstance(manifest_payload, dict):
-        recorded_manifest_error = "projected support runtime manifest is not a JSON object."
-    else:
-        interpreter, interpreter_error = _validate_support_runtime_interpreter(
-            str(manifest_payload.get("selected_interpreter", "")),
-            subject="projected support runtime manifest",
-        )
-        if interpreter_error is None:
-            assert interpreter is not None
-            return (
-                _ProjectedSupportRuntimeRepairLauncher(
-                    selected_interpreter=interpreter,
-                    pythonpath_entries=(),
-                ),
-                None,
-            )
-        recorded_manifest_error = interpreter_error
+    launcher, recorded_manifest_error = _parse_support_runtime_repair_launcher(
+        manifest_payload,
+        subject="projected support runtime manifest",
+    )
+    if recorded_manifest_error is None:
+        assert launcher is not None
+        return launcher, None
     if support_manifest_error is None:
         return None, recorded_manifest_error
     return (
