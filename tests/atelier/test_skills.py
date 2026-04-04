@@ -2,6 +2,7 @@ import shutil
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from importlib import resources
 from pathlib import Path
 
@@ -62,6 +63,7 @@ def test_install_workspace_skills_writes_skill_docs() -> None:
         assert (
             workspace_dir / "skills" / "shared" / "scripts" / "projected_bootstrap.py"
         ).is_file()
+        assert (workspace_dir / "skills" / "shared" / "support-manifest.json").is_file()
         for name in (
             "publish",
             "github",
@@ -202,6 +204,72 @@ def test_ensure_project_skills_installs_if_missing() -> None:
         assert (skills_dir / "planner-startup-check" / "SKILL.md").exists()
 
 
+def _write_project_config(project_dir: Path) -> None:
+    skills.paths.project_config_sys_path(project_dir).write_text("{}", encoding="utf-8")
+
+
+def test_repair_installed_project_skills_repairs_existing_projects_once_per_version(
+    monkeypatch,
+) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        atelier_data_dir = Path(tmp) / "atelier-data"
+        projects_root = atelier_data_dir / "projects"
+        project_alpha = projects_root / "alpha"
+        project_beta = projects_root / "beta"
+        for project_dir in (project_alpha, project_beta):
+            project_dir.mkdir(parents=True)
+            _write_project_config(project_dir)
+            skills.install_workspace_skills(project_dir)
+
+        shutil.rmtree(project_alpha / "skills" / "shared")
+        manifest_path = project_beta / ".atelier-runtime" / "projected-runtime.json"
+        manifest_path.write_text("{broken", encoding="utf-8")
+
+        monkeypatch.setattr(skills.paths, "atelier_data_dir", lambda: atelier_data_dir)
+
+        original_sync = skills.sync_project_skills
+        seen_projects: list[Path] = []
+
+        def wrapped_sync(
+            project_dir: Path,
+            *,
+            upgrade_policy: str = "ask",
+            yes: bool = False,
+            interactive: bool = False,
+            prompt_update: Callable[[str], bool] | None = None,
+            dry_run: bool = False,
+        ) -> skills.ProjectSkillsSyncResult:
+            seen_projects.append(project_dir)
+            return original_sync(
+                project_dir,
+                upgrade_policy=upgrade_policy,
+                yes=yes,
+                interactive=interactive,
+                prompt_update=prompt_update,
+                dry_run=dry_run,
+            )
+
+        monkeypatch.setattr(skills, "sync_project_skills", wrapped_sync)
+
+        result = skills.repair_installed_project_skills_for_current_version()
+
+        assert result.action == "repaired"
+        assert result.failed_projects == ()
+        assert set(result.scanned_projects) == {project_alpha, project_beta}
+        assert set(result.updated_projects) == {project_alpha, project_beta}
+        assert set(seen_projects) == {project_alpha, project_beta}
+        assert (
+            project_alpha / "skills" / "shared" / "scripts" / "projected_bootstrap.py"
+        ).is_file()
+        assert skills._projected_runtime_manifest_requires_backfill(project_beta) is False
+
+        seen_projects.clear()
+        second = skills.repair_installed_project_skills_for_current_version()
+
+        assert second.action == "skipped"
+        assert seen_projects == []
+
+
 def test_sync_project_skills_installs_when_missing() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp)
@@ -235,6 +303,21 @@ def test_sync_project_skills_updates_when_shared_support_tree_missing() -> None:
 
         assert result.action == "updated"
         assert (support_tree / "scripts" / "projected_bootstrap.py").is_file()
+
+
+def test_sync_project_skills_updates_when_projected_support_manifest_missing() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        skills.install_workspace_skills(project_dir)
+        support_manifest = project_dir / "skills" / "shared" / "support-manifest.json"
+        support_manifest.unlink()
+
+        result = skills.sync_project_skills(project_dir)
+
+        assert result.action == "updated"
+        assert support_manifest.is_file()
+        assert skills._projected_runtime_manifest_requires_backfill(project_dir) is False
+        assert skills._projected_support_manifest_requires_backfill(project_dir) is False
 
 
 def test_sync_project_skills_applies_upgrade_with_yes() -> None:

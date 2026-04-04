@@ -205,6 +205,33 @@ def test_ensure_agent_links_creates_project_skill_aliases() -> None:
         _assert_link_or_marker(home.path, ".claude/skills", skills)
 
 
+def test_ensure_agent_links_relinks_stale_copied_skill_tree() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_dir = root / "project"
+        project_dir.mkdir(parents=True)
+        home = agent_home.resolve_agent_home(project_dir, ProjectConfig(), role="worker")
+        worktree = root / "worktree"
+        beads = root / "beads"
+        skills = root / "skills"
+        worktree.mkdir()
+        beads.mkdir()
+        skills.mkdir()
+
+        stale_shared = home.path / "skills" / "shared" / "scripts"
+        stale_shared.mkdir(parents=True)
+        (stale_shared / "projected_bootstrap.py").write_text("", encoding="utf-8")
+
+        agent_home.ensure_agent_links(
+            home,
+            worktree_path=worktree,
+            beads_root=beads,
+            skills_dir=skills,
+        )
+
+        _assert_link_or_marker(home.path, "skills", skills)
+
+
 def test_cleanup_agent_home_removes_session_dir_and_prunes() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp) / "project"

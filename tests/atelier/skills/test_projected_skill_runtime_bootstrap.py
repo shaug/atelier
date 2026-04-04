@@ -38,6 +38,10 @@ def _projected_runtime_manifest_path(agent_home: Path) -> Path:
     return agent_home / ".atelier-runtime" / "projected-runtime.json"
 
 
+def _projected_support_manifest_path(agent_home: Path) -> Path:
+    return agent_home / "skills" / "shared" / "support-manifest.json"
+
+
 def _write_fake_module(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -149,6 +153,42 @@ def _write_python_without_site_packages(python_path: Path) -> None:
 def _write_repo_python_without_site_packages(repo_root: Path) -> None:
     repo_python = repo_root / ".venv" / "bin" / "python3"
     _write_python_without_site_packages(repo_python)
+
+
+def _write_python_with_pythonpath(
+    python_path: Path,
+    *,
+    pythonpath: Sequence[Path | str],
+) -> None:
+    python_path.parent.mkdir(parents=True, exist_ok=True)
+    joined_pythonpath = os.pathsep.join(str(entry) for entry in pythonpath)
+    python_path.write_text(
+        "\n".join(
+            [
+                "#!/bin/sh",
+                f'export PYTHONPATH="{joined_pythonpath}"',
+                f'exec "{Path(sys.executable).resolve()}" "$@"',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    python_path.chmod(python_path.stat().st_mode | 0o111)
+
+
+def _write_json_echo_python(python_path: Path, payload: str) -> None:
+    python_path.parent.mkdir(parents=True, exist_ok=True)
+    python_path.write_text(
+        "\n".join(
+            [
+                "#!/bin/sh",
+                f"printf '%s\\n' {payload!r}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    python_path.chmod(python_path.stat().st_mode | 0o111)
 
 
 def _ambient_python_executable() -> str:
@@ -264,12 +304,17 @@ def test_install_workspace_skills_writes_converged_projected_runtime_manifest(
 
     manifest_path = _projected_runtime_manifest_path(agent_home)
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    support_payload = json.loads(
+        _projected_support_manifest_path(agent_home).read_text(encoding="utf-8")
+    )
 
     assert payload["status"] == "converged"
     assert payload["helper_session_id"]
     assert Path(payload["selected_interpreter"]).exists()
     assert (Path(payload["atelier_import_root"]) / "atelier" / "__init__.py").is_file()
     assert payload["pythonpath_entries"]
+    assert support_payload["status"] == "converged"
+    assert support_payload["pythonpath_entries"]
 
 
 def test_sync_project_skills_backfills_missing_projected_runtime_manifest(
@@ -603,6 +648,181 @@ def test_projected_refresh_overview_uses_recorded_runtime_in_clean_non_atelier_r
     assert "usage:" in completed.stdout.lower()
 
 
+def test_projected_refresh_overview_repairs_stale_manifest_on_first_helper_invocation(
+    tmp_path: Path,
+) -> None:
+    agent_home, projected_script = _install_projected_script(
+        tmp_path,
+        skill_name="planner-startup-check",
+        script_name="refresh_overview.py",
+    )
+    repo_root = tmp_path / "non-atelier-repo"
+    repo_root.mkdir()
+    manifest_path = _projected_runtime_manifest_path(agent_home)
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload["helper_session_id"] = "stale-helper-session"
+    payload["atelier_import_root"] = str(tmp_path / "missing-import-root")
+    payload["pythonpath_entries"] = [str(tmp_path / "missing-pythonpath")]
+    payload["selected_interpreter"] = str(tmp_path / "bin" / "repair-python")
+    manifest_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    _write_python_without_site_packages(Path(payload["selected_interpreter"]))
+    isolated_python = tmp_path / "bin" / "python3"
+    _write_python_without_site_packages(isolated_python)
+
+    completed = subprocess.run(
+        [
+            str(isolated_python),
+            str(projected_script),
+            "--repo-dir",
+            str(repo_root),
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=agent_home,
+        env={},
+    )
+
+    assert completed.returncode == 0
+    assert "usage:" in completed.stdout.lower()
+    repaired = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert repaired["status"] == "converged"
+    assert repaired["helper_session_id"]
+    assert (Path(repaired["atelier_import_root"]) / "atelier" / "__init__.py").is_file()
+    assert repaired["pythonpath_entries"]
+
+
+def test_projected_refresh_overview_repairs_stale_manifest_without_support_manifest(
+    tmp_path: Path,
+) -> None:
+    agent_home, projected_script = _install_projected_script(
+        tmp_path,
+        skill_name="planner-startup-check",
+        script_name="refresh_overview.py",
+    )
+    repo_root = tmp_path / "non-atelier-repo"
+    repo_root.mkdir()
+    manifest_path = _projected_runtime_manifest_path(agent_home)
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    recorded_pythonpath = tuple(payload["pythonpath_entries"])
+    payload["selected_interpreter"] = str(tmp_path / "bin" / "repair-python")
+    payload["helper_session_id"] = "stale-helper-session"
+    payload["atelier_import_root"] = str(tmp_path / "missing-import-root")
+    payload["pythonpath_entries"] = list(recorded_pythonpath)
+    manifest_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    _projected_support_manifest_path(agent_home).unlink(missing_ok=True)
+    _write_python_without_site_packages(Path(payload["selected_interpreter"]))
+    wrapper_probe = subprocess.run(
+        [str(payload["selected_interpreter"]), "-c", "import atelier"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={},
+    )
+    assert wrapper_probe.returncode != 0
+    isolated_python = tmp_path / "bin" / "python3"
+    _write_python_without_site_packages(isolated_python)
+
+    completed = subprocess.run(
+        [
+            str(isolated_python),
+            str(projected_script),
+            "--repo-dir",
+            str(repo_root),
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=agent_home,
+        env={},
+    )
+
+    assert completed.returncode == 0
+    assert "usage:" in completed.stdout.lower()
+    repaired = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert repaired["status"] == "converged"
+    assert repaired["helper_session_id"]
+    assert (Path(repaired["atelier_import_root"]) / "atelier" / "__init__.py").is_file()
+    assert repaired["pythonpath_entries"]
+
+
+def test_projected_refresh_overview_prefers_canonical_project_runtime_from_stale_agent_home_copy(
+    tmp_path: Path,
+) -> None:
+    project_dir = tmp_path / "project-data"
+    packaged_skills.install_workspace_skills(project_dir)
+    copied_agent_home = project_dir / "agents" / "worker" / "codex" / "p1-t2"
+    copied_agent_home.mkdir(parents=True)
+    (copied_agent_home / "agent.json").write_text(
+        json.dumps(
+            {
+                "id": "atelier/worker/codex/p1-t2",
+                "name": "codex",
+                "role": "worker",
+                "session_key": "p1-t2",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    shutil.copytree(project_dir / "skills", copied_agent_home / "skills")
+    projected_script = (
+        copied_agent_home / "skills" / "planner-startup-check" / "scripts" / "refresh_overview.py"
+    )
+    copied_manifest = _projected_runtime_manifest_path(copied_agent_home)
+    assert not copied_manifest.exists()
+
+    copied_support_manifest_path = _projected_support_manifest_path(copied_agent_home)
+    copied_support_payload = json.loads(copied_support_manifest_path.read_text(encoding="utf-8"))
+    copied_support_payload["selected_interpreter"] = str(tmp_path / "bin" / "broken-repair-python")
+    copied_support_manifest_path.write_text(
+        json.dumps(copied_support_payload, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    canonical_manifest_path = project_dir / ".atelier-runtime" / "projected-runtime.json"
+    canonical_payload = json.loads(canonical_manifest_path.read_text(encoding="utf-8"))
+    canonical_payload["helper_session_id"] = "stale-project-runtime"
+    canonical_payload["atelier_import_root"] = str(tmp_path / "missing-import-root")
+    canonical_payload["pythonpath_entries"] = [str(tmp_path / "missing-pythonpath")]
+    canonical_payload["selected_interpreter"] = str(tmp_path / "bin" / "broken-project-python")
+    canonical_manifest_path.write_text(
+        json.dumps(canonical_payload, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    _write_python_without_site_packages(Path(canonical_payload["selected_interpreter"]))
+    isolated_python = tmp_path / "bin" / "python3"
+    _write_python_without_site_packages(isolated_python)
+    repo_root = tmp_path / "non-atelier-repo"
+    repo_root.mkdir()
+
+    completed = subprocess.run(
+        [
+            str(isolated_python),
+            str(projected_script),
+            "--repo-dir",
+            str(repo_root),
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=copied_agent_home,
+        env={},
+    )
+
+    assert completed.returncode == 0
+    assert "usage:" in completed.stdout.lower()
+    repaired = json.loads(canonical_manifest_path.read_text(encoding="utf-8"))
+    assert repaired["status"] == "converged"
+    assert repaired["helper_session_id"]
+    assert (Path(repaired["atelier_import_root"]) / "atelier" / "__init__.py").is_file()
+    assert repaired["pythonpath_entries"]
+    assert not copied_manifest.exists()
+
+
 def test_projected_create_epic_ignores_cross_project_env_hints_for_non_atelier_repo(
     tmp_path: Path,
 ) -> None:
@@ -682,6 +902,51 @@ def test_projected_refresh_overview_fails_closed_when_recorded_runtime_manifest_
     assert "repo_runtime_status: unavailable" in completed.stderr
     assert "projected support runtime manifest missing" in completed.stderr
     assert "dependency: atelier.runtime_env" in completed.stderr
+    assert "Traceback" not in completed.stderr
+
+
+def test_projected_refresh_overview_fails_closed_when_self_heal_evidence_is_malformed(
+    tmp_path: Path,
+) -> None:
+    agent_home, projected_script = _install_projected_script(
+        tmp_path,
+        skill_name="planner-startup-check",
+        script_name="refresh_overview.py",
+    )
+    repo_root = tmp_path / "non-atelier-repo"
+    repo_root.mkdir()
+    manifest_path = _projected_runtime_manifest_path(agent_home)
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload["atelier_import_root"] = str(tmp_path / "missing-import-root")
+    payload["pythonpath_entries"] = [str(tmp_path / "missing-pythonpath")]
+    manifest_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    support_manifest_path = _projected_support_manifest_path(agent_home)
+    support_payload = json.loads(support_manifest_path.read_text(encoding="utf-8"))
+    support_payload["selected_interpreter"] = str(tmp_path / "bin" / "repair-python")
+    support_manifest_path.write_text(json.dumps(support_payload, indent=2) + "\n", encoding="utf-8")
+    _write_json_echo_python(Path(support_payload["selected_interpreter"]), "not-json")
+    isolated_python = tmp_path / "bin" / "python3"
+    _write_python_without_site_packages(isolated_python)
+
+    completed = subprocess.run(
+        [
+            str(isolated_python),
+            str(projected_script),
+            "--repo-dir",
+            str(repo_root),
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=agent_home,
+        env={},
+    )
+
+    assert completed.returncode == 1
+    assert "planner helper runtime is unhealthy" in completed.stderr
+    assert "repo_runtime_status: unavailable" in completed.stderr
+    assert "self-heal emitted malformed convergence evidence" in completed.stderr
     assert "Traceback" not in completed.stderr
 
 

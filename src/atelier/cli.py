@@ -22,7 +22,7 @@ try:
 except ImportError:  # pragma: no cover - legacy Click fallback
     from click.parser import split_arg_string
 
-from . import __version__, bd_invocation, beads, config, git, lifecycle, paths
+from . import __version__, bd_invocation, beads, config, git, lifecycle, paths, skills
 from . import log as atelier_log
 from .commands import config as config_cmd
 from .commands import doctor as doctor_cmd
@@ -276,6 +276,8 @@ def app_callback(
         atelier_log.set_level(normalized)
     if color is not None:
         atelier_log.set_no_color(not color)
+    if _COMPLETE_ENV not in os.environ:
+        skills.repair_installed_project_skills_for_current_version()
 
 
 @app.command(
