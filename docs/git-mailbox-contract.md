@@ -625,7 +625,6 @@ reviews:
     verdict: clean
     candidate_revision: 2222222222222222222222222222222222222222
     comparison_base_revision: 1111111111111111111111111111111111111111
-    unresolved_material_findings: []
     observed_at: 2026-07-25T12:55:00Z
 unresolved_obligations: []
 mutation_ownership: retained
@@ -652,12 +651,13 @@ takeover. V1 cannot encode a PR stack or merged result.
 Validation entries identify the command, outcome, exact candidate revision, and
 observation time. Review entries identify the reviewer or review mechanism,
 shared review verdict (`clean`, `changes_required`, or `blocked`), exact
-candidate and comparison-base revisions, unresolved material findings, and
-observation time. A review can satisfy `independent-review-current` only when
-its verdict is `clean`, its candidate and comparison-base revisions match the
-current delivery, and it reports no unresolved material findings. The body
-explains discoveries, unresolved obligations, handoff instructions, and the next
-required decision.
+candidate and comparison-base revisions, and observation time. A review can
+satisfy `independent-review-current` only when its verdict is `clean` and its
+candidate and comparison-base revisions match the current delivery. Findings
+retained by a clean shared review keep their recorded dispositions; Atelier does
+not reinterpret an explicit deferral as a gating failure. The body explains
+discoveries, unresolved obligations, handoff instructions, and the next required
+decision.
 
 Receipts are concise evidence indexes. Audit mode must read live native state
 when current state matters.
