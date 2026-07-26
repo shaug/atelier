@@ -1,0 +1,20 @@
+{
+  "name": "atelier-composition-spike",
+  "version": "0.1.0+codex.20260726184539",
+  "description": "Prove Atelier-to-Agent-Scripts delegated composition in Codex",
+  "author": {
+    "name": "Atelier"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Atelier Composition Spike",
+    "shortDescription": "Validate delegated Agent Scripts composition.",
+    "longDescription": "Runs a disposable, fail-closed composition proof against an independently installed implement-ticket capability.",
+    "developerName": "Atelier",
+    "category": "Developer Tools",
+    "capabilities": [
+      "delegated execution validation"
+    ],
+    "defaultPrompt": "Run the Atelier delegated execution composition proof."
+  }
+}

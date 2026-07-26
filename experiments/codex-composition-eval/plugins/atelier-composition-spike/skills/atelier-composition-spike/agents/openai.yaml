@@ -1,0 +1,4 @@
+interface:
+  display_name: "Atelier Composition Spike"
+  short_description: "Validate delegated skill composition"
+  default_prompt: "Use $atelier-composition-spike to run the delegated execution composition proof."

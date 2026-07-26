@@ -16,11 +16,7 @@ from typing import Annotated, Callable, cast
 
 import click
 import typer
-
-try:
-    from click.shell_completion import split_arg_string
-except ImportError:  # pragma: no cover - legacy Click fallback
-    from click.parser import split_arg_string
+from click.parser import split_arg_string
 
 from . import __version__, bd_invocation, beads, config, git, lifecycle, paths, skills
 from . import log as atelier_log

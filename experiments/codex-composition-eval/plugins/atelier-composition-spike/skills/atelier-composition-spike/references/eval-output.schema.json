@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "capability_id",
+    "agent_scripts_skill_sha256",
+    "atelier_skill_sha256",
+    "scenario_count",
+    "passed",
+    "failed",
+    "failed_scenarios",
+    "evidence_path",
+    "boundary_observation"
+  ],
+  "properties": {
+    "capability_id": {
+      "const": "agent-scripts.implement-ticket/delegated-execution/v1"
+    },
+    "agent_scripts_skill_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "atelier_skill_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "scenario_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "passed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "failed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "failed_scenarios": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidence_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "boundary_observation": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
