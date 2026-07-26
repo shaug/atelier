@@ -2,7 +2,7 @@
 
 ## Status
 
-The disposable v0 protocol experiment passed all 15 acceptance scenarios on
+The disposable v0 protocol experiment passed all 16 acceptance scenarios on
 2026-07-25.
 
 The experiment is implemented in `experiments/mailbox_protocol_v0.py` and runs

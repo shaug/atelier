@@ -1,0 +1,20 @@
+{
+  "name": "atelier-spike",
+  "interface": {
+    "displayName": "Atelier Spike"
+  },
+  "plugins": [
+    {
+      "name": "atelier-composition-spike",
+      "source": {
+        "source": "local",
+        "path": "./plugins/atelier-composition-spike"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

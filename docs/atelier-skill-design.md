@@ -156,6 +156,18 @@ The agent host surrounds this system. It provides the active task, subagents,
 permissions, timers, worktrees, connectors, and user interface. Atelier does not
 persist or reproduce host task state.
 
+Codex is the reference host for v0. Its plugin, skill, subagent, connector, and
+permission surfaces define the first tested adapter. This is a delivery
+constraint, not a product claim that Atelier concepts belong to Codex.
+
+A future Claude Code adapter should preserve the same Atelier documents,
+transitions, authority vocabulary, Agent Scripts contract, and mailbox history.
+Only host integration may differ: command discovery, skill invocation, subagent
+launch, permission prompts, and connector access. If a supposedly portable
+Atelier rule must branch on host identity, the rule belongs above the host
+adapter or the contract is underspecified. Claude compatibility is deferred
+until the Codex reference path works; it must not distort v0.
+
 ## Distribution and dependency model
 
 Atelier should remain its own repository and plugin. It is an application built
@@ -620,11 +632,26 @@ implementation foundation.
 
 ## Transition from the current codebase
 
-The current CLI should receive a final archival tag or branch before the reset.
-The next implementation should then replace it rather than coexist with it.
+The current CLI receives the annotated archival tag `atelier-cli-v2-final`
+before the reset. The tag names the exact final legacy commit and explains that
+the skill-based product supersedes it. The next implementation then replaces the
+CLI rather than coexisting with it.
 
-There should be no dual-running period, data migration, compatibility adapter,
-or attempt to route new skill behavior through the existing store and worker
+The tag, legacy-ticket disposition, and implementation removal are a deliberate
+reset gate. Before crossing it, the composition spike must prove that an
+independently installed Agent Scripts capability can be discovered, validated,
+invoked with allowed and denied checkpoints, acknowledge a published candidate,
+and return a valid terminal result without Atelier copying its workflow. The
+operator reviews that evidence and explicitly confirms the reset a second time.
+
+Only after that confirmation should obsolete tickets be closed as `cancelled` or
+`superseded`, the archival tag be pushed, and the legacy implementation be
+removed. A ticket is not `completed` merely because its architecture was
+abandoned. The disposition record must map retained product obligations to the
+new implementation graph before deletion begins.
+
+There is no dual-running period, data migration, compatibility adapter, or
+attempt to route new skill behavior through the existing store and worker
 runtime. Existing documents and skills are source material; selected behavioral
 tests may become forward-evaluation cases. Legacy Python modules and their
 implementation-specific tests are not the scaffold for the new product.
@@ -634,9 +661,13 @@ the infrastructure burden that the reset is meant to remove.
 
 ## Validation strategy
 
-The next version should be validated outside Atelier itself.
+Atelier itself is the first low-risk live dogfood repository. It should exercise
+planning, delegated implementation, review, delivery, operator acceptance, and
+the reset changes while the legacy implementation remains recoverable by tag.
+This proves that the workflow can govern real work, not that it generalizes.
 
-At minimum, forward evaluations should cover:
+External validation must follow before claiming broader product success. At
+minimum, forward evaluations should cover:
 
 1. A personal GitHub project with human approval and merge.
 1. A cross-project initiative spanning Tuber and Peeler.
@@ -662,7 +693,7 @@ Evaluations should measure:
 
 Lines of code and raw ticket throughput are not success measures.
 
-The backing protocol has separately passed the 15-scenario
+The backing protocol has separately passed the 16-scenario
 [Mailbox Protocol Validation]. That result validates the Git mechanics, not the
 future skill prompts, host integration, or live provider adapters.
 
@@ -681,7 +712,9 @@ The first usable version should contain only:
 
 It should support one Git mailbox realm and one native ticket provider first.
 Additional providers should be expressed through host connectors and
-project-policy references rather than a new Atelier provider framework.
+project-policy references rather than a new Atelier provider framework. The
+ordered changesets and reset gate are defined in the
+[Atelier Skill Implementation Plan].
 
 ## Decisions intentionally deferred
 
@@ -699,6 +732,7 @@ These decisions do not require a storage abstraction or server design.
 [agent scripts]: https://github.com/shaug/agent-scripts
 [atelier north star]: ./north-star.md
 [atelier project policy contract]: ./project-policy-contract.md
+[atelier skill implementation plan]: ./implementation-plan.md
 [git mailbox contract]: ./git-mailbox-contract.md
 [mailbox protocol validation]: ./mailbox-protocol-validation.md
 [why atelier?]: ./atelier-name.md
