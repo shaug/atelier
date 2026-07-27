@@ -6,13 +6,13 @@ human acceptance distinct across agentic tasks.
 
 ## Status
 
-This repository is the post-CLI reset scaffold. It contains a valid Codex plugin
-manifest and an explicit `/atelier` skill entrypoint, but production `plan`,
-`work`, and `audit` behavior is intentionally unavailable.
+This repository is the post-CLI reset implementation. It contains a valid Codex
+plugin, an explicit `/atelier` skill entrypoint, the Codex host boundary, and
+strict read-only v1 mailbox reconstruction. Production `plan`, `work`, and
+`audit` behavior is intentionally unavailable.
 
-The first implementation issue is [#774]. Until it lands, invoking Atelier fails
-closed without mutating a mailbox, repository, ticket, pull request, or
-acceptance record.
+Invoking an unavailable mode fails closed without mutating a mailbox,
+repository, ticket, pull request, or acceptance record.
 
 ## Product boundary
 
@@ -38,6 +38,7 @@ Read [Atelier as a Skill], the [Git Mailbox Contract], and the
 ## Development
 
 ```text
+python3 -m pip install --requirement requirements.txt
 just lint
 just test
 ```
@@ -51,7 +52,6 @@ The final standalone CLI remains recoverable from the immutable
 
 <!-- inline reference link definitions. please keep alphabetized -->
 
-[#774]: https://github.com/shaug/atelier/issues/774
 [atelier as a skill]: docs/atelier-skill-design.md
 [git mailbox contract]: docs/git-mailbox-contract.md
 [implementation plan]: docs/implementation-plan.md

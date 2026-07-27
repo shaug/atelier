@@ -23,9 +23,8 @@ fail-closed startup preflight.
 The preflight must prove:
 
 - the exact plugin-qualified `agent-scripts:implement-ticket` skill identity;
-- the compatible
-  `agent-scripts.implement-ticket/delegated-execution/v1` manifest, schemas, and
-  dependency-owned validator;
+- the compatible `agent-scripts.implement-ticket/delegated-execution/v1`
+  manifest, schemas, and dependency-owned validator;
 - the six v0 candidate, pull-request, and review authority actions declared by
   the host capability descriptor;
 - the installed and authorized `github@openai-curated` connector;
@@ -60,6 +59,18 @@ When invoked before the required mode is implemented:
 An explicit host-readiness request may complete the read-only host preflight and
 return its exact compatibility or failure result. That does not make any
 production mode available.
+
+## Mailbox document boundary
+
+The strict v1 mailbox schema and fresh-clone reconstruction helper are
+implemented, but canonical Git writes and every production mode remain
+unavailable. Before interpreting mailbox documents, read
+`references/mailbox-validation.md` and use its read-only helper.
+
+Fail closed on every unsupported schema, unknown normative field, invalid
+lifecycle combination, contradictory reference, or missing external readiness
+gate. The reconstructed snapshot is invocation-local and must never be written
+back as a manifest, cache, index, or projection.
 
 ## Invariants
 

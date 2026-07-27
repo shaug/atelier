@@ -1,0 +1,1116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://atelier.local/schemas/mailbox-v1.schema.json",
+  "title": "Atelier mailbox and project-policy v1 documents",
+  "$defs": {
+    "acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receipt_id",
+        "accepted_by",
+        "accepted_at",
+        "policy_commit",
+        "candidate_revision",
+        "evidence"
+      ],
+      "properties": {
+        "receipt_id": {
+          "$ref": "#/$defs/receipt_id"
+        },
+        "accepted_by": {
+          "const": "operator"
+        },
+        "accepted_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "policy_commit": {
+          "$ref": "#/$defs/sha"
+        },
+        "candidate_revision": {
+          "$ref": "#/$defs/sha"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence_results"
+        }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "approved_by",
+        "approved_at",
+        "revision",
+        "policy",
+        "authority_ceiling",
+        "acceptance"
+      ],
+      "properties": {
+        "approved_by": {
+          "const": "operator"
+        },
+        "approved_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "policy": {
+          "$ref": "#/$defs/pinned_policy"
+        },
+        "authority_ceiling": {
+          "$ref": "#/$defs/authority_actions"
+        },
+        "acceptance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "required_evidence"
+          ],
+          "properties": {
+            "mode": {
+              "const": "operator"
+            },
+            "required_evidence": {
+              "$ref": "#/$defs/evidence_names"
+            }
+          }
+        }
+      }
+    },
+    "authority_action": {
+      "enum": [
+        "repository.candidate.create",
+        "repository.candidate.push",
+        "pull_request.create",
+        "pull_request.update",
+        "review.reply",
+        "review.resolve"
+      ]
+    },
+    "authority_actions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/authority_action"
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "invocation_id",
+        "phase",
+        "action",
+        "proposed_effect_digest",
+        "candidate_head",
+        "acknowledged_candidate_head",
+        "recorded_at"
+      ],
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "invocation_id": {
+          "$ref": "#/$defs/run_id"
+        },
+        "phase": {
+          "enum": [
+            "pre_external_mutation",
+            "candidate_published"
+          ]
+        },
+        "action": {
+          "$ref": "#/$defs/authority_action"
+        },
+        "proposed_effect_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "candidate_head": {
+          "$ref": "#/$defs/nullable_sha"
+        },
+        "acknowledged_candidate_head": {
+          "$ref": "#/$defs/nullable_sha"
+        },
+        "recorded_at": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "remote",
+        "remote_url",
+        "remote_ref",
+        "base_revision",
+        "head_revision",
+        "pull_request",
+        "workspace_id",
+        "published_at"
+      ],
+      "properties": {
+        "repository": {
+          "$ref": "#/$defs/repository_identity"
+        },
+        "remote": {
+          "$ref": "#/$defs/nonempty_string"
+        },
+        "remote_url": {
+          "$ref": "#/$defs/nonempty_string"
+        },
+        "remote_ref": {
+          "$ref": "#/$defs/branch_ref"
+        },
+        "base_revision": {
+          "$ref": "#/$defs/sha"
+        },
+        "head_revision": {
+          "$ref": "#/$defs/sha"
+        },
+        "pull_request": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^https://github\\.com/[^/]+/[^/]+/pull/[1-9][0-9]*$"
+            }
+          ]
+        },
+        "workspace_id": {
+          "$ref": "#/$defs/nullable_workspace_id"
+        },
+        "published_at": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "checkpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "continuation_token",
+        "authorizations"
+      ],
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "continuation_token": {
+          "$ref": "#/$defs/nonempty_string"
+        },
+        "authorizations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/authorization"
+          }
+        }
+      }
+    },
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "worker_run_id",
+        "work_revision",
+        "approved_commit",
+        "policy_commit",
+        "ticket_observation_digest",
+        "claimed_at",
+        "host",
+        "checkpoint",
+        "candidate"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/claim_id"
+        },
+        "worker_run_id": {
+          "$ref": "#/$defs/run_id"
+        },
+        "work_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "approved_commit": {
+          "$ref": "#/$defs/sha"
+        },
+        "policy_commit": {
+          "$ref": "#/$defs/sha"
+        },
+        "ticket_observation_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "claimed_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "host": {
+          "const": "codex"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/checkpoint"
+        },
+        "candidate": {
+          "$ref": "#/$defs/nullable_candidate"
+        }
+      }
+    },
+    "branch_ref": {
+      "type": "string",
+      "pattern": "^refs/heads/[^ ]+$"
+    },
+    "claim_id": {
+      "type": "string",
+      "pattern": "^clm_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "evidence_name": {
+      "enum": [
+        "candidate-remote-reachable",
+        "pull-request-head-current",
+        "pull-request-open",
+        "pull-request-mergeable",
+        "required-checks-pass",
+        "required-validation-reported",
+        "independent-review-current",
+        "unresolved-feedback-zero"
+      ]
+    },
+    "evidence_names": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/evidence_name"
+      }
+    },
+    "evidence_results": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "candidate-remote-reachable": {
+          "const": "satisfied"
+        },
+        "pull-request-head-current": {
+          "const": "satisfied"
+        },
+        "pull-request-open": {
+          "const": "satisfied"
+        },
+        "pull-request-mergeable": {
+          "const": "satisfied"
+        },
+        "required-checks-pass": {
+          "const": "satisfied"
+        },
+        "required-validation-reported": {
+          "const": "satisfied"
+        },
+        "independent-review-current": {
+          "const": "satisfied"
+        },
+        "unresolved-feedback-zero": {
+          "const": "satisfied"
+        }
+      }
+    },
+    "initiative": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "id",
+        "title"
+      ],
+      "properties": {
+        "schema": {
+          "const": "atelier.initiative/v1"
+        },
+        "id": {
+          "$ref": "#/$defs/initiative_id"
+        },
+        "title": {
+          "$ref": "#/$defs/nonempty_string"
+        }
+      }
+    },
+    "initiative_id": {
+      "type": "string",
+      "pattern": "^ini_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "mailbox": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "realm_id",
+        "canonical_branch"
+      ],
+      "properties": {
+        "schema": {
+          "const": "atelier.mailbox/v1"
+        },
+        "realm_id": {
+          "$ref": "#/$defs/nonempty_string"
+        },
+        "canonical_branch": {
+          "$ref": "#/$defs/nonempty_string"
+        }
+      }
+    },
+    "message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "id",
+        "work_id",
+        "kind",
+        "author_role",
+        "worker_run_id",
+        "audience",
+        "in_reply_to",
+        "resolves",
+        "blocks",
+        "created_at",
+        "subject"
+      ],
+      "properties": {
+        "schema": {
+          "const": "atelier.message/v1"
+        },
+        "id": {
+          "$ref": "#/$defs/message_id"
+        },
+        "work_id": {
+          "$ref": "#/$defs/work_id"
+        },
+        "kind": {
+          "enum": [
+            "instruction",
+            "needs-decision",
+            "notification"
+          ]
+        },
+        "author_role": {
+          "enum": [
+            "planner",
+            "worker",
+            "operator"
+          ]
+        },
+        "worker_run_id": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/run_id"
+            }
+          ]
+        },
+        "audience": {
+          "enum": [
+            "planner",
+            "worker",
+            "operator"
+          ]
+        },
+        "in_reply_to": {
+          "$ref": "#/$defs/nullable_message_id"
+        },
+        "resolves": {
+          "$ref": "#/$defs/nullable_message_id"
+        },
+        "blocks": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "const": "worker"
+            }
+          ]
+        },
+        "created_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "subject": {
+          "$ref": "#/$defs/nonempty_string"
+        }
+      }
+    },
+    "message_id": {
+      "type": "string",
+      "pattern": "^msg_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "native_ticket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "id",
+        "url"
+      ],
+      "properties": {
+        "provider": {
+          "const": "github"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$"
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^https://github\\.com/[^/]+/[^/]+/issues/[1-9][0-9]*$"
+        }
+      }
+    },
+    "nonempty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nullable_candidate": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/candidate"
+        }
+      ]
+    },
+    "nullable_initiative_id": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/initiative_id"
+        }
+      ]
+    },
+    "nullable_message_id": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/message_id"
+        }
+      ]
+    },
+    "nullable_native_ticket": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/native_ticket"
+        }
+      ]
+    },
+    "nullable_receipt_id": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/receipt_id"
+        }
+      ]
+    },
+    "nullable_sha": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/sha"
+        }
+      ]
+    },
+    "nullable_workspace_id": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$"
+        }
+      ]
+    },
+    "pinned_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "commit",
+        "path"
+      ],
+      "properties": {
+        "repository": {
+          "$ref": "#/$defs/repository_identity"
+        },
+        "commit": {
+          "$ref": "#/$defs/sha"
+        },
+        "path": {
+          "const": ".atelier/policy.yaml"
+        }
+      }
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "id",
+        "name",
+        "repository",
+        "policy",
+        "native_ticket",
+        "status"
+      ],
+      "properties": {
+        "schema": {
+          "const": "atelier.project/v1"
+        },
+        "id": {
+          "$ref": "#/$defs/project_id"
+        },
+        "name": {
+          "$ref": "#/$defs/nonempty_string"
+        },
+        "repository": {
+          "$ref": "#/$defs/repository_identity"
+        },
+        "policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repository",
+            "path"
+          ],
+          "properties": {
+            "repository": {
+              "$ref": "#/$defs/repository_identity"
+            },
+            "path": {
+              "const": ".atelier/policy.yaml"
+            }
+          }
+        },
+        "native_ticket": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "required_before_claim"
+          ],
+          "properties": {
+            "provider": {
+              "const": "github"
+            },
+            "required_before_claim": {
+              "const": true
+            }
+          }
+        },
+        "status": {
+          "const": "active"
+        }
+      }
+    },
+    "project_id": {
+      "type": "string",
+      "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "project_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "mailbox",
+        "repository",
+        "ticket",
+        "execution",
+        "authority",
+        "validation",
+        "acceptance"
+      ],
+      "properties": {
+        "schema": {
+          "const": "atelier.project-policy/v1"
+        },
+        "mailbox": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "remote",
+            "realm_id",
+            "canonical_branch",
+            "project_id"
+          ],
+          "properties": {
+            "remote": {
+              "$ref": "#/$defs/nonempty_string"
+            },
+            "realm_id": {
+              "$ref": "#/$defs/nonempty_string"
+            },
+            "canonical_branch": {
+              "$ref": "#/$defs/nonempty_string"
+            },
+            "project_id": {
+              "$ref": "#/$defs/project_id"
+            }
+          }
+        },
+        "repository": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "identity",
+            "canonical_ref"
+          ],
+          "properties": {
+            "identity": {
+              "$ref": "#/$defs/repository_identity"
+            },
+            "canonical_ref": {
+              "$ref": "#/$defs/branch_ref"
+            }
+          }
+        },
+        "ticket": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "allowed_states",
+            "require_no_blockers",
+            "material_fields"
+          ],
+          "properties": {
+            "provider": {
+              "const": "github"
+            },
+            "allowed_states": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "const": "open"
+              }
+            },
+            "require_no_blockers": {
+              "const": true
+            },
+            "material_fields": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "body",
+                  "state",
+                  "relationships"
+                ]
+              }
+            }
+          }
+        },
+        "execution": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "capability",
+            "delivery_outcome",
+            "parallel_assignments"
+          ],
+          "properties": {
+            "capability": {
+              "const": "agent-scripts.implement-ticket/delegated-execution/v1"
+            },
+            "delivery_outcome": {
+              "const": "ready_pr"
+            },
+            "parallel_assignments": {
+              "const": false
+            }
+          }
+        },
+        "authority": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "allow"
+          ],
+          "properties": {
+            "allow": {
+              "$ref": "#/$defs/authority_actions"
+            }
+          }
+        },
+        "validation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "required_commands"
+          ],
+          "properties": {
+            "required_commands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/nonempty_string"
+              }
+            }
+          }
+        },
+        "acceptance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "actor",
+            "evidence"
+          ],
+          "properties": {
+            "actor": {
+              "const": "operator"
+            },
+            "evidence": {
+              "$ref": "#/$defs/evidence_names"
+            }
+          }
+        }
+      }
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "id",
+        "work_id",
+        "outcome",
+        "approved_revision",
+        "approved_commit",
+        "policy_commit",
+        "claim_id",
+        "worker_run_id",
+        "candidate",
+        "handoff",
+        "native_ticket",
+        "validation",
+        "reviews",
+        "unresolved_obligations",
+        "mutation_ownership",
+        "ended_at"
+      ],
+      "properties": {
+        "schema": {
+          "const": "atelier.receipt/v1"
+        },
+        "id": {
+          "$ref": "#/$defs/receipt_id"
+        },
+        "work_id": {
+          "$ref": "#/$defs/work_id"
+        },
+        "outcome": {
+          "enum": [
+            "blocked",
+            "released",
+            "delivered"
+          ]
+        },
+        "approved_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "approved_commit": {
+          "$ref": "#/$defs/sha"
+        },
+        "policy_commit": {
+          "$ref": "#/$defs/sha"
+        },
+        "claim_id": {
+          "$ref": "#/$defs/claim_id"
+        },
+        "worker_run_id": {
+          "$ref": "#/$defs/run_id"
+        },
+        "candidate": {
+          "$ref": "#/$defs/nullable_candidate"
+        },
+        "handoff": {
+          "enum": [
+            "transferable",
+            "none"
+          ]
+        },
+        "native_ticket": {
+          "$ref": "#/$defs/native_ticket_receipt"
+        },
+        "validation": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/validation_observation"
+          }
+        },
+        "reviews": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/review_observation"
+          }
+        },
+        "unresolved_obligations": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/nonempty_string"
+          }
+        },
+        "mutation_ownership": {
+          "enum": [
+            "retained",
+            "relinquished"
+          ]
+        },
+        "ended_at": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "receipt_id": {
+      "type": "string",
+      "pattern": "^rcp_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "repository_identity": {
+      "type": "string",
+      "pattern": "^github:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "review_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mechanism",
+        "verdict",
+        "candidate_revision",
+        "comparison_base_revision",
+        "observed_at"
+      ],
+      "properties": {
+        "mechanism": {
+          "const": "review-code-change"
+        },
+        "verdict": {
+          "enum": [
+            "clean",
+            "changes_required",
+            "blocked"
+          ]
+        },
+        "candidate_revision": {
+          "$ref": "#/$defs/sha"
+        },
+        "comparison_base_revision": {
+          "$ref": "#/$defs/sha"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^run_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "native_ticket_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "id"
+      ],
+      "properties": {
+        "provider": {
+          "const": "github"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$"
+        }
+      }
+    },
+    "validation_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "outcome",
+        "candidate_revision",
+        "observed_at"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/$defs/nonempty_string"
+        },
+        "outcome": {
+          "enum": [
+            "passed",
+            "failed",
+            "unavailable"
+          ]
+        },
+        "candidate_revision": {
+          "$ref": "#/$defs/sha"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "work": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "id",
+        "title",
+        "project_id",
+        "initiative_id",
+        "status",
+        "revision",
+        "dependencies",
+        "replaces",
+        "native_ticket",
+        "approval",
+        "claim",
+        "blocking_message_id",
+        "attempt_receipt_id",
+        "delivery_receipt_id",
+        "acceptance"
+      ],
+      "properties": {
+        "schema": {
+          "const": "atelier.work/v1"
+        },
+        "id": {
+          "$ref": "#/$defs/work_id"
+        },
+        "title": {
+          "$ref": "#/$defs/nonempty_string"
+        },
+        "project_id": {
+          "$ref": "#/$defs/project_id"
+        },
+        "initiative_id": {
+          "$ref": "#/$defs/nullable_initiative_id"
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "approved",
+            "active",
+            "blocked",
+            "delivered",
+            "accepted",
+            "deferred",
+            "cancelled"
+          ]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "dependencies": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/work_id"
+          }
+        },
+        "replaces": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/work_id"
+          }
+        },
+        "native_ticket": {
+          "$ref": "#/$defs/nullable_native_ticket"
+        },
+        "approval": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/approval"
+            }
+          ]
+        },
+        "claim": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/claim"
+            }
+          ]
+        },
+        "blocking_message_id": {
+          "$ref": "#/$defs/nullable_message_id"
+        },
+        "attempt_receipt_id": {
+          "$ref": "#/$defs/nullable_receipt_id"
+        },
+        "delivery_receipt_id": {
+          "$ref": "#/$defs/nullable_receipt_id"
+        },
+        "acceptance": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/acceptance"
+            }
+          ]
+        }
+      }
+    },
+    "work_id": {
+      "type": "string",
+      "pattern": "^wrk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    }
+  }
+}
