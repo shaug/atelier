@@ -236,7 +236,7 @@ class GitMailboxWriter:
                 prior_claims = self._read_prior_claims(checkout, changes)
                 self._apply(checkout, changes)
                 reconstruct_mailbox(checkout)
-                self._verify_claim_history(checkout, prior_claims)
+                self._verify_claim_history(checkout, prior_claims, changes)
                 self._stage_exact_changes(checkout, changes)
                 commit = self._commit(checkout, transition.commit_message)
                 self._verify_commit_shape(
@@ -419,13 +419,37 @@ class GitMailboxWriter:
         self,
         checkout: Path,
         prior_claims: Mapping[str, Mapping[str, Any] | None],
+        changes: tuple[FileChange, ...],
     ) -> None:
         for path, prior_claim in prior_claims.items():
             if prior_claim is None:
                 continue
             document, _ = _read_yaml(checkout / path, frontmatter=True, label=path)
             current_claim = document["claim"]
-            if current_claim is None or current_claim["id"] != prior_claim["id"]:
+            if current_claim is None:
+                continue
+            if current_claim["id"] != prior_claim["id"]:
+                work_id = PurePosixPath(path).parts[1]
+                for change in changes:
+                    receipt_path = PurePosixPath(change.path)
+                    if (
+                        change.content is None
+                        or len(receipt_path.parts) != 4
+                        or receipt_path.parts[:3] != ("work", work_id, "receipts")
+                    ):
+                        continue
+                    receipt, _ = _read_yaml(
+                        checkout / change.path,
+                        frontmatter=True,
+                        label=change.path,
+                    )
+                    if (
+                        receipt["outcome"] == "released"
+                        and receipt["claim_id"] == prior_claim["id"]
+                    ):
+                        raise MailboxTransitionRejected(
+                            f"{path}: release and new claim require distinct transitions"
+                        )
                 continue
             prior_checkpoint = prior_claim["checkpoint"]
             current_checkpoint = current_claim["checkpoint"]

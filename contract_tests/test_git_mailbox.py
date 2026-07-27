@@ -760,6 +760,49 @@ class GitMailboxWriteContract(unittest.TestCase):
         self.assertEqual(current["claim"]["id"], takeover_claim["id"])
         fixtures.MAILBOX.reconstruct_mailbox(fresh)
 
+    def test_release_and_new_claim_require_distinct_transitions(self) -> None:
+        original_claim = self._claim(with_candidate=True)
+        replacement_claim = fixtures.claim(self.repository, 2, with_candidate=False)
+        replacement_claim["candidate"] = copy.deepcopy(original_claim["candidate"])
+        work_path = f"work/{self.work_id}/work.md"
+        receipt_id = fixtures.identifier("rcp", 1)
+        before = self.remote_head()
+
+        def compound_release_and_claim(context: TransitionContext) -> TransitionPlan:
+            work = read_markdown(context.checkout / work_path)
+            released = fixtures.receipt(
+                work,
+                self.repository,
+                1,
+                outcome="released",
+                with_candidate=True,
+            )
+            released["mutation_ownership"] = "relinquished"
+            work["status"] = "active"
+            work["claim"] = copy.deepcopy(replacement_claim)
+            work["attempt_receipt_id"] = receipt_id
+            return TransitionPlan(
+                "compound release and new claim",
+                (
+                    FileChange(work_path, markdown(work)),
+                    FileChange(
+                        f"work/{self.work_id}/receipts/{receipt_id}.md",
+                        markdown(released),
+                    ),
+                ),
+            )
+
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "release and new claim require distinct transitions",
+        ):
+            self.writer().publish(
+                "compound release and new claim",
+                revalidate=lambda context: None,
+                plan=compound_release_and_claim,
+            )
+        self.assertEqual(self.remote_head(), before)
+
     def test_policy_tightening_after_contention_does_not_widen_authority(self) -> None:
         approved = {"repository.candidate.push"}
         current = set(approved)

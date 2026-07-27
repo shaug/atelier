@@ -22,7 +22,9 @@ documents are append-only: a plan cannot delete them or target an identifier
 that already exists in the fetched mailbox. While a claim remains current, its
 checkpoint authorization ledger must retain the fetched ledger as an exact
 prefix, and its sequence and continuation token advance together. Release,
-takeover, and a new claim remain distinct lifecycle transitions.
+takeover, and a new claim remain distinct lifecycle transitions. In particular,
+one plan cannot both append the current claim's release receipt and install a
+different claim.
 
 Git commands are noninteractive and have a finite timeout. A mailbox remote
 must be a repository operand and cannot begin with `-`. Fetch timeouts fail as
