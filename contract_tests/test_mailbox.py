@@ -958,6 +958,19 @@ class MailboxContract(unittest.TestCase):
 
         self.assert_invalid("identity-collision")
 
+    def test_historical_receipt_execution_identities_stay_in_one_work(self) -> None:
+        first = self.fixture.add_work(1, "accepted")
+        second = self.fixture.add_work(2, "accepted")
+        first_receipt_id = self.fixture.works[first]["delivery_receipt_id"]
+        second_receipt_id = self.fixture.works[second]["delivery_receipt_id"]
+        first_receipt = self.fixture.receipts[first][first_receipt_id]
+        second_receipt = self.fixture.receipts[second][second_receipt_id]
+        second_receipt["claim_id"] = first_receipt["claim_id"]
+        second_receipt["worker_run_id"] = first_receipt["worker_run_id"]
+        self.fixture.write_work(second)
+
+        self.assert_invalid("identity-collision")
+
     def test_timestamps_and_candidate_remote_urls_fail_closed(self) -> None:
         work_id = self.fixture.add_work(1, "delivered")
         work = self.fixture.works[work_id]

@@ -1229,6 +1229,7 @@ def _global_identity_diagnostics(
 ) -> list[Diagnostic]:
     diagnostics: list[Diagnostic] = []
     owners: dict[str, str] = {}
+    execution_owners: dict[str, tuple[str, str]] = {}
 
     def record(identifier: str, path: str) -> None:
         prior = owners.get(identifier)
@@ -1243,6 +1244,19 @@ def _global_identity_diagnostics(
         else:
             owners[identifier] = path
 
+    def record_execution(identifier: str, work_id: str, path: str) -> None:
+        prior = execution_owners.get(identifier)
+        if prior is not None and prior[0] != work_id:
+            diagnostics.append(
+                Diagnostic(
+                    path,
+                    "identity-collision",
+                    f"{identifier} is already owned by {prior[1]}",
+                )
+            )
+        elif prior is None:
+            execution_owners[identifier] = (work_id, path)
+
     for project_id in sorted(projects):
         record(project_id, f"projects/{project_id}/project.md")
     for initiative_id in sorted(initiatives):
@@ -1254,10 +1268,16 @@ def _global_identity_diagnostics(
         if claim is not None:
             record(claim["id"], work_path)
             record(claim["worker_run_id"], work_path)
+            record_execution(claim["id"], work_id, work_path)
+            record_execution(claim["worker_run_id"], work_id, work_path)
         for message_id in sorted(messages[work_id]):
             record(message_id, f"work/{work_id}/messages/{message_id}.md")
         for receipt_id in sorted(receipts[work_id]):
-            record(receipt_id, f"work/{work_id}/receipts/{receipt_id}.md")
+            receipt_path = f"work/{work_id}/receipts/{receipt_id}.md"
+            record(receipt_id, receipt_path)
+            receipt = receipts[work_id][receipt_id]
+            record_execution(receipt["claim_id"], work_id, receipt_path)
+            record_execution(receipt["worker_run_id"], work_id, receipt_path)
     return diagnostics
 
 
