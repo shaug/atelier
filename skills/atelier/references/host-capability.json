@@ -1,0 +1,54 @@
+{
+  "schema": "atelier.host-capability/v1",
+  "reference_host": "codex",
+  "delegated_capability": "agent-scripts.implement-ticket/delegated-execution/v1",
+  "delegated_authority_actions": [
+    "repository.candidate.create",
+    "repository.candidate.push",
+    "pull_request.create",
+    "pull_request.update",
+    "review.reply",
+    "review.resolve"
+  ],
+  "accepted_terminal_states": [
+    "ready_pr",
+    "blocked",
+    "requires_epic"
+  ],
+  "delegated_skill": {
+    "stable_name": "agent-scripts:implement-ticket",
+    "frontmatter_name": "implement-ticket",
+    "skill_sha256": "307b660864b15a167e755d0f47840acb56d20e1e8ec940d110d84548aec85243",
+    "capability_manifest": "references/delegated-execution/capability.json",
+    "capability_manifest_sha256": "551d2e883d226d2a1e7e39eae66eb2bd3d9d88ec18c56cfba190253677e34156",
+    "bundle_sha256": {
+      "CONTRACT.md": "760601f774a461e7f15b03bb52d284c8fdac0a119a88c63274b8e97fc8c9f016",
+      "capability.schema.json": "16188433bcbf979776a8e56c6905caaf5bede1b3eca8ab51d5798dd4841fb5f0",
+      "invocation.schema.json": "43ae1f337500d5955c9ed9c4c057a2105bc17f951533b095b63c6aea198c71af",
+      "checkpoint-request.schema.json": "d94d38243c411f98b7f9c0169684595b69b3de09655f0c258f7d3522e5354aa9",
+      "checkpoint-response.schema.json": "7e54a12959eaac937d62a97ad736f2bc924cb085df113b87d1272d6b35ed3abb",
+      "result.schema.json": "bc62b055faed7fce8bef4694e8bb9e714ed032092d687befebd549b4cffe21ce",
+      "validate.py": "a9e49308e7165eaa0abd18952f15185dfb463c35c39b38a2933b43147be560c1"
+    }
+  },
+  "native_state": {
+    "access": "read-only",
+    "connector": "github@openai-curated",
+    "observation_schema": "github-observation.schema.json",
+    "freshness": {
+      "max_age_seconds": 300,
+      "max_future_skew_seconds": 5
+    },
+    "required_operations": [
+      "github.issue.read",
+      "github.issue.relationships.read",
+      "github.pull-request.read",
+      "github.pull-request.comments.read",
+      "github.pull-request.reviews.read",
+      "github.pull-request.checks.read",
+      "github.pull-request.threads.read"
+    ]
+  },
+  "native_state_access": "read-only",
+  "fallback_to_copied_workflows": false
+}

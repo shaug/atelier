@@ -4,8 +4,8 @@ description: >-
   Coordinate accountable software development through durable planning, bounded
   worker delegation, Git-mailbox state, live audit, and explicit operator
   acceptance. Use when the user explicitly invokes Atelier in plan, work, or
-  audit mode, or asks to continue an Atelier-managed initiative across separate
-  Codex tasks.
+  audit mode, asks to inspect Atelier host readiness, or asks to continue an
+  Atelier-managed initiative across separate Codex tasks.
 ---
 
 # Atelier
@@ -13,6 +13,32 @@ description: >-
 Atelier is a workflow framework for development at the speed of accountability.
 It separates durable intent, delegated implementation, current evidence, and
 human acceptance across agentic tasks.
+
+## Host boundary
+
+Codex is the v0 reference host. Before reading native project state or invoking
+future delegation behavior, read `references/host-boundary.md` and complete its
+fail-closed startup preflight.
+
+The preflight must prove:
+
+- the exact plugin-qualified `agent-scripts:implement-ticket` skill identity;
+- the compatible
+  `agent-scripts.implement-ticket/delegated-execution/v1` manifest, schemas, and
+  dependency-owned validator;
+- the six v0 candidate, pull-request, and review authority actions declared by
+  the host capability descriptor;
+- the installed and authorized `github@openai-curated` connector;
+- every required read-only issue, relationship, pull-request, comment, review,
+  check, and thread operation; and
+- one complete observation conforming to
+  `references/github-observation.schema.json` when live state is requested.
+
+Run `scripts/host_boundary.py` exactly as the reference describes. Stop with its
+diagnostic when any identity, operation, schema, pagination result, or
+observation is missing or mismatched. Never scan for a substitute skill, use a
+copied workflow, treat cached prose as native state, or cross into a provider
+mutation.
 
 ## Reset scaffold
 
@@ -31,6 +57,10 @@ When invoked before the required mode is implemented:
    - `audit`: shaug/atelier#780
 1. Make no mailbox, repository, ticket, pull-request, or acceptance mutation.
 
+An explicit host-readiness request may complete the read-only host preflight and
+return its exact compatibility or failure result. That does not make any
+production mode available.
+
 ## Invariants
 
 Preserve these boundaries in every future mode:
@@ -44,7 +74,8 @@ Preserve these boundaries in every future mode:
 - Delivery is not acceptance. Acceptance is not merge, deployment, or native
   ticket completion.
 - Every consequential action is bounded by current authority and fails closed on
-  missing, stale, contradictory, or unverifiable state.
+  missing, pre-read, stale, contradictory, or unverifiable state. Pin the
+  dependency's complete delegated protocol bundle before trusting it.
 - Do not add Beads, Dolt, SQLite, a daemon, a server, a persistent projection,
   or backward compatibility.
 
