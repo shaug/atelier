@@ -17,7 +17,9 @@ The writer always reconstructs and validates the fetched mailbox before either
 callback runs. After contention it fetches again, discards the stale local
 commit, reconstructs current state, and invokes both callbacks again. A
 transition callback is read-only; it returns complete UTF-8 replacements or
-deletions and cannot mutate its checkout directly.
+deletions and cannot mutate its checkout directly. Message and receipt
+documents are append-only: a plan cannot delete them or target an identifier
+that already exists in the fetched mailbox.
 
 Git commands are noninteractive and have a finite timeout. A mailbox remote
 must be a repository operand and cannot begin with `-`. Fetch timeouts fail as

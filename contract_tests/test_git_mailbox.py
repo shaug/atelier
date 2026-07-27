@@ -878,6 +878,59 @@ class GitMailboxWriteContract(unittest.TestCase):
             )
         self.assertEqual(self.remote_head(), before)
 
+    def test_existing_messages_and_receipts_are_append_only(self) -> None:
+        remote = self.root / "append-only-mailbox.git"
+        seed = self.root / "append-only-seed"
+        git(None, "init", "--bare", "--initial-branch=main", str(remote))
+        git(None, "clone", str(remote), str(seed))
+        mailbox = fixtures.MailboxFixture(seed)
+        work_id = mailbox.add_work(2, "blocked")
+        git(seed, "add", "-A")
+        git(
+            seed,
+            "-c",
+            "user.name=Atelier Test",
+            "-c",
+            "user.email=atelier-test@invalid",
+            "commit",
+            "-m",
+            "seed append-only artifacts",
+        )
+        git(seed, "push", "origin", "HEAD:main")
+        before = git(seed, "rev-parse", "HEAD").stdout.strip()
+        message_id = next(iter(mailbox.messages[work_id]))
+        receipt_id = next(iter(mailbox.receipts[work_id]))
+        paths = (
+            f"work/{work_id}/messages/{message_id}.md",
+            f"work/{work_id}/receipts/{receipt_id}.md",
+        )
+        writer = GitMailboxWriter(str(remote), "main")
+
+        for path in paths:
+            original = (seed / path).read_text(encoding="utf-8")
+            for content in (original.replace("Fixture.", "Rewritten."), None):
+                with self.subTest(path=path, deletion=content is None):
+                    with self.assertRaisesRegex(
+                        MailboxTransitionRejected,
+                        "append-only mailbox document",
+                    ):
+                        writer.publish(
+                            "mutate append-only artifact",
+                            revalidate=lambda context: None,
+                            plan=lambda context, path=path, content=content: TransitionPlan(
+                                "mutate append-only artifact",
+                                (FileChange(path, content),),
+                            ),
+                        )
+                    head = git(
+                        None,
+                        "--git-dir",
+                        str(remote),
+                        "rev-parse",
+                        "main",
+                    ).stdout.strip()
+                    self.assertEqual(head, before)
+
     def test_option_looking_remote_is_rejected_before_git_runs(self) -> None:
         calls: list[tuple[str, ...]] = []
 

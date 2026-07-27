@@ -363,6 +363,19 @@ class GitMailboxWriter:
                 raise MailboxTransitionRejected(f"unsafe mailbox path: {change.path!r}")
             if change.path in by_path:
                 raise MailboxTransitionRejected(f"duplicate mailbox path: {change.path}")
+            append_only = (
+                len(pure.parts) == 4
+                and pure.parts[0] == "work"
+                and pure.parts[2] in {"messages", "receipts"}
+            )
+            if append_only and change.content is None:
+                raise MailboxTransitionRejected(
+                    f"{change.path}: append-only mailbox documents cannot be deleted"
+                )
+            if append_only and (checkout / change.path).exists():
+                raise MailboxTransitionRejected(
+                    f"{change.path}: append-only mailbox document already exists"
+                )
             if change.content is not None:
                 try:
                     change.content.encode("utf-8")
