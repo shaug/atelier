@@ -306,8 +306,10 @@ def _read_yaml(
         raise _fail(label, "symlink", "normative documents must not be symbolic links")
     try:
         text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        raise _fail(label, "encoding", "document is not valid UTF-8") from error
     except OSError as error:
-        raise _fail(label, "unreadable", str(error)) from error
+        raise _fail(label, "unreadable", "document could not be read") from error
     if not frontmatter:
         return _parse_yaml(text, label), ""
     lines = text.splitlines()
@@ -550,6 +552,12 @@ def validate_project_policy(
             "remote-credentials",
             "mailbox remote must not contain embedded credentials",
         )
+    if not _valid_repository_identity(value["repository"]["identity"]):
+        raise _fail(
+            path.as_posix(),
+            "repository-identity",
+            "repository identity is not a canonical GitHub owner/repository pair",
+        )
     return value
 
 
@@ -582,6 +590,13 @@ def _remote_has_embedded_credentials(value: str) -> bool:
     )
 
 
+def _valid_repository_identity(repository: str) -> bool:
+    if not repository.startswith("github:"):
+        return False
+    parts = repository.removeprefix("github:").split("/")
+    return len(parts) == 2 and all(part not in {"", ".", ".."} for part in parts)
+
+
 def _github_object_url(
     url: str,
     *,
@@ -589,7 +604,7 @@ def _github_object_url(
     object_kind: str,
     object_id: str | None = None,
 ) -> bool:
-    if not repository.startswith("github:"):
+    if not _valid_repository_identity(repository):
         return False
     parsed = urlsplit(url)
     if (
@@ -614,7 +629,7 @@ def _github_object_url(
 
 
 def _github_remote_url(url: str, *, repository: str) -> bool:
-    if not repository.startswith("github:"):
+    if not _valid_repository_identity(repository):
         return False
     expected = repository.removeprefix("github:").removesuffix(".git").lower()
     scp_match = re.fullmatch(r"git@github\.com:(.+)", url, flags=re.IGNORECASE)
@@ -646,6 +661,14 @@ def _candidate_reference_diagnostics(
     if candidate is None:
         return []
     diagnostics: list[Diagnostic] = []
+    if not _valid_repository_identity(candidate["repository"]):
+        diagnostics.append(
+            Diagnostic(
+                path,
+                "repository-identity",
+                "candidate repository is not a canonical GitHub owner/repository pair",
+            )
+        )
     if not _valid_branch_ref(candidate["remote_ref"]):
         diagnostics.append(
             Diagnostic(path, "git-ref", "candidate remote_ref is not a valid full Git branch ref")
@@ -707,6 +730,11 @@ def _require_no_unexpected_entries(root: Path) -> None:
         if directory.is_symlink():
             diagnostics.append(
                 Diagnostic(group, "symlink", "mailbox directories must not be symbolic links")
+            )
+            continue
+        if not directory.is_dir():
+            diagnostics.append(
+                Diagnostic(group, "layout", "mailbox collection must be a directory")
             )
             continue
         for entry in sorted(directory.iterdir(), key=lambda item: item.name):
@@ -905,6 +933,37 @@ def _check_dependency_cycles(works: dict[str, dict[str, Any]]) -> list[Diagnosti
     for work_id in sorted(works):
         visit(work_id)
     return diagnostics
+
+
+def _message_reference_cycle(
+    work_messages: dict[str, dict[str, Any]],
+) -> str | None:
+    state: dict[str, int] = {}
+
+    def visit(message_id: str) -> str | None:
+        state[message_id] = 1
+        message = work_messages[message_id]
+        references = sorted(
+            reference
+            for reference in (message["in_reply_to"], message["resolves"])
+            if reference in work_messages
+        )
+        for reference in references:
+            if state.get(reference) == 1:
+                return message_id
+            if state.get(reference, 0) == 0:
+                cycle = visit(reference)
+                if cycle is not None:
+                    return cycle
+        state[message_id] = 2
+        return None
+
+    for message_id in sorted(work_messages):
+        if state.get(message_id, 0) == 0:
+            cycle = visit(message_id)
+            if cycle is not None:
+                return cycle
+    return None
 
 
 def _validate_claim(
@@ -1148,6 +1207,15 @@ def _validate_lifecycle(
                 )
         if message["resolves"] is not None:
             resolutions.setdefault(message["resolves"], []).append(message_id)
+    cycle = _message_reference_cycle(work_messages)
+    if cycle is not None:
+        diagnostics.append(
+            Diagnostic(
+                f"work/{work_id}/messages/{cycle}.md",
+                "message-cycle",
+                "message references must form an acyclic history",
+            )
+        )
     for target, resolving in resolutions.items():
         if len(resolving) > 1:
             diagnostics.append(
@@ -1422,6 +1490,14 @@ def _validate_relationships(
     active_project_paths: dict[str, str] = {}
     for project_id, project in projects.items():
         repository = project["repository"]
+        if not _valid_repository_identity(repository):
+            diagnostics.append(
+                Diagnostic(
+                    f"projects/{project_id}/project.md",
+                    "repository-identity",
+                    "repository is not a canonical GitHub owner/repository pair",
+                )
+            )
         repository_key = _repository_identity_key(repository)
         if repository_key in repositories:
             diagnostics.append(
@@ -1536,6 +1612,14 @@ def _validate_relationships(
         }
         for receipt_id, receipt in receipts[work_id].items():
             receipt_path = f"work/{work_id}/receipts/{receipt_id}.md"
+            if receipt["approved_revision"] > work["revision"]:
+                diagnostics.append(
+                    Diagnostic(
+                        receipt_path,
+                        "receipt-revision",
+                        "receipt approved_revision exceeds the current work revision",
+                    )
+                )
             transferable = receipt["handoff"] == "transferable"
             if transferable != (receipt["candidate"] is not None):
                 diagnostics.append(
@@ -1796,8 +1880,24 @@ def _read_readiness(path: Path | None) -> dict[str, dict[str, bool]] | None:
         return None
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise _fail(path.as_posix(), "readiness-unreadable", str(error)) from error
+    except UnicodeDecodeError as error:
+        raise _fail(
+            path.as_posix(),
+            "readiness-encoding",
+            "readiness input is not valid UTF-8",
+        ) from error
+    except OSError as error:
+        raise _fail(
+            path.as_posix(),
+            "readiness-unreadable",
+            "readiness input could not be read",
+        ) from error
+    except json.JSONDecodeError as error:
+        raise _fail(
+            path.as_posix(),
+            "readiness-json",
+            "readiness input is not valid JSON",
+        ) from error
     if not isinstance(value, dict):
         raise _fail(path.as_posix(), "readiness-shape", "readiness must be a JSON object")
     return value

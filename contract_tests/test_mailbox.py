@@ -521,6 +521,13 @@ class MailboxContract(unittest.TestCase):
         ):
             MAILBOX.validate_project_policy(path)
         self.assertEqual(path.read_bytes(), before)
+        policy["mailbox"]["remote"] = "git@github.com:example/mailbox.git"
+        policy["repository"]["identity"] = "github:./.."
+        write_yaml(path, policy)
+        with self.assertRaisesRegex(
+            MAILBOX.MailboxValidationError, "repository-identity"
+        ):
+            MAILBOX.validate_project_policy(path)
 
     def test_fresh_clones_reconstruct_all_views_identically(self) -> None:
         initiative_id = identifier("ini", 1)
@@ -681,6 +688,32 @@ class MailboxContract(unittest.TestCase):
         self.fixture.messages[work_id][resolving_id] = resolving
         self.fixture.write_work(work_id)
         self.assert_invalid("blocking-message")
+
+    def test_message_references_must_be_acyclic(self) -> None:
+        work_id = self.fixture.add_work(1, "active")
+        first_id = identifier("msg", 1)
+        second_id = identifier("msg", 2)
+        for message_id, reference in (
+            (first_id, second_id),
+            (second_id, first_id),
+        ):
+            self.fixture.messages[work_id][message_id] = {
+                "schema": "atelier.message/v1",
+                "id": message_id,
+                "work_id": work_id,
+                "kind": "notification",
+                "author_role": "planner",
+                "worker_run_id": None,
+                "audience": "worker",
+                "in_reply_to": reference,
+                "resolves": None,
+                "blocks": None,
+                "created_at": TIMESTAMP,
+                "subject": "Cyclic history",
+            }
+        self.fixture.write_work(work_id)
+
+        self.assert_invalid("message-cycle")
 
     def test_unresolved_worker_blocker_requires_the_canonical_pointer(self) -> None:
         work_id = self.fixture.add_work(1, "blocked")
@@ -989,6 +1022,19 @@ class MailboxContract(unittest.TestCase):
         self.assertEqual(snapshot["work"][0]["project_id"], next_project_id)
         self.assertEqual(len(self.fixture.receipts[work_id]), 2)
 
+    def test_historical_receipt_cannot_name_a_future_work_revision(self) -> None:
+        work_id = self.fixture.add_work(1, "accepted")
+        delivery_id = self.fixture.works[work_id]["delivery_receipt_id"]
+        future = copy.deepcopy(self.fixture.receipts[work_id][delivery_id])
+        future["id"] = identifier("rcp", 2)
+        future["outcome"] = "released"
+        future["approved_revision"] = 999
+        future["mutation_ownership"] = "relinquished"
+        self.fixture.receipts[work_id][future["id"]] = future
+        self.fixture.write_work(work_id)
+
+        self.assert_invalid("receipt-revision")
+
     def test_blocked_work_requires_a_blocked_retained_attempt(self) -> None:
         work_id = self.fixture.add_work(1, "blocked")
         work = self.fixture.works[work_id]
@@ -1142,6 +1188,15 @@ class MailboxContract(unittest.TestCase):
         self.fixture.write_work(second)
         self.assert_invalid("parallel-assignments")
 
+    def test_repository_identity_rejects_dot_segments(self) -> None:
+        project_id, _ = self.fixture.add_project(1)
+        project = self.fixture.projects[project_id]
+        project["repository"] = "github:./.."
+        project["policy"]["repository"] = "github:./.."
+        self.fixture.write_project(project_id)
+
+        self.assert_invalid("repository-identity")
+
     def test_github_repository_case_aliases_share_one_identity(self) -> None:
         self.fixture.add_work(1, "active")
         second = self.fixture.add_work(2, "active")
@@ -1184,6 +1239,26 @@ class MailboxContract(unittest.TestCase):
         (self.root / "projects" / project_id / "cache.json").write_text("{}\n")
         self.assert_invalid("layout")
 
+    def test_mailbox_collection_file_has_a_relative_layout_diagnostic(self) -> None:
+        (self.root / "projects").write_text("not a directory\n", encoding="utf-8")
+
+        with self.assertRaises(MAILBOX.MailboxValidationError) as caught:
+            MAILBOX.reconstruct_mailbox(self.root)
+        diagnostic = next(
+            item for item in caught.exception.diagnostics if item.code == "layout"
+        )
+        self.assertEqual(diagnostic.path, "projects")
+
+    def test_invalid_utf8_document_has_a_relative_encoding_diagnostic(self) -> None:
+        (self.root / "atelier.yaml").write_bytes(b"\xff")
+
+        with self.assertRaises(MAILBOX.MailboxValidationError) as caught:
+            MAILBOX.reconstruct_mailbox(self.root)
+        diagnostic = next(
+            item for item in caught.exception.diagnostics if item.code == "encoding"
+        )
+        self.assertEqual(diagnostic.path, "atelier.yaml")
+
     def test_malformed_single_quoted_yaml_fails_closed(self) -> None:
         project_id, _ = self.fixture.add_project(1)
         project_path = self.root / "projects" / project_id / "project.md"
@@ -1217,6 +1292,13 @@ class MailboxContract(unittest.TestCase):
                 self.root,
                 readiness={ready: {"database": True}},
             )
+
+        readiness_path = Path(self.temporary.name) / "readiness.json"
+        readiness_path.write_bytes(b"\xff")
+        with self.assertRaisesRegex(
+            MAILBOX.MailboxValidationError, "readiness-encoding"
+        ):
+            MAILBOX._read_readiness(readiness_path)
 
 
 if __name__ == "__main__":
