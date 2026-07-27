@@ -1000,6 +1000,32 @@ class GitMailboxWriteContract(unittest.TestCase):
             )
         self.assertEqual(self.remote_head(), before)
 
+    def test_transition_cannot_change_the_canonical_branch(self) -> None:
+        before = self.remote_head()
+
+        def plan(context: TransitionContext) -> TransitionPlan:
+            manifest = (context.checkout / "atelier.yaml").read_text(encoding="utf-8")
+            changed = manifest.replace(
+                'canonical_branch: "main"',
+                'canonical_branch: "other"',
+            )
+            self.assertNotEqual(changed, manifest)
+            return TransitionPlan(
+                "change canonical branch",
+                (FileChange("atelier.yaml", changed),),
+            )
+
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "manifest canonical branch 'other' does not match 'main'",
+        ):
+            self.writer().publish(
+                "change canonical branch",
+                revalidate=lambda context: None,
+                plan=plan,
+            )
+        self.assertEqual(self.remote_head(), before)
+
     def test_declared_non_mailbox_paths_fail_before_push(self) -> None:
         before = self.remote_head()
         for path in (

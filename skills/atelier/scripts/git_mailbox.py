@@ -248,11 +248,7 @@ class GitMailboxWriter:
                 latest_observed_revision = base_revision
                 self._reset(checkout)
                 snapshot = reconstruct_mailbox(checkout)
-                if snapshot["canonical_branch"] != self.branch:
-                    raise MailboxTransitionRejected(
-                        f"{operation}: manifest canonical branch "
-                        f"{snapshot['canonical_branch']!r} does not match {self.branch!r}"
-                    )
+                self._require_canonical_branch(snapshot, operation=operation)
                 with tempfile.TemporaryDirectory(
                     prefix="atelier-mailbox-context-"
                 ) as context_temporary:
@@ -279,7 +275,8 @@ class GitMailboxWriter:
                 changes = self._normalize_plan(checkout, transition)
                 prior_claims = self._read_prior_claims(checkout, changes)
                 self._apply(checkout, changes)
-                reconstruct_mailbox(checkout)
+                updated_snapshot = reconstruct_mailbox(checkout)
+                self._require_canonical_branch(updated_snapshot, operation=operation)
                 self._verify_claim_history(checkout, prior_claims, changes)
                 self._stage_exact_changes(checkout, changes)
                 commit = self._commit(checkout, transition.commit_message)
@@ -398,6 +395,18 @@ class GitMailboxWriter:
         cleaned = self._run(checkout, ("clean", "-ffdqx"))
         if reset.returncode != 0 or cleaned.returncode != 0:
             raise MailboxWriteError("could not reset isolated checkout to the fetched mailbox")
+
+    def _require_canonical_branch(
+        self,
+        snapshot: Mapping[str, Any],
+        *,
+        operation: str,
+    ) -> None:
+        if snapshot["canonical_branch"] != self.branch:
+            raise MailboxTransitionRejected(
+                f"{operation}: manifest canonical branch "
+                f"{snapshot['canonical_branch']!r} does not match {self.branch!r}"
+            )
 
     def _normalize_plan(
         self,

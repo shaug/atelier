@@ -21,8 +21,9 @@ deletions and cannot mutate its checkout directly. Callbacks receive a
 document-only snapshot with no Git administrative state; the writer keeps its
 transport checkout private, seals its Git environment before either callback,
 discards environment-level Git configuration injection, and rejects any
-snapshot mutation. Message and receipt documents are append-only: a plan cannot
-delete them or target an identifier
+snapshot mutation. A transition cannot change the manifest's canonical branch.
+Message and receipt documents are append-only: a plan cannot delete them or
+target an identifier
 that already exists in the fetched mailbox. While a claim remains current, its
 checkpoint authorization ledger must retain the fetched ledger as an exact
 prefix. One transition may append exactly one entry while incrementing the
