@@ -931,6 +931,45 @@ class GitMailboxWriteContract(unittest.TestCase):
                     ).stdout.strip()
                     self.assertEqual(head, before)
 
+    def test_same_claim_checkpoint_ledger_cannot_be_rewritten_or_truncated(self) -> None:
+        self._claim(with_candidate=True)
+        before = self.remote_head()
+
+        def mutate_checkpoint(
+            context: TransitionContext,
+            mutation: str,
+        ) -> TransitionPlan:
+            path = f"work/{self.work_id}/work.md"
+            work = read_markdown(context.checkout / path)
+            checkpoint = work["claim"]["checkpoint"]
+            if mutation == "truncate":
+                checkpoint["authorizations"] = checkpoint["authorizations"][:-1]
+                checkpoint["sequence"] -= 1
+            else:
+                checkpoint["authorizations"][-1]["proposed_effect_digest"] = (
+                    "sha256:" + ("f" * 64)
+                )
+            return TransitionPlan(
+                f"{mutation} checkpoint ledger",
+                (FileChange(path, markdown(work)),),
+            )
+
+        for mutation in ("truncate", "rewrite"):
+            with self.subTest(mutation=mutation):
+                with self.assertRaisesRegex(
+                    MailboxTransitionRejected,
+                    "checkpoint authorization ledger is append-only",
+                ):
+                    self.writer().publish(
+                        f"{mutation} checkpoint ledger",
+                        revalidate=lambda context: None,
+                        plan=lambda context, mutation=mutation: mutate_checkpoint(
+                            context,
+                            mutation,
+                        ),
+                    )
+                self.assertEqual(self.remote_head(), before)
+
     def test_option_looking_remote_is_rejected_before_git_runs(self) -> None:
         calls: list[tuple[str, ...]] = []
 

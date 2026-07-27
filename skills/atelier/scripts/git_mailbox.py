@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
-from .mailbox import reconstruct_mailbox
+from .mailbox import _read_yaml, reconstruct_mailbox
 
 READBACK_REF = "refs/remotes/atelier/canonical"
 GIT_COMMAND_TIMEOUT_SECONDS = 30
@@ -233,8 +233,10 @@ class GitMailboxWriter:
                 revalidate(context)
                 transition = plan(context)
                 changes = self._normalize_plan(checkout, transition)
+                prior_claims = self._read_prior_claims(checkout, changes)
                 self._apply(checkout, changes)
                 reconstruct_mailbox(checkout)
+                self._verify_claim_history(checkout, prior_claims)
                 self._stage_exact_changes(checkout, changes)
                 commit = self._commit(checkout, transition.commit_message)
                 self._verify_commit_shape(
@@ -385,6 +387,62 @@ class GitMailboxWriter:
                     ) from error
             by_path[change.path] = change
         return tuple(by_path[path] for path in sorted(by_path))
+
+    def _read_prior_claims(
+        self,
+        checkout: Path,
+        changes: tuple[FileChange, ...],
+    ) -> dict[str, Mapping[str, Any] | None]:
+        prior_claims: dict[str, Mapping[str, Any] | None] = {}
+        for change in changes:
+            pure = PurePosixPath(change.path)
+            if (
+                len(pure.parts) != 3
+                or pure.parts[0] != "work"
+                or pure.parts[2] != "work.md"
+                or change.content is None
+            ):
+                continue
+            target = checkout / change.path
+            if target.exists():
+                document, _ = _read_yaml(target, frontmatter=True, label=change.path)
+                prior_claims[change.path] = document["claim"]
+        return prior_claims
+
+    def _verify_claim_history(
+        self,
+        checkout: Path,
+        prior_claims: Mapping[str, Mapping[str, Any] | None],
+    ) -> None:
+        for path, prior_claim in prior_claims.items():
+            if prior_claim is None:
+                continue
+            document, _ = _read_yaml(checkout / path, frontmatter=True, label=path)
+            current_claim = document["claim"]
+            if current_claim is None or current_claim["id"] != prior_claim["id"]:
+                continue
+            prior_checkpoint = prior_claim["checkpoint"]
+            current_checkpoint = current_claim["checkpoint"]
+            prior_ledger = prior_checkpoint["authorizations"]
+            current_ledger = current_checkpoint["authorizations"]
+            if (
+                current_checkpoint["sequence"] < prior_checkpoint["sequence"]
+                or current_ledger[: len(prior_ledger)] != prior_ledger
+            ):
+                raise MailboxTransitionRejected(
+                    f"{path}: checkpoint authorization ledger is append-only"
+                )
+            sequence_advanced = (
+                current_checkpoint["sequence"] > prior_checkpoint["sequence"]
+            )
+            token_rotated = (
+                current_checkpoint["continuation_token"]
+                != prior_checkpoint["continuation_token"]
+            )
+            if sequence_advanced != token_rotated:
+                raise MailboxTransitionRejected(
+                    f"{path}: checkpoint sequence and continuation token must advance together"
+                )
 
     def _apply(self, checkout: Path, changes: tuple[FileChange, ...]) -> None:
         for change in changes:

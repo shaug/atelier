@@ -19,7 +19,10 @@ commit, reconstructs current state, and invokes both callbacks again. A
 transition callback is read-only; it returns complete UTF-8 replacements or
 deletions and cannot mutate its checkout directly. Message and receipt
 documents are append-only: a plan cannot delete them or target an identifier
-that already exists in the fetched mailbox.
+that already exists in the fetched mailbox. While a claim remains current, its
+checkpoint authorization ledger must retain the fetched ledger as an exact
+prefix, and its sequence and continuation token advance together. Release,
+takeover, and a new claim remain distinct lifecycle transitions.
 
 Git commands are noninteractive and have a finite timeout. A mailbox remote
 must be a repository operand and cannot begin with `-`. Fetch timeouts fail as
