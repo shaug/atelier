@@ -13,8 +13,9 @@ The production persistence boundary is implemented in
 `skills/atelier/scripts/git_mailbox.py`. Its executable contracts live in
 `contract_tests/test_git_mailbox.py` and repeat the write-critical scenarios
 through that helper: claim races, independent append retry, atomic
-multi-document transitions, external-state drift after contention, ambiguous
-push recovery after later commits, unavailable remotes, malformed transitions,
+multi-document transitions, takeover fencing, release and takeover candidate
+handoff, policy, ticket, and pull-request drift after contention, ambiguous push
+recovery after later commits, unavailable remotes, malformed transitions,
 fresh-clone reconstruction, and exact historical read-back.
 
 ## Command

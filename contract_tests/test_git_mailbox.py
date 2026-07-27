@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -102,17 +103,10 @@ class LostPushResponse:
 
 
 class AdvanceBeforeFirstPush:
-    """Advance the canonical branch and external observation before one stale push."""
+    """Run one concurrent transition before allowing a stale push to continue."""
 
-    def __init__(
-        self,
-        remote: Path,
-        work_id: str,
-        external_observation: dict[str, str],
-    ):
-        self.remote = remote
-        self.work_id = work_id
-        self.external_observation = external_observation
+    def __init__(self, advance: Callable[[], None]):
+        self._advance = advance
         self.advance = True
 
     def __call__(
@@ -122,16 +116,7 @@ class AdvanceBeforeFirstPush:
     ) -> subprocess.CompletedProcess[str]:
         if arguments and arguments[0] == "push" and self.advance:
             self.advance = False
-            self.external_observation["ticket"] = "changed"
-            path, content = planner_message(self.work_id, 99)
-            GitMailboxWriter(str(self.remote), "main").publish(
-                "publish concurrent instruction",
-                revalidate=lambda context: None,
-                plan=lambda context: TransitionPlan(
-                    "publish concurrent instruction",
-                    (FileChange(path, content),),
-                ),
-            )
+            self._advance()
         return run_git(cwd, arguments)
 
 
@@ -304,7 +289,7 @@ class GitMailboxWriteContract(unittest.TestCase):
 
         def revalidate(context: TransitionContext) -> None:
             work = read_markdown(context.checkout / f"work/{self.work_id}/work.md")
-            if work["claim"]["id"] != claim_result["claim_id"]:
+            if work["claim"]["id"] != claim_result["id"]:
                 raise MailboxTransitionRejected("claim changed")
 
         def plan(context: TransitionContext) -> TransitionPlan:
@@ -441,14 +426,16 @@ class GitMailboxWriteContract(unittest.TestCase):
         attempts: list[int] = []
         path, content = planner_message(self.work_id, 1)
 
+        def advance() -> None:
+            observation["ticket"] = "changed"
+            self._append_instruction(99)
+
         def revalidate(context: TransitionContext) -> None:
             attempts.append(context.attempt)
             if observation["ticket"] != "approved":
                 raise MailboxTransitionRejected("material ticket observation changed")
 
-        writer = self.writer(
-            runner=AdvanceBeforeFirstPush(self.remote, self.work_id, observation)
-        )
+        writer = self.writer(runner=AdvanceBeforeFirstPush(advance))
         with self.assertRaisesRegex(
             MailboxTransitionRejected,
             "material ticket observation changed",
@@ -482,6 +469,218 @@ class GitMailboxWriteContract(unittest.TestCase):
             f"main:{concurrent_path}",
         )
         self.assertTrue(concurrent.stdout)
+
+    def test_takeover_fences_the_prior_claimant_after_contention(self) -> None:
+        old_claim = self._claim()
+        new_claim = fixtures.claim(self.repository, 2, with_candidate=False)
+        work_path = f"work/{self.work_id}/work.md"
+
+        def take_over() -> None:
+            def plan(context: TransitionContext) -> TransitionPlan:
+                work = read_markdown(context.checkout / work_path)
+                work["claim"] = copy.deepcopy(new_claim)
+                return TransitionPlan(
+                    "take over active work",
+                    (FileChange(work_path, markdown(work)),),
+                )
+
+            self.writer().publish(
+                "take over active work",
+                revalidate=lambda context: None,
+                plan=plan,
+            )
+
+        def revalidate(context: TransitionContext) -> None:
+            claim = read_markdown(context.checkout / work_path)["claim"]
+            if (
+                claim["id"] != old_claim["id"]
+                or claim["checkpoint"]["sequence"] != 0
+                or claim["checkpoint"]["continuation_token"]
+                != old_claim["checkpoint"]["continuation_token"]
+            ):
+                raise MailboxTransitionRejected("prior claim is fenced")
+
+        def authorize(context: TransitionContext) -> TransitionPlan:
+            work = read_markdown(context.checkout / work_path)
+            checkpoint = work["claim"]["checkpoint"]
+            checkpoint["sequence"] = 1
+            checkpoint["continuation_token"] = "rotated-token"
+            checkpoint["authorizations"].append(
+                {
+                    "sequence": 1,
+                    "invocation_id": old_claim["worker_run_id"],
+                    "phase": "pre_external_mutation",
+                    "action": "repository.candidate.create",
+                    "proposed_effect_digest": fixtures.DIGEST,
+                    "candidate_head": None,
+                    "acknowledged_candidate_head": None,
+                    "recorded_at": fixtures.TIMESTAMP,
+                }
+            )
+            return TransitionPlan(
+                "authorize stale claimant",
+                (FileChange(work_path, markdown(work)),),
+            )
+
+        with self.assertRaisesRegex(MailboxTransitionRejected, "prior claim is fenced"):
+            self.writer(runner=AdvanceBeforeFirstPush(take_over)).publish(
+                "authorize stale claimant",
+                revalidate=revalidate,
+                plan=authorize,
+            )
+
+        fresh = self.root / "fresh-takeover"
+        git(None, "clone", str(self.remote), str(fresh))
+        current = read_markdown(fresh / work_path)
+        self.assertEqual(current["claim"]["id"], new_claim["id"])
+        self.assertEqual(current["claim"]["checkpoint"]["authorizations"], [])
+
+    def test_release_and_takeover_preserve_candidate_handoff(self) -> None:
+        original_claim = self._claim(with_candidate=True)
+        candidate = copy.deepcopy(original_claim["candidate"])
+        work_path = f"work/{self.work_id}/work.md"
+        receipt_id = fixtures.identifier("rcp", 1)
+
+        def release(context: TransitionContext) -> TransitionPlan:
+            work = read_markdown(context.checkout / work_path)
+            released = fixtures.receipt(
+                work,
+                self.repository,
+                1,
+                outcome="released",
+                with_candidate=True,
+            )
+            released["mutation_ownership"] = "relinquished"
+            work["status"] = "approved"
+            work["claim"] = None
+            work["attempt_receipt_id"] = receipt_id
+            return TransitionPlan(
+                "release candidate handoff",
+                (
+                    FileChange(work_path, markdown(work)),
+                    FileChange(
+                        f"work/{self.work_id}/receipts/{receipt_id}.md",
+                        markdown(released),
+                    ),
+                ),
+            )
+
+        self.writer().publish(
+            "release candidate handoff",
+            revalidate=lambda context: None,
+            plan=release,
+        )
+
+        adopted_claim = fixtures.claim(self.repository, 2, with_candidate=False)
+        adopted_claim["candidate"] = copy.deepcopy(candidate)
+
+        def adopt(context: TransitionContext) -> TransitionPlan:
+            work = read_markdown(context.checkout / work_path)
+            receipt = read_markdown(
+                context.checkout / f"work/{self.work_id}/receipts/{receipt_id}.md"
+            )
+            if receipt["candidate"] != candidate:
+                raise MailboxTransitionRejected("released candidate changed")
+            work["status"] = "active"
+            work["claim"] = copy.deepcopy(adopted_claim)
+            return TransitionPlan(
+                "adopt released candidate",
+                (FileChange(work_path, markdown(work)),),
+            )
+
+        self.writer().publish(
+            "adopt released candidate",
+            revalidate=lambda context: None,
+            plan=adopt,
+        )
+
+        takeover_claim = fixtures.claim(self.repository, 3, with_candidate=False)
+        takeover_claim["candidate"] = copy.deepcopy(candidate)
+
+        def take_over(context: TransitionContext) -> TransitionPlan:
+            work = read_markdown(context.checkout / work_path)
+            work["claim"] = copy.deepcopy(takeover_claim)
+            return TransitionPlan(
+                "take over candidate handoff",
+                (FileChange(work_path, markdown(work)),),
+            )
+
+        self.writer().publish(
+            "take over candidate handoff",
+            revalidate=lambda context: None,
+            plan=take_over,
+        )
+
+        fresh = self.root / "fresh-handoff"
+        git(None, "clone", str(self.remote), str(fresh))
+        current = read_markdown(fresh / work_path)
+        released = read_markdown(
+            fresh / f"work/{self.work_id}/receipts/{receipt_id}.md"
+        )
+        self.assertEqual(released["candidate"], candidate)
+        self.assertEqual(current["attempt_receipt_id"], receipt_id)
+        self.assertEqual(current["claim"]["candidate"], candidate)
+        self.assertEqual(current["claim"]["id"], takeover_claim["id"])
+        fixtures.MAILBOX.reconstruct_mailbox(fresh)
+
+    def test_policy_tightening_after_contention_does_not_widen_authority(self) -> None:
+        approved = {"repository.candidate.push"}
+        current = set(approved)
+        effective_observations: list[set[str]] = []
+        path, content = planner_message(self.work_id, 1)
+
+        def advance() -> None:
+            current.clear()
+            current.update({"pull_request.create", "pull_request.merge"})
+            self._append_instruction(99)
+
+        def revalidate(context: TransitionContext) -> None:
+            effective = approved & current
+            effective_observations.append(effective)
+            if "pull_request.merge" in effective:
+                raise AssertionError("looser current policy widened approved authority")
+            if "repository.candidate.push" not in effective:
+                raise MailboxTransitionRejected("current policy removed candidate push")
+
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "current policy removed candidate push",
+        ):
+            self.writer(runner=AdvanceBeforeFirstPush(advance)).publish(
+                "publish under effective authority",
+                revalidate=revalidate,
+                plan=lambda context: TransitionPlan(
+                    "publish under effective authority",
+                    (FileChange(path, content),),
+                ),
+            )
+        self.assertEqual(effective_observations, [approved, set()])
+
+    def test_pull_request_head_drift_blocks_retry_after_contention(self) -> None:
+        delivered_head = fixtures.SHA_A
+        live = {"head": delivered_head}
+        path, content = planner_message(self.work_id, 1)
+
+        def advance() -> None:
+            live["head"] = fixtures.SHA_B
+            self._append_instruction(99)
+
+        def revalidate(context: TransitionContext) -> None:
+            if live["head"] != delivered_head:
+                raise MailboxTransitionRejected("pull request head changed")
+
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "pull request head changed",
+        ):
+            self.writer(runner=AdvanceBeforeFirstPush(advance)).publish(
+                "publish against delivered head",
+                revalidate=revalidate,
+                plan=lambda context: TransitionPlan(
+                    "publish against delivered head",
+                    (FileChange(path, content),),
+                ),
+            )
 
     def test_invalid_transition_fails_closed_before_push(self) -> None:
         path = f"work/{fixtures.identifier('wrk', 9)}/work.md"
@@ -518,8 +717,23 @@ class GitMailboxWriteContract(unittest.TestCase):
             )
         self.assertEqual(self.remote_head(), before)
 
-    def _claim(self) -> dict[str, str]:
-        claim_value = fixtures.claim(self.repository, 1, with_candidate=False)
+    def _append_instruction(self, number: int) -> None:
+        path, content = planner_message(self.work_id, number)
+        self.writer().publish(
+            f"append instruction {number}",
+            revalidate=lambda context: None,
+            plan=lambda context: TransitionPlan(
+                f"append instruction {number}",
+                (FileChange(path, content),),
+            ),
+        )
+
+    def _claim(self, *, with_candidate: bool = False) -> dict[str, Any]:
+        claim_value = fixtures.claim(
+            self.repository,
+            1,
+            with_candidate=with_candidate,
+        )
 
         def plan(context: TransitionContext) -> TransitionPlan:
             work = read_markdown(context.checkout / f"work/{self.work_id}/work.md")
@@ -535,4 +749,4 @@ class GitMailboxWriteContract(unittest.TestCase):
             revalidate=lambda context: None,
             plan=plan,
         )
-        return {"claim_id": claim_value["id"]}
+        return claim_value
