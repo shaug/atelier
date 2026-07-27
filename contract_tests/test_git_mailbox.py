@@ -1041,6 +1041,7 @@ class GitMailboxWriteContract(unittest.TestCase):
         before = self.remote_head()
 
         def plan(context: TransitionContext) -> TransitionPlan:
+            self.assertFalse((context.checkout / ".git").exists())
             committed = run_git(
                 context.checkout,
                 (
@@ -1056,30 +1057,36 @@ class GitMailboxWriteContract(unittest.TestCase):
                     "hidden callback commit",
                 ),
             )
-            self.assertEqual(committed.returncode, 0)
+            self.assertNotEqual(committed.returncode, 0)
             path, content = planner_message(self.work_id, 1)
             return TransitionPlan(
                 "declared transition",
                 (FileChange(path, content),),
             )
 
-        with self.assertRaisesRegex(
-            MailboxTransitionRejected,
-            "one commit directly atop the fetched base",
-        ):
-            self.writer().publish(
-                "callback history mutation",
-                revalidate=lambda context: None,
-                plan=plan,
-            )
-        self.assertEqual(self.remote_head(), before)
+        result = self.writer().publish(
+            "callback history mutation",
+            revalidate=lambda context: None,
+            plan=plan,
+        )
+        self.assertEqual(self.remote_head(), result.commit)
+        commit_count = git(
+            None,
+            "--git-dir",
+            str(self.remote),
+            "rev-list",
+            "--count",
+            f"{before}..main",
+        )
+        self.assertEqual(commit_count.stdout.strip(), "1")
 
-    def test_commit_hook_content_mutation_fails_before_push(self) -> None:
+    def test_callback_cannot_install_commit_hook_in_writer_checkout(self) -> None:
         before = self.remote_head()
         path, content = planner_message(self.work_id, 1)
 
         def plan(context: TransitionContext) -> TransitionPlan:
             hook = context.checkout / ".git" / "hooks" / "pre-commit"
+            hook.parent.mkdir(parents=True)
             hook.write_text(
                 "#!/bin/sh\n"
                 f"printf 'corrupted\\n' > {path}\n"
@@ -1094,7 +1101,7 @@ class GitMailboxWriteContract(unittest.TestCase):
 
         with self.assertRaisesRegex(
             MailboxTransitionRejected,
-            "committed mailbox content differs",
+            "mutated its read-only context",
         ):
             self.writer().publish(
                 "commit hook content mutation",
@@ -1102,6 +1109,53 @@ class GitMailboxWriteContract(unittest.TestCase):
                 plan=plan,
             )
         self.assertEqual(self.remote_head(), before)
+
+    def test_callback_git_config_cannot_redirect_canonical_remote(self) -> None:
+        alternate = self.root / "alternate.git"
+        git(None, "clone", "--bare", str(self.remote), str(alternate))
+        canonical_before = self.remote_head()
+        alternate_before = git(
+            None,
+            "--git-dir",
+            str(alternate),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+
+        def plan(context: TransitionContext) -> TransitionPlan:
+            self.assertFalse((context.checkout / ".git").exists())
+            redirected = run_git(
+                context.checkout,
+                (
+                    "config",
+                    "--local",
+                    f"url.{alternate}.insteadOf",
+                    str(self.remote),
+                ),
+            )
+            self.assertNotEqual(redirected.returncode, 0)
+            path, content = planner_message(self.work_id, 1)
+            return TransitionPlan(
+                "publish without transport redirect",
+                (FileChange(path, content),),
+            )
+
+        result = self.writer().publish(
+            "reject callback transport redirect",
+            revalidate=lambda context: None,
+            plan=plan,
+        )
+
+        self.assertNotEqual(result.commit, canonical_before)
+        self.assertEqual(self.remote_head(), result.commit)
+        alternate_after = git(
+            None,
+            "--git-dir",
+            str(alternate),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+        self.assertEqual(alternate_after, alternate_before)
 
     def test_existing_messages_and_receipts_are_append_only(self) -> None:
         remote = self.root / "append-only-mailbox.git"

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
@@ -232,14 +233,29 @@ class GitMailboxWriter:
                         f"{operation}: manifest canonical branch "
                         f"{snapshot['canonical_branch']!r} does not match {self.branch!r}"
                     )
-                context = TransitionContext(
-                    checkout=checkout,
-                    base_revision=base_revision,
-                    snapshot=snapshot,
-                    attempt=attempt,
-                )
-                revalidate(context)
-                transition = plan(context)
+                with tempfile.TemporaryDirectory(
+                    prefix="atelier-mailbox-context-"
+                ) as context_temporary:
+                    context_checkout = Path(context_temporary) / "mailbox"
+                    shutil.copytree(
+                        checkout,
+                        context_checkout,
+                        ignore=shutil.ignore_patterns(".git"),
+                        symlinks=True,
+                    )
+                    context_fingerprint = self._context_fingerprint(context_checkout)
+                    context = TransitionContext(
+                        checkout=context_checkout,
+                        base_revision=base_revision,
+                        snapshot=snapshot,
+                        attempt=attempt,
+                    )
+                    revalidate(context)
+                    transition = plan(context)
+                    self._require_context_unchanged(
+                        context_checkout,
+                        expected=context_fingerprint,
+                    )
                 changes = self._normalize_plan(checkout, transition)
                 prior_claims = self._read_prior_claims(checkout, changes)
                 self._apply(checkout, changes)
@@ -370,9 +386,6 @@ class GitMailboxWriter:
     ) -> tuple[FileChange, ...]:
         if not transition.commit_message.strip():
             raise MailboxTransitionRejected("transition commit message must not be empty")
-        dirty = self._run(checkout, ("status", "--porcelain", "--untracked-files=all"))
-        if dirty.returncode != 0 or dirty.stdout:
-            raise MailboxTransitionRejected("transition callback mutated its read-only context")
         if not transition.changes:
             raise MailboxTransitionRejected("transition must change at least one document")
         by_path: dict[str, FileChange] = {}
@@ -411,6 +424,46 @@ class GitMailboxWriter:
                     ) from error
             by_path[change.path] = change
         return tuple(by_path[path] for path in sorted(by_path))
+
+    def _context_fingerprint(
+        self,
+        root: Path,
+    ) -> tuple[tuple[str, int, bytes | str | None], ...]:
+        entries: list[tuple[str, int, bytes | str | None]] = []
+
+        def visit(path: Path) -> None:
+            mode = path.lstat().st_mode
+            relative = "." if path == root else path.relative_to(root).as_posix()
+            if stat.S_ISLNK(mode):
+                entries.append((relative, mode, os.readlink(path)))
+                return
+            if stat.S_ISREG(mode):
+                entries.append((relative, mode, path.read_bytes()))
+                return
+            entries.append((relative, mode, None))
+            if stat.S_ISDIR(mode):
+                for child in sorted(path.iterdir(), key=lambda item: item.name):
+                    visit(child)
+
+        visit(root)
+        return tuple(entries)
+
+    def _require_context_unchanged(
+        self,
+        checkout: Path,
+        *,
+        expected: tuple[tuple[str, int, bytes | str | None], ...],
+    ) -> None:
+        try:
+            current = self._context_fingerprint(checkout)
+        except OSError as error:
+            raise MailboxTransitionRejected(
+                "transition callback mutated its read-only context"
+            ) from error
+        if current != expected:
+            raise MailboxTransitionRejected(
+                "transition callback mutated its read-only context"
+            )
 
     def _read_prior_claims(
         self,

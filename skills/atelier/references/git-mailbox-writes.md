@@ -17,8 +17,10 @@ The writer always reconstructs and validates the fetched mailbox before either
 callback runs. After contention it fetches again, discards the stale local
 commit, reconstructs current state, and invokes both callbacks again. A
 transition callback is read-only; it returns complete UTF-8 replacements or
-deletions and cannot mutate its checkout directly. Message and receipt
-documents are append-only: a plan cannot delete them or target an identifier
+deletions and cannot mutate its checkout directly. Callbacks receive a
+document-only snapshot with no Git administrative state; the writer keeps its
+transport checkout private and rejects any snapshot mutation. Message and
+receipt documents are append-only: a plan cannot delete them or target an identifier
 that already exists in the fetched mailbox. While a claim remains current, its
 checkpoint authorization ledger must retain the fetched ledger as an exact
 prefix. One transition may append exactly one entry while incrementing the
