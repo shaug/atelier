@@ -155,6 +155,22 @@ def _parse_yaml(text: str, path: str) -> dict[str, Any]:
         raise _fail(path, "yaml-empty", "document is empty")
     if not isinstance(parsed, dict):
         raise _fail(path, "yaml-root", "document root must be a mapping")
+
+    active_collections: set[int] = set()
+
+    def reject_recursive_aliases(value: Any) -> None:
+        if not isinstance(value, dict | list):
+            return
+        identity = id(value)
+        if identity in active_collections:
+            raise _fail(path, "yaml-recursion", "document contains a recursive alias")
+        active_collections.add(identity)
+        children = value.values() if isinstance(value, dict) else value
+        for child in children:
+            reject_recursive_aliases(child)
+        active_collections.remove(identity)
+
+    reject_recursive_aliases(parsed)
     return parsed
 
 
@@ -383,15 +399,13 @@ def validate_document(
         raise MailboxValidationError(diagnostics)
 
 
-def validate_project_policy(
-    path: Path, *, schema_path: Path = DEFAULT_SCHEMA
-) -> dict[str, Any]:
+def validate_project_policy(path: Path) -> dict[str, Any]:
     """Validate one managed-project policy without changing it."""
     value, _ = _read_yaml(path, frontmatter=False)
     validate_document(
         value,
         path=path.as_posix(),
-        schema_bundle=_load_schema(schema_path),
+        schema_bundle=_load_schema(DEFAULT_SCHEMA),
         expected_schema="atelier.project-policy/v1",
     )
     if not _valid_branch_ref(value["repository"]["canonical_ref"]):
@@ -1016,7 +1030,6 @@ def _validate_claim(
         and not any(
             entry["phase"] == "pre_external_mutation"
             and entry["action"] in {"pull_request.create", "pull_request.update"}
-            and entry["candidate_head"] == candidate["head_revision"]
             for entry in ledger
         )
     ):
@@ -1024,7 +1037,7 @@ def _validate_claim(
             Diagnostic(
                 path,
                 "checkpoint-pr-authority",
-                "delivered PR candidate lacks pre-mutation authority for its exact head",
+                "delivered PR candidate lacks recorded pre-mutation authority",
             )
         )
     return diagnostics
@@ -1770,13 +1783,12 @@ def reconstruct_mailbox(
     root: Path,
     *,
     readiness: dict[str, dict[str, bool]] | None = None,
-    schema_path: Path = DEFAULT_SCHEMA,
 ) -> dict[str, Any]:
     """Rebuild one deterministic snapshot directly from mailbox documents."""
     root = root.resolve()
     if not root.is_dir():
         raise _fail(root.as_posix(), "mailbox-root", "mailbox root is not a directory")
-    schema_bundle = _load_schema(schema_path)
+    schema_bundle = _load_schema(DEFAULT_SCHEMA)
     manifest, projects, initiatives, works, messages, receipts = _load_documents(
         root, schema_bundle
     )
@@ -1883,7 +1895,6 @@ def _read_readiness(path: Path | None) -> dict[str, dict[str, bool]] | None:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--schema", type=Path, default=DEFAULT_SCHEMA)
     commands = parser.add_subparsers(dest="command", required=True)
     reconstruct = commands.add_parser("reconstruct", help="Validate and reconstruct a mailbox")
     reconstruct.add_argument("root", type=Path)
@@ -1900,14 +1911,13 @@ def main() -> int:
             result = reconstruct_mailbox(
                 args.root,
                 readiness=_read_readiness(args.readiness),
-                schema_path=args.schema,
             )
         else:
             result = {
                 "schema": "atelier.project-policy-check/v1",
                 "status": "valid",
                 "path": args.path.as_posix(),
-                "policy": validate_project_policy(args.path, schema_path=args.schema),
+                "policy": validate_project_policy(args.path),
             }
     except MailboxValidationError as error:
         for diagnostic in error.diagnostics:

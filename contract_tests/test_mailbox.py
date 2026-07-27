@@ -492,6 +492,7 @@ class MailboxContract(unittest.TestCase):
                 f"prefix-{identifier('wrk', 1)}-suffix",
             )
         )
+        self.assertNotIn("--schema", MAILBOX._parser().format_help())
 
     def test_project_policy_is_strict_and_read_only(self) -> None:
         project_id, repository = self.fixture.add_project(1)
@@ -928,7 +929,7 @@ class MailboxContract(unittest.TestCase):
         self.fixture.write_work(work_id)
         self.assert_invalid("checkpoint-candidate-history")
 
-    def test_delivered_pr_requires_authority_for_the_exact_current_head(self) -> None:
+    def test_delivered_pr_requires_recorded_mutation_authority(self) -> None:
         work_id = self.fixture.add_work(1, "delivered")
         checkpoint = self.fixture.works[work_id]["claim"]["checkpoint"]
         checkpoint["authorizations"] = checkpoint["authorizations"][:2]
@@ -962,7 +963,7 @@ class MailboxContract(unittest.TestCase):
         work = self.fixture.works[work_id]
         next_head = "d" * 40
         checkpoint = work["claim"]["checkpoint"]
-        checkpoint["sequence"] = 6
+        checkpoint["sequence"] = 5
         checkpoint["continuation_token"] = "token-1-next"
         checkpoint["authorizations"].extend(
             [
@@ -984,16 +985,6 @@ class MailboxContract(unittest.TestCase):
                     "proposed_effect_digest": DIGEST,
                     "candidate_head": next_head,
                     "acknowledged_candidate_head": next_head,
-                    "recorded_at": TIMESTAMP,
-                },
-                {
-                    "sequence": 6,
-                    "invocation_id": work["claim"]["worker_run_id"],
-                    "phase": "pre_external_mutation",
-                    "action": "pull_request.update",
-                    "proposed_effect_digest": DIGEST,
-                    "candidate_head": next_head,
-                    "acknowledged_candidate_head": None,
                     "recorded_at": TIMESTAMP,
                 },
             ]
@@ -1429,6 +1420,17 @@ class MailboxContract(unittest.TestCase):
         )
 
         self.assert_invalid("yaml-syntax")
+
+    def test_safe_yaml_reader_rejects_recursive_aliases(self) -> None:
+        work_id = self.fixture.add_work(1, "draft")
+        work_path = self.root / "work" / work_id / "work.md"
+        work_text = work_path.read_text(encoding="utf-8")
+        work_path.write_text(
+            work_text.replace("dependencies: []", "dependencies: &deps [*deps]"),
+            encoding="utf-8",
+        )
+
+        self.assert_invalid("yaml-recursion")
 
     def test_mailbox_collection_file_has_a_relative_layout_diagnostic(self) -> None:
         (self.root / "projects").write_text("not a directory\n", encoding="utf-8")

@@ -3,8 +3,8 @@
 Issue #775 provides a read-only v1 document boundary. It does not implement a
 mailbox transition, Git write, native-ticket mutation, or Atelier mode.
 
-The frozen schema bundle is `mailbox-v1.schema.json`. It defines the complete v1
-shapes for:
+The frozen, caller-invariant schema bundle is `mailbox-v1.schema.json`. It
+defines the complete v1 shapes for:
 
 - `atelier.mailbox/v1`,
 - `atelier.project/v1`,
