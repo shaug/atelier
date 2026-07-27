@@ -27,7 +27,15 @@ unchanged. The current claim's worker, revision, approval, policy, ticket, time,
 and host bindings are immutable. Release, takeover, and a new claim remain
 distinct lifecycle transitions. A takeover preserves the replaced claim's exact
 candidate, and one plan cannot both append the current claim's release receipt
-and install a different claim.
+and install a different claim. Every installed claim starts at checkpoint zero
+with an empty ledger and claim/run identities absent from the work document's
+canonical Git history.
+
+A same-claim candidate change consumes exactly one checkpoint whose
+`candidate_published` entry acknowledges the new exact head. Recovery returns a
+retryable absence when the commit is absent and the readable canonical head
+still descends from the pending write's base. A detectable rewind or divergence
+behind that base fails closed.
 
 Git commands are noninteractive and have a finite timeout. A mailbox remote
 must be a repository operand and cannot begin with `-`. Fetch timeouts fail as

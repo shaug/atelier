@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
-from .mailbox import _read_yaml, reconstruct_mailbox
+from .mailbox import _parse_yaml, _read_yaml, reconstruct_mailbox
 
 READBACK_REF = "refs/remotes/atelier/canonical"
 GIT_COMMAND_TIMEOUT_SECONDS = 30
@@ -302,6 +302,11 @@ class GitMailboxWriter:
             checkout = Path(temporary) / "mailbox"
             self._initialize(checkout)
             if not self._read_back(checkout, pending):
+                self._require_canonical_descendant(
+                    checkout,
+                    base_revision=pending.base_revision,
+                    operation=pending.operation,
+                )
                 return None
         return WriteResult(
             operation=pending.operation,
@@ -413,6 +418,8 @@ class GitMailboxWriter:
             if target.exists():
                 document, _ = _read_yaml(target, frontmatter=True, label=change.path)
                 prior_claims[change.path] = document["claim"]
+            else:
+                prior_claims[change.path] = None
         return prior_claims
 
     def _verify_claim_history(
@@ -422,17 +429,19 @@ class GitMailboxWriter:
         changes: tuple[FileChange, ...],
     ) -> None:
         for path, prior_claim in prior_claims.items():
-            if prior_claim is None:
-                continue
             document, _ = _read_yaml(checkout / path, frontmatter=True, label=path)
             current_claim = document["claim"]
             if current_claim is None:
+                continue
+            if prior_claim is None:
+                self._verify_new_claim(checkout, path, current_claim)
                 continue
             if current_claim["id"] != prior_claim["id"]:
                 if current_claim["candidate"] != prior_claim["candidate"]:
                     raise MailboxTransitionRejected(
                         f"{path}: takeover must preserve the prior claim candidate"
                     )
+                self._verify_new_claim(checkout, path, current_claim)
                 work_id = PurePosixPath(path).parts[1]
                 for change in changes:
                     receipt_path = PurePosixPath(change.path)
@@ -494,6 +503,75 @@ class GitMailboxWriter:
                 raise MailboxTransitionRejected(
                     f"{path}: checkpoint sequence and continuation token must advance together"
                 )
+            if current_claim["candidate"] != prior_claim["candidate"]:
+                if sequence_delta != 1 or current_claim["candidate"] is None:
+                    raise MailboxTransitionRejected(
+                        f"{path}: candidate changes require one publication checkpoint"
+                    )
+                publication = current_ledger[-1]
+                candidate_head = current_claim["candidate"]["head_revision"]
+                if (
+                    publication["phase"] != "candidate_published"
+                    or publication["candidate_head"] != candidate_head
+                    or publication["acknowledged_candidate_head"] != candidate_head
+                ):
+                    raise MailboxTransitionRejected(
+                        f"{path}: candidate publication checkpoint does not match candidate"
+                    )
+
+    def _verify_new_claim(
+        self,
+        checkout: Path,
+        path: str,
+        claim: Mapping[str, Any],
+    ) -> None:
+        checkpoint = claim["checkpoint"]
+        if checkpoint["sequence"] != 0 or checkpoint["authorizations"]:
+            raise MailboxTransitionRejected(
+                f"{path}: a new claim must begin with an empty checkpoint ledger"
+            )
+        historical_claims, historical_runs = self._historical_claim_identities(checkout, path)
+        if claim["id"] in historical_claims or claim["worker_run_id"] in historical_runs:
+            raise MailboxTransitionRejected(
+                f"{path}: released or replaced claim identities cannot become current again"
+            )
+
+    def _historical_claim_identities(
+        self,
+        checkout: Path,
+        path: str,
+    ) -> tuple[set[str], set[str]]:
+        revisions = self._output_lines(
+            checkout,
+            ("log", "--format=%H", READBACK_REF, "--", path),
+            "inspect historical claim identities",
+        )
+        claim_ids: set[str] = set()
+        worker_run_ids: set[str] = set()
+        for revision in revisions:
+            shown = self._run(checkout, ("show", f"{revision}:{path}"))
+            if shown.returncode != 0:
+                continue
+            lines = shown.stdout.splitlines()
+            if not lines or lines[0] != "---":
+                raise MailboxTransitionRejected(
+                    f"{path}: historical work document has invalid frontmatter"
+                )
+            try:
+                end = lines.index("---", 1)
+            except ValueError as error:
+                raise MailboxTransitionRejected(
+                    f"{path}: historical work document has invalid frontmatter"
+                ) from error
+            document = _parse_yaml(
+                "\n".join(lines[1:end]),
+                f"{path}@{revision}",
+            )
+            historical_claim = document["claim"]
+            if historical_claim is not None:
+                claim_ids.add(historical_claim["id"])
+                worker_run_ids.add(historical_claim["worker_run_id"])
+        return claim_ids, worker_run_ids
 
     def _apply(self, checkout: Path, changes: tuple[FileChange, ...]) -> None:
         for change in changes:

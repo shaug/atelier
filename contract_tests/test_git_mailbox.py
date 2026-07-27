@@ -18,6 +18,7 @@ from skills.atelier.scripts.git_mailbox import (
     FileChange,
     GitMailboxWriter,
     MailboxPersistenceUnknown,
+    MailboxReadBackError,
     MailboxRemoteUnavailable,
     MailboxTransitionRejected,
     PendingWrite,
@@ -438,6 +439,56 @@ class GitMailboxWriteContract(unittest.TestCase):
             ),
         )
         self.assertEqual(ancestor.returncode, 0)
+
+    def test_ambiguous_recovery_fails_closed_after_canonical_divergence(self) -> None:
+        path, content = planner_message(self.work_id, 1)
+        writer = self.writer(runner=LostPushResponse())
+        with self.assertRaises(MailboxPersistenceUnknown) as raised:
+            writer.publish(
+                "append before recovery divergence",
+                revalidate=lambda context: None,
+                plan=lambda context: TransitionPlan(
+                    "append before recovery divergence",
+                    (FileChange(path, content),),
+                ),
+            )
+        pending = raised.exception.pending
+        tree = git(
+            None,
+            "--git-dir",
+            str(self.remote),
+            "rev-parse",
+            f"{pending.base_revision}^{{tree}}",
+        ).stdout.strip()
+        divergent = git(
+            None,
+            "--git-dir",
+            str(self.remote),
+            "-c",
+            "user.name=Atelier Test",
+            "-c",
+            "user.email=atelier-test@invalid",
+            "commit-tree",
+            tree,
+            "-m",
+            "divergent canonical root",
+        ).stdout.strip()
+        git(
+            None,
+            "--git-dir",
+            str(self.remote),
+            "update-ref",
+            "refs/heads/main",
+            divergent,
+            pending.commit,
+        )
+
+        with self.assertRaisesRegex(
+            MailboxReadBackError,
+            "could not verify canonical branch continuity",
+        ):
+            self.writer().recover(pending)
+        self.assertEqual(self.remote_head(), divergent)
 
     def test_timeout_after_success_enters_exact_read_back_recovery(self) -> None:
         path, content = planner_message(self.work_id, 1)
@@ -1140,6 +1191,95 @@ class GitMailboxWriteContract(unittest.TestCase):
             )
         self.assertEqual(self.remote_head(), before)
 
+    def test_new_claim_requires_empty_checkpoint_and_fresh_identities(self) -> None:
+        path = f"work/{self.work_id}/work.md"
+        prepopulated = fixtures.claim(self.repository, 1, with_candidate=True)
+        before = self.remote_head()
+
+        def install_prepopulated(context: TransitionContext) -> TransitionPlan:
+            work = read_markdown(context.checkout / path)
+            work["status"] = "active"
+            work["claim"] = copy.deepcopy(prepopulated)
+            return TransitionPlan(
+                "install prepopulated claim",
+                (FileChange(path, markdown(work)),),
+            )
+
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "new claim must begin with an empty checkpoint ledger",
+        ):
+            self.writer().publish(
+                "install prepopulated claim",
+                revalidate=lambda context: None,
+                plan=install_prepopulated,
+            )
+        self.assertEqual(self.remote_head(), before)
+
+        released_claim = self._claim(with_candidate=False)
+
+        def release_without_replacement(context: TransitionContext) -> TransitionPlan:
+            work = read_markdown(context.checkout / path)
+            work["status"] = "approved"
+            work["claim"] = None
+            return TransitionPlan(
+                "release current claim",
+                (FileChange(path, markdown(work)),),
+            )
+
+        self.writer().publish(
+            "release current claim",
+            revalidate=lambda context: None,
+            plan=release_without_replacement,
+        )
+        released_head = self.remote_head()
+
+        def reuse_released_identity(context: TransitionContext) -> TransitionPlan:
+            work = read_markdown(context.checkout / path)
+            work["status"] = "active"
+            work["claim"] = copy.deepcopy(released_claim)
+            return TransitionPlan(
+                "reuse released claim identity",
+                (FileChange(path, markdown(work)),),
+            )
+
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "released or replaced claim identities cannot become current again",
+        ):
+            self.writer().publish(
+                "reuse released claim identity",
+                revalidate=lambda context: None,
+                plan=reuse_released_identity,
+            )
+        self.assertEqual(self.remote_head(), released_head)
+
+    def test_same_claim_candidate_rebinding_requires_publication_checkpoint(self) -> None:
+        self._claim(with_candidate=True)
+        path = f"work/{self.work_id}/work.md"
+        before = self.remote_head()
+
+        def rebind_candidate(context: TransitionContext) -> TransitionPlan:
+            work = read_markdown(context.checkout / path)
+            work["claim"]["candidate"]["remote_ref"] = (
+                "refs/heads/scott/rebound-candidate"
+            )
+            return TransitionPlan(
+                "rebind candidate without checkpoint",
+                (FileChange(path, markdown(work)),),
+            )
+
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "candidate changes require one publication checkpoint",
+        ):
+            self.writer().publish(
+                "rebind candidate without checkpoint",
+                revalidate=lambda context: None,
+                plan=rebind_candidate,
+            )
+        self.assertEqual(self.remote_head(), before)
+
     def test_option_looking_remote_is_rejected_before_git_runs(self) -> None:
         calls: list[tuple[str, ...]] = []
 
@@ -1173,7 +1313,7 @@ class GitMailboxWriteContract(unittest.TestCase):
         claim_value = fixtures.claim(
             self.repository,
             1,
-            with_candidate=with_candidate,
+            with_candidate=False,
         )
 
         def plan(context: TransitionContext) -> TransitionPlan:
@@ -1190,4 +1330,44 @@ class GitMailboxWriteContract(unittest.TestCase):
             revalidate=lambda context: None,
             plan=plan,
         )
+        if not with_candidate:
+            return claim_value
+
+        published_claim = fixtures.claim(self.repository, 1, with_candidate=True)
+        for authorization in published_claim["checkpoint"]["authorizations"]:
+            claim_value["checkpoint"]["authorizations"].append(copy.deepcopy(authorization))
+            claim_value["checkpoint"]["sequence"] = authorization["sequence"]
+            claim_value["checkpoint"]["continuation_token"] = (
+                f"token-1-{authorization['sequence']}"
+            )
+            if authorization["phase"] == "candidate_published":
+                claim_value["candidate"] = copy.deepcopy(published_claim["candidate"])
+
+            checkpoint_claim = copy.deepcopy(claim_value)
+            checkpoint_number = authorization["sequence"]
+
+            def checkpoint(
+                context: TransitionContext,
+                checkpoint_claim: dict[str, Any] = checkpoint_claim,
+                checkpoint_number: int = checkpoint_number,
+            ) -> TransitionPlan:
+                work = read_markdown(
+                    context.checkout / f"work/{self.work_id}/work.md"
+                )
+                work["claim"] = copy.deepcopy(checkpoint_claim)
+                return TransitionPlan(
+                    f"advance checkpoint {checkpoint_number}",
+                    (
+                        FileChange(
+                            f"work/{self.work_id}/work.md",
+                            markdown(work),
+                        ),
+                    ),
+                )
+
+            self.writer().publish(
+                f"advance checkpoint {checkpoint_number}",
+                revalidate=lambda context: None,
+                plan=checkpoint,
+            )
         return claim_value
