@@ -396,13 +396,23 @@ def _schema_diagnostics(
                     Diagnostic(document, "schema-pattern", f"{at} is malformed")
                 )
         if schema.get("format") == "date-time":
-            try:
-                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            except ValueError:
+            if re.fullmatch(
+                r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})",
+                value,
+            ) is None:
                 parsed = None
+            else:
+                try:
+                    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                except ValueError:
+                    parsed = None
             if parsed is None or parsed.utcoffset() is None:
                 diagnostics.append(
-                    Diagnostic(document, "schema-date-time", f"{at} must include a UTC offset")
+                    Diagnostic(
+                        document,
+                        "schema-date-time",
+                        f"{at} must be an RFC 3339 timestamp with a UTC offset",
+                    )
                 )
     if isinstance(value, int) and not isinstance(value, bool):
         if value < schema.get("minimum", value):
@@ -560,6 +570,29 @@ def _github_object_url(
     return object_id is None or path_parts[3] == object_id
 
 
+def _github_remote_url(url: str, *, repository: str) -> bool:
+    if not repository.startswith("github:"):
+        return False
+    expected = repository.removeprefix("github:").removesuffix(".git").lower()
+    scp_match = re.fullmatch(r"git@github\.com:(.+)", url, flags=re.IGNORECASE)
+    if scp_match is not None:
+        actual = scp_match.group(1).removesuffix(".git").lower()
+        return actual == expected
+    parsed = urlsplit(url)
+    if parsed.query or parsed.fragment or parsed.hostname != "github.com":
+        return False
+    if parsed.scheme == "ssh":
+        if parsed.username != "git" or parsed.password is not None:
+            return False
+    elif parsed.scheme == "https":
+        if parsed.username is not None or parsed.password is not None:
+            return False
+    else:
+        return False
+    actual = parsed.path.strip("/").removesuffix(".git").lower()
+    return actual == expected
+
+
 def _candidate_reference_diagnostics(
     path: str, candidate: dict[str, Any] | None
 ) -> list[Diagnostic]:
@@ -569,6 +602,14 @@ def _candidate_reference_diagnostics(
     if not _valid_branch_ref(candidate["remote_ref"]):
         diagnostics.append(
             Diagnostic(path, "git-ref", "candidate remote_ref is not a valid full Git branch ref")
+        )
+    if not _github_remote_url(candidate["remote_url"], repository=candidate["repository"]):
+        diagnostics.append(
+            Diagnostic(
+                path,
+                "candidate-remote-url",
+                "candidate remote URL contradicts its repository",
+            )
         )
     pull_request = candidate["pull_request"]
     if pull_request is not None and not _github_object_url(
@@ -1023,6 +1064,18 @@ def _validate_lifecycle(
                     "attempt receipt does not name the approved revision",
                 )
             )
+        if (
+            status == "approved"
+            and attempt_receipt is not None
+            and attempt_receipt["outcome"] != "released"
+        ):
+            diagnostics.append(
+                Diagnostic(
+                    path,
+                    "attempt-outcome",
+                    "approved work may retain only its latest released attempt receipt",
+                )
+            )
         if claim is not None and status in {"blocked", "delivered"} and (
             attempt_receipt is None
             or attempt_receipt["claim_id"] != claim["id"]
@@ -1070,6 +1123,47 @@ def _validate_lifecycle(
     return diagnostics
 
 
+def _global_identity_diagnostics(
+    projects: dict[str, dict[str, Any]],
+    initiatives: dict[str, dict[str, Any]],
+    works: dict[str, dict[str, Any]],
+    messages: dict[str, dict[str, dict[str, Any]]],
+    receipts: dict[str, dict[str, dict[str, Any]]],
+) -> list[Diagnostic]:
+    diagnostics: list[Diagnostic] = []
+    owners: dict[str, str] = {}
+
+    def record(identifier: str, path: str) -> None:
+        prior = owners.get(identifier)
+        if prior is not None:
+            diagnostics.append(
+                Diagnostic(
+                    path,
+                    "identity-collision",
+                    f"{identifier} is already owned by {prior}",
+                )
+            )
+        else:
+            owners[identifier] = path
+
+    for project_id in sorted(projects):
+        record(project_id, f"projects/{project_id}/project.md")
+    for initiative_id in sorted(initiatives):
+        record(initiative_id, f"initiatives/{initiative_id}/initiative.md")
+    for work_id, work in sorted(works.items()):
+        work_path = f"work/{work_id}/work.md"
+        record(work_id, work_path)
+        claim = work["claim"]
+        if claim is not None:
+            record(claim["id"], work_path)
+            record(claim["worker_run_id"], work_path)
+        for message_id in sorted(messages[work_id]):
+            record(message_id, f"work/{work_id}/messages/{message_id}.md")
+        for receipt_id in sorted(receipts[work_id]):
+            record(receipt_id, f"work/{work_id}/receipts/{receipt_id}.md")
+    return diagnostics
+
+
 def _validate_relationships(
     projects: dict[str, dict[str, Any]],
     initiatives: dict[str, dict[str, Any]],
@@ -1077,7 +1171,9 @@ def _validate_relationships(
     messages: dict[str, dict[str, dict[str, Any]]],
     receipts: dict[str, dict[str, dict[str, Any]]],
 ) -> None:
-    diagnostics: list[Diagnostic] = []
+    diagnostics = _global_identity_diagnostics(
+        projects, initiatives, works, messages, receipts
+    )
     repositories: dict[str, str] = {}
     active_by_project: dict[str, list[str]] = {}
     for project_id, project in projects.items():

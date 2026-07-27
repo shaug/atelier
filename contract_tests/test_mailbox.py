@@ -790,6 +790,64 @@ class MailboxContract(unittest.TestCase):
         self.fixture.write_work(work_id)
         self.assert_invalid("candidate-pull-request")
 
+    def test_approved_work_retains_only_a_released_attempt(self) -> None:
+        work_id = self.fixture.add_work(1, "blocked")
+        work = self.fixture.works[work_id]
+        work["status"] = "approved"
+        work["claim"] = None
+        work["blocking_message_id"] = None
+        self.fixture.write_work(work_id)
+
+        self.assert_invalid("attempt-outcome")
+
+    def test_generated_identifiers_are_global_across_work_threads(self) -> None:
+        first = self.fixture.add_work(1, "delivered")
+        second = self.fixture.add_work(2, "delivered")
+        first_work = self.fixture.works[first]
+        second_work = self.fixture.works[second]
+        first_receipt_id = first_work["delivery_receipt_id"]
+        second_receipt_id = second_work["delivery_receipt_id"]
+        second_receipt = self.fixture.receipts[second].pop(second_receipt_id)
+        second_receipt["id"] = first_receipt_id
+        second_receipt["claim_id"] = first_work["claim"]["id"]
+        second_receipt["worker_run_id"] = first_work["claim"]["worker_run_id"]
+        self.fixture.receipts[second][first_receipt_id] = second_receipt
+        second_work["claim"]["id"] = first_work["claim"]["id"]
+        second_work["claim"]["worker_run_id"] = first_work["claim"]["worker_run_id"]
+        for entry in second_work["claim"]["checkpoint"]["authorizations"]:
+            entry["invocation_id"] = first_work["claim"]["worker_run_id"]
+        second_work["attempt_receipt_id"] = first_receipt_id
+        second_work["delivery_receipt_id"] = first_receipt_id
+        self.fixture.write_work(second)
+
+        self.assert_invalid("identity-collision")
+
+    def test_timestamps_and_candidate_remote_urls_fail_closed(self) -> None:
+        work_id = self.fixture.add_work(1, "delivered")
+        work = self.fixture.works[work_id]
+        receipt_id = work["delivery_receipt_id"]
+        invalid_timestamp = "2026-07-27 12:00:00+00:00"
+        work["claim"]["candidate"]["published_at"] = invalid_timestamp
+        self.fixture.receipts[work_id][receipt_id]["candidate"][
+            "published_at"
+        ] = invalid_timestamp
+        self.fixture.write_work(work_id)
+        self.assert_invalid("schema-one-of")
+
+        shutil.rmtree(self.root)
+        self.root.mkdir()
+        self.fixture = MailboxFixture(self.root)
+        work_id = self.fixture.add_work(1, "delivered")
+        work = self.fixture.works[work_id]
+        receipt_id = work["delivery_receipt_id"]
+        mismatched_remote = "git@github.com:another/project.git"
+        work["claim"]["candidate"]["remote_url"] = mismatched_remote
+        self.fixture.receipts[work_id][receipt_id]["candidate"][
+            "remote_url"
+        ] = mismatched_remote
+        self.fixture.write_work(work_id)
+        self.assert_invalid("candidate-remote-url")
+
     def test_delivery_and_acceptance_bind_exact_receipt_candidate(self) -> None:
         work_id = self.fixture.add_work(1, "accepted")
         self.fixture.works[work_id]["acceptance"]["candidate_revision"] = "d" * 40
