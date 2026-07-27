@@ -170,7 +170,7 @@ def claim(repository: str, number: int, *, with_candidate: bool) -> dict[str, An
                 "phase": "pre_external_mutation",
                 "action": "repository.candidate.push",
                 "proposed_effect_digest": DIGEST,
-                "candidate_head": None,
+                "candidate_head": SHA_B,
                 "acknowledged_candidate_head": None,
                 "recorded_at": TIMESTAMP,
             },
@@ -792,6 +792,32 @@ class MailboxContract(unittest.TestCase):
         self.fixture.write_work(work_id)
         self.assert_invalid("checkpoint-sequence")
 
+    def test_checkpoint_ledger_respects_authority_and_phase_semantics(self) -> None:
+        work_id = self.fixture.add_work(1, "delivered")
+        work = self.fixture.works[work_id]
+        work["approval"]["authority_ceiling"].remove("repository.candidate.push")
+        self.fixture.write_work(work_id)
+        self.assert_invalid("checkpoint-authority")
+
+        shutil.rmtree(self.root)
+        self.root.mkdir()
+        self.fixture = MailboxFixture(self.root)
+        work_id = self.fixture.add_work(1, "delivered")
+        ledger = self.fixture.works[work_id]["claim"]["checkpoint"]["authorizations"]
+        ledger[-1]["action"] = "review.reply"
+        self.fixture.write_work(work_id)
+        self.assert_invalid("checkpoint-phase")
+
+        ledger[-1]["action"] = "repository.candidate.push"
+        ledger[0]["acknowledged_candidate_head"] = SHA_B
+        self.fixture.write_work(work_id)
+        self.assert_invalid("checkpoint-acknowledgement")
+
+        ledger[0]["acknowledged_candidate_head"] = None
+        ledger[0]["candidate_head"] = None
+        self.fixture.write_work(work_id)
+        self.assert_invalid("checkpoint-candidate")
+
     def test_current_candidate_requires_publication_acknowledgement(self) -> None:
         work_id = self.fixture.add_work(1, "delivered")
         checkpoint = self.fixture.works[work_id]["claim"]["checkpoint"]
@@ -815,7 +841,7 @@ class MailboxContract(unittest.TestCase):
                     "phase": "pre_external_mutation",
                     "action": "repository.candidate.push",
                     "proposed_effect_digest": DIGEST,
-                    "candidate_head": SHA_B,
+                    "candidate_head": next_head,
                     "acknowledged_candidate_head": None,
                     "recorded_at": TIMESTAMP,
                 },
@@ -871,6 +897,28 @@ class MailboxContract(unittest.TestCase):
         work["claim"]["candidate"] = None
         self.fixture.write_work(work_id)
         self.assert_invalid("candidate-acknowledgement")
+
+    def test_released_execution_identity_cannot_become_current_again(self) -> None:
+        work_id = self.fixture.add_work(1, "active")
+        work = self.fixture.works[work_id]
+        repository = self.fixture.projects[work["project_id"]]["repository"]
+        work["claim"] = claim(repository, 1, with_candidate=True)
+        released = receipt(
+            work,
+            repository,
+            2,
+            outcome="released",
+            with_candidate=True,
+        )
+        released["claim_id"] = work["claim"]["id"]
+        released["worker_run_id"] = work["claim"]["worker_run_id"]
+        released["candidate"] = copy.deepcopy(work["claim"]["candidate"])
+        released["mutation_ownership"] = "relinquished"
+        work["attempt_receipt_id"] = released["id"]
+        self.fixture.receipts[work_id][released["id"]] = released
+        self.fixture.write_work(work_id)
+
+        self.assert_invalid("released-claim-identity")
 
     def test_git_refs_and_github_reference_identities_fail_closed(self) -> None:
         work_id = self.fixture.add_work(1, "delivered")

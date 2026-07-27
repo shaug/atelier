@@ -36,6 +36,13 @@ WORK_STATES = {
     "cancelled",
 }
 ACTIVE_STATES = {"active", "blocked", "delivered"}
+CANDIDATE_REQUIRED_ACTIONS = {
+    "repository.candidate.push",
+    "pull_request.create",
+    "pull_request.update",
+    "review.reply",
+    "review.resolve",
+}
 
 
 @dataclass(frozen=True)
@@ -930,6 +937,50 @@ def _validate_claim(
         diagnostics.append(
             Diagnostic(path, "checkpoint-invocation", "authorization names another worker run")
         )
+    authority_ceiling = set(approval["authority_ceiling"]) if approval is not None else set()
+    for entry in ledger:
+        action = entry["action"]
+        phase = entry["phase"]
+        candidate_head = entry["candidate_head"]
+        acknowledged_head = entry["acknowledged_candidate_head"]
+        if action not in authority_ceiling:
+            diagnostics.append(
+                Diagnostic(
+                    path,
+                    "checkpoint-authority",
+                    f"authorization action {action!r} exceeds the approved authority ceiling",
+                )
+            )
+        if phase == "candidate_published":
+            if (
+                action != "repository.candidate.push"
+                or candidate_head is None
+                or acknowledged_head != candidate_head
+            ):
+                diagnostics.append(
+                    Diagnostic(
+                        path,
+                        "checkpoint-phase",
+                        "candidate_published must acknowledge an exact repository candidate push",
+                    )
+                )
+        else:
+            if acknowledged_head is not None:
+                diagnostics.append(
+                    Diagnostic(
+                        path,
+                        "checkpoint-acknowledgement",
+                        "pre_external_mutation must not acknowledge a candidate",
+                    )
+                )
+            if action in CANDIDATE_REQUIRED_ACTIONS and candidate_head is None:
+                diagnostics.append(
+                    Diagnostic(
+                        path,
+                        "checkpoint-candidate",
+                        f"authorization action {action!r} requires an exact candidate head",
+                    )
+                )
     candidate = claim["candidate"]
     publication_entries = [entry for entry in ledger if entry["phase"] == "candidate_published"]
     internally_invalid = any(
@@ -1051,6 +1102,21 @@ def _validate_lifecycle(
             Diagnostic(path, "approval-revision", "approval does not name the current revision")
         )
     diagnostics.extend(_validate_claim(work_id, work, attempt_receipt))
+    if claim is not None and any(
+        receipt["outcome"] == "released"
+        and (
+            receipt["claim_id"] == claim["id"]
+            or receipt["worker_run_id"] == claim["worker_run_id"]
+        )
+        for receipt in work_receipts.values()
+    ):
+        diagnostics.append(
+            Diagnostic(
+                path,
+                "released-claim-identity",
+                "current claim reuses an execution identity terminated by a release",
+            )
+        )
 
     resolutions: dict[str, list[str]] = {}
     for message_id, message in work_messages.items():
