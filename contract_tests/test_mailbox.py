@@ -852,6 +852,10 @@ class MailboxContract(unittest.TestCase):
 
         self.assertEqual(snapshot["views"]["active"], [work_id])
 
+        work["claim"]["candidate"] = None
+        self.fixture.write_work(work_id)
+        self.assert_invalid("candidate-acknowledgement")
+
     def test_git_refs_and_github_reference_identities_fail_closed(self) -> None:
         work_id = self.fixture.add_work(1, "delivered")
         work = self.fixture.works[work_id]
@@ -1028,6 +1032,18 @@ class MailboxContract(unittest.TestCase):
         project_id, _ = self.fixture.add_project(1)
         (self.root / "projects" / project_id / "cache.json").write_text("{}\n")
         self.assert_invalid("layout")
+
+    def test_malformed_single_quoted_yaml_fails_closed(self) -> None:
+        project_id, _ = self.fixture.add_project(1)
+        project_path = self.root / "projects" / project_id / "project.md"
+        project_path.write_text(
+            project_path.read_text(encoding="utf-8").replace(
+                'name: "Project 1"',
+                "name: 'foo'bar'",
+            ),
+            encoding="utf-8",
+        )
+        self.assert_invalid("yaml-string")
 
     def test_symbolic_links_cannot_supply_normative_documents(self) -> None:
         outside = Path(self.temporary.name) / "outside"

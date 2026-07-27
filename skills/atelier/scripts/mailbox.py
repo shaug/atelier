@@ -174,7 +174,20 @@ def _parse_scalar(value: str, path: str, line_number: int) -> Any:
     if value.startswith("'"):
         if len(value) < 2 or not value.endswith("'"):
             raise _fail(path, "yaml-string", f"line {line_number} has an unterminated string")
-        return value[1:-1].replace("''", "'")
+        inner = value[1:-1]
+        index = 0
+        while index < len(inner):
+            if inner[index] != "'":
+                index += 1
+                continue
+            if index + 1 == len(inner) or inner[index + 1] != "'":
+                raise _fail(
+                    path,
+                    "yaml-string",
+                    f"line {line_number} has an invalid single-quoted string",
+                )
+            index += 2
+        return inner.replace("''", "'")
     if value[0] in "!&*|>@`" or value.endswith(":"):
         raise _fail(
             path,
@@ -901,12 +914,15 @@ def _validate_claim(
         or entry["acknowledged_candidate_head"] != entry["candidate_head"]
         for entry in publication_entries
     )
+    transferable_handoff = (
+        attempt_receipt is not None
+        and attempt_receipt["handoff"] == "transferable"
+        and attempt_receipt["claim_id"] != claim["id"]
+    )
     inherited_candidate = (
         candidate is not None
         and not publication_entries
-        and attempt_receipt is not None
-        and attempt_receipt["handoff"] == "transferable"
-        and attempt_receipt["claim_id"] != claim["id"]
+        and transferable_handoff
         and attempt_receipt["candidate"] == candidate
     )
     current_unacknowledged = (
@@ -917,7 +933,15 @@ def _validate_claim(
             or publication_entries[-1]["candidate_head"] != candidate["head_revision"]
         )
     )
-    if internally_invalid or current_unacknowledged or (candidate is None and publication_entries):
+    discarded_handoff = transferable_handoff and (
+        candidate is None or attempt_receipt["candidate"] != candidate
+    )
+    if (
+        internally_invalid
+        or current_unacknowledged
+        or discarded_handoff
+        or (candidate is None and publication_entries)
+    ):
         diagnostics.append(
             Diagnostic(
                 path,
