@@ -19,6 +19,9 @@ mismatches, invalid lifecycle combinations, duplicate normative documents,
 contradictory cross-document references, dependency cycles, and concurrent
 active work for one project fail closed with path-specific diagnostics.
 
+A non-null candidate `workspace_id` is an opaque durable host identifier using
+only letters, digits, `.`, `_`, `:`, `@`, or `-`. Filesystem paths are invalid.
+
 ## Fresh-clone reconstruction
 
 Run:

@@ -611,6 +611,17 @@ def _candidate_reference_diagnostics(
                 "candidate remote URL contradicts its repository",
             )
         )
+    workspace_id = candidate["workspace_id"]
+    if workspace_id is not None and re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}", workspace_id
+    ) is None:
+        diagnostics.append(
+            Diagnostic(
+                path,
+                "workspace-id",
+                "candidate workspace_id must be an opaque durable host identifier",
+            )
+        )
     pull_request = candidate["pull_request"]
     if pull_request is not None and not _github_object_url(
         pull_request,

@@ -879,6 +879,35 @@ class MailboxContract(unittest.TestCase):
         self.fixture.write_work(work_id)
         self.assert_invalid("candidate-remote-url")
 
+    def test_workspace_id_is_portable_and_not_a_machine_local_path(self) -> None:
+        work_id = self.fixture.add_work(1, "delivered")
+        work = self.fixture.works[work_id]
+        receipt_id = work["delivery_receipt_id"]
+        durable_id = "codex:task-019f9a9e"
+        work["claim"]["candidate"]["workspace_id"] = durable_id
+        self.fixture.receipts[work_id][receipt_id]["candidate"]["workspace_id"] = durable_id
+        self.fixture.write_work(work_id)
+        snapshot = MAILBOX.reconstruct_mailbox(self.root)
+        self.assertEqual(snapshot["views"]["delivered"], [work_id])
+
+        for machine_path in (
+            "/Users/alice/private/worktree",
+            r"C:\Users\alice\private\worktree",
+        ):
+            with self.subTest(machine_path=machine_path):
+                shutil.rmtree(self.root)
+                self.root.mkdir()
+                self.fixture = MailboxFixture(self.root)
+                work_id = self.fixture.add_work(1, "delivered")
+                work = self.fixture.works[work_id]
+                receipt_id = work["delivery_receipt_id"]
+                work["claim"]["candidate"]["workspace_id"] = machine_path
+                self.fixture.receipts[work_id][receipt_id]["candidate"][
+                    "workspace_id"
+                ] = machine_path
+                self.fixture.write_work(work_id)
+                self.assert_invalid("schema-one-of")
+
     def test_delivery_and_acceptance_bind_exact_receipt_candidate(self) -> None:
         work_id = self.fixture.add_work(1, "accepted")
         self.fixture.works[work_id]["acceptance"]["candidate_revision"] = "d" * 40

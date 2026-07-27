@@ -187,7 +187,7 @@
           ]
         },
         "workspace_id": {
-          "$ref": "#/$defs/nullable_string"
+          "$ref": "#/$defs/nullable_workspace_id"
         },
         "published_at": {
           "$ref": "#/$defs/timestamp"
@@ -546,13 +546,14 @@
         }
       ]
     },
-    "nullable_string": {
+    "nullable_workspace_id": {
       "oneOf": [
         {
           "type": "null"
         },
         {
-          "$ref": "#/$defs/nonempty_string"
+          "type": "string",
+          "pattern": "[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}"
         }
       ]
     },
