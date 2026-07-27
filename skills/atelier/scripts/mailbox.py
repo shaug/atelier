@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCHEMA = ROOT / "references" / "mailbox-v1.schema.json"
@@ -277,8 +278,10 @@ def _parse_yaml(text: str, path: str) -> dict[str, Any]:
     return parsed
 
 
-def _read_yaml(path: Path, *, frontmatter: bool) -> tuple[dict[str, Any], str]:
-    label = path.as_posix()
+def _read_yaml(
+    path: Path, *, frontmatter: bool, label: str | None = None
+) -> tuple[dict[str, Any], str]:
+    label = label or path.as_posix()
     if path.is_symlink():
         raise _fail(label, "symlink", "normative documents must not be symbolic links")
     try:
@@ -499,7 +502,88 @@ def validate_project_policy(
         schema_bundle=_load_schema(schema_path),
         expected_schema="atelier.project-policy/v1",
     )
+    if not _valid_branch_ref(value["repository"]["canonical_ref"]):
+        raise _fail(
+            path.as_posix(),
+            "git-ref",
+            "repository canonical_ref is not a valid full Git branch ref",
+        )
     return value
+
+
+def _valid_branch_ref(value: str) -> bool:
+    if not value.startswith("refs/heads/") or value.endswith(("/", ".")):
+        return False
+    if ".." in value or "@{" in value:
+        return False
+    if any(ord(character) < 32 or ord(character) == 127 for character in value):
+        return False
+    if any(character in " ~^:?*[\\\\" for character in value):
+        return False
+    components = value.split("/")
+    return all(
+        component
+        and not component.startswith(".")
+        and not component.endswith(".lock")
+        for component in components
+    )
+
+
+def _github_object_url(
+    url: str,
+    *,
+    repository: str,
+    object_kind: str,
+    object_id: str | None = None,
+) -> bool:
+    if not repository.startswith("github:"):
+        return False
+    parsed = urlsplit(url)
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc.lower() != "github.com"
+        or parsed.query
+        or parsed.fragment
+    ):
+        return False
+    repository_parts = repository.removeprefix("github:").split("/")
+    path_parts = parsed.path.strip("/").split("/")
+    if (
+        len(repository_parts) != 2
+        or len(path_parts) != 4
+        or [part.lower() for part in path_parts[:2]]
+        != [part.lower() for part in repository_parts]
+        or path_parts[2] != object_kind
+        or not path_parts[3].isdigit()
+    ):
+        return False
+    return object_id is None or path_parts[3] == object_id
+
+
+def _candidate_reference_diagnostics(
+    path: str, candidate: dict[str, Any] | None
+) -> list[Diagnostic]:
+    if candidate is None:
+        return []
+    diagnostics: list[Diagnostic] = []
+    if not _valid_branch_ref(candidate["remote_ref"]):
+        diagnostics.append(
+            Diagnostic(path, "git-ref", "candidate remote_ref is not a valid full Git branch ref")
+        )
+    pull_request = candidate["pull_request"]
+    if pull_request is not None and not _github_object_url(
+        pull_request,
+        repository=candidate["repository"],
+        object_kind="pull",
+    ):
+        diagnostics.append(
+            Diagnostic(
+                path,
+                "candidate-pull-request",
+                "candidate pull-request URL contradicts its repository",
+            )
+        )
+    return diagnostics
 
 
 def _expected_child_directories(root: Path, name: str) -> list[Path]:
@@ -595,7 +679,7 @@ def _load_documents(
     dict[str, dict[str, dict[str, Any]]],
 ]:
     manifest_path = root / "atelier.yaml"
-    manifest, _ = _read_yaml(manifest_path, frontmatter=False)
+    manifest, _ = _read_yaml(manifest_path, frontmatter=False, label="atelier.yaml")
     validate_document(
         manifest,
         path="atelier.yaml",
@@ -612,7 +696,7 @@ def _load_documents(
 
     for directory in _expected_child_directories(root, "projects"):
         relative = f"projects/{directory.name}/project.md"
-        value, _ = _read_yaml(root / relative, frontmatter=True)
+        value, _ = _read_yaml(root / relative, frontmatter=True, label=relative)
         validate_document(
             value,
             path=relative,
@@ -627,7 +711,7 @@ def _load_documents(
 
     for directory in _expected_child_directories(root, "initiatives"):
         relative = f"initiatives/{directory.name}/initiative.md"
-        value, _ = _read_yaml(root / relative, frontmatter=True)
+        value, _ = _read_yaml(root / relative, frontmatter=True, label=relative)
         validate_document(
             value,
             path=relative,
@@ -642,7 +726,7 @@ def _load_documents(
 
     for directory in _expected_child_directories(root, "work"):
         relative = f"work/{directory.name}/work.md"
-        value, _ = _read_yaml(root / relative, frontmatter=True)
+        value, _ = _read_yaml(root / relative, frontmatter=True, label=relative)
         validate_document(
             value,
             path=relative,
@@ -665,7 +749,7 @@ def _load_documents(
                 continue
             for path in sorted(child_root.glob("*.md")):
                 child_relative = path.relative_to(root).as_posix()
-                child, _ = _read_yaml(path, frontmatter=True)
+                child, _ = _read_yaml(path, frontmatter=True, label=child_relative)
                 validate_document(
                     child,
                     path=child_relative,
@@ -724,7 +808,11 @@ def _check_dependency_cycles(works: dict[str, dict[str, Any]]) -> list[Diagnosti
     return diagnostics
 
 
-def _validate_claim(work_id: str, work: dict[str, Any]) -> list[Diagnostic]:
+def _validate_claim(
+    work_id: str,
+    work: dict[str, Any],
+    attempt_receipt: dict[str, Any] | None,
+) -> list[Diagnostic]:
     claim = work["claim"]
     if claim is None:
         return []
@@ -757,8 +845,17 @@ def _validate_claim(work_id: str, work: dict[str, Any]) -> list[Diagnostic]:
         or entry["acknowledged_candidate_head"] != entry["candidate_head"]
         for entry in publication_entries
     )
+    inherited_candidate = (
+        candidate is not None
+        and not publication_entries
+        and attempt_receipt is not None
+        and attempt_receipt["handoff"] == "transferable"
+        and attempt_receipt["claim_id"] != claim["id"]
+        and attempt_receipt["candidate"] == candidate
+    )
     current_unacknowledged = (
         candidate is not None
+        and not inherited_candidate
         and (
             not publication_entries
             or publication_entries[-1]["candidate_head"] != candidate["head_revision"]
@@ -786,6 +883,7 @@ def _validate_lifecycle(
     claim = work["claim"]
     blocker = work["blocking_message_id"]
     attempt = work["attempt_receipt_id"]
+    attempt_receipt = work_receipts.get(attempt) if attempt is not None else None
     delivery = work["delivery_receipt_id"]
     acceptance = work["acceptance"]
     status = work["status"]
@@ -849,7 +947,7 @@ def _validate_lifecycle(
         diagnostics.append(
             Diagnostic(path, "approval-revision", "approval does not name the current revision")
         )
-    diagnostics.extend(_validate_claim(work_id, work))
+    diagnostics.extend(_validate_claim(work_id, work, attempt_receipt))
 
     resolutions: dict[str, list[str]] = {}
     for message_id, message in work_messages.items():
@@ -912,7 +1010,6 @@ def _validate_lifecycle(
                 Diagnostic(path, "blocking-message", "current blocker is missing or resolved")
             )
 
-    attempt_receipt = work_receipts.get(attempt) if attempt is not None else None
     if attempt is not None:
         if attempt_receipt is None:
             diagnostics.append(
@@ -1038,6 +1135,19 @@ def _validate_relationships(
                 diagnostics.append(
                         Diagnostic(path, "ticket-provider", "ticket provider contradicts project")
                 )
+            if native_ticket["provider"] == "github" and not _github_object_url(
+                native_ticket["url"],
+                repository=project["repository"],
+                object_kind="issues",
+                object_id=native_ticket["id"],
+            ):
+                diagnostics.append(
+                    Diagnostic(
+                        path,
+                        "ticket-url",
+                        "native ticket URL contradicts its repository or identifier",
+                    )
+                )
         approval = work["approval"]
         if project is not None and approval is not None:
             if approval["policy"]["repository"] != project["repository"]:
@@ -1057,6 +1167,7 @@ def _validate_relationships(
             diagnostics.append(
                 Diagnostic(path, "candidate-repository", "candidate belongs to another project")
             )
+        diagnostics.extend(_candidate_reference_diagnostics(path, current_candidate))
         diagnostics.extend(
             _validate_lifecycle(work_id, work, messages[work_id], receipts[work_id])
         )
@@ -1083,6 +1194,9 @@ def _validate_relationships(
                     )
                 )
             receipt_candidate = receipt["candidate"]
+            diagnostics.extend(
+                _candidate_reference_diagnostics(receipt_path, receipt_candidate)
+            )
             if (
                 receipt_candidate is not None
                 and project is not None

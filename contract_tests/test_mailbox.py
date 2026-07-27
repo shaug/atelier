@@ -500,6 +500,11 @@ class MailboxContract(unittest.TestCase):
         write_yaml(path, policy)
         with self.assertRaisesRegex(MAILBOX.MailboxValidationError, "expected False"):
             MAILBOX.validate_project_policy(path)
+        policy["execution"]["parallel_assignments"] = False
+        policy["repository"]["canonical_ref"] = "refs/heads/main..malformed"
+        write_yaml(path, policy)
+        with self.assertRaisesRegex(MAILBOX.MailboxValidationError, "git-ref"):
+            MAILBOX.validate_project_policy(path)
 
     def test_fresh_clones_reconstruct_all_views_identically(self) -> None:
         initiative_id = identifier("ini", 1)
@@ -545,6 +550,34 @@ class MailboxContract(unittest.TestCase):
         self.assertEqual(first["views"]["delivered"], [delivered])
         self.assertEqual(first["views"]["accepted"], [accepted])
         self.assertEqual(first["diagnostics"], [])
+
+    def test_fresh_clones_report_identical_relative_diagnostics(self) -> None:
+        manifest = self.root / "atelier.yaml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8") + 'realm_id: "other"\n',
+            encoding="utf-8",
+        )
+        git_run(self.root, "init", "-b", "main")
+        git_run(self.root, "config", "user.name", "Atelier Contract")
+        git_run(self.root, "config", "user.email", "atelier@example.invalid")
+        git_run(self.root, "add", ".")
+        git_run(self.root, "commit", "-m", "test: freeze malformed mailbox fixture")
+        remote = Path(self.temporary.name) / "malformed-mailbox.git"
+        git_run(None, "clone", "--bare", str(self.root), str(remote))
+        first_clone = Path(self.temporary.name) / "malformed-clone-one"
+        second_clone = Path(self.temporary.name) / "malformed-clone-two"
+        git_run(None, "clone", str(remote), str(first_clone))
+        git_run(None, "clone", str(remote), str(second_clone))
+
+        def diagnostics(clone: Path) -> list[dict[str, str]]:
+            with self.assertRaises(MAILBOX.MailboxValidationError) as caught:
+                MAILBOX.reconstruct_mailbox(clone)
+            return [item.as_dict() for item in caught.exception.diagnostics]
+
+        first = diagnostics(first_clone)
+        second = diagnostics(second_clone)
+        self.assertEqual(first, second)
+        self.assertEqual(first[0]["path"], "atelier.yaml")
 
     def test_ready_work_fails_closed_without_each_external_gate(self) -> None:
         ready = self.fixture.add_work(1, "approved")
@@ -707,6 +740,55 @@ class MailboxContract(unittest.TestCase):
         snapshot = MAILBOX.reconstruct_mailbox(self.root)
 
         self.assertEqual(snapshot["views"]["delivered"], [work_id])
+
+    def test_transferable_candidate_can_be_adopted_by_a_fresh_claim(self) -> None:
+        work_id = self.fixture.add_work(1, "active")
+        work = self.fixture.works[work_id]
+        repository = self.fixture.projects[work["project_id"]]["repository"]
+        prior_claim = claim(repository, 1, with_candidate=True)
+        work["claim"] = prior_claim
+        released = receipt(
+            work,
+            repository,
+            1,
+            outcome="released",
+            with_candidate=True,
+        )
+        released["mutation_ownership"] = "relinquished"
+        work["attempt_receipt_id"] = released["id"]
+        self.fixture.receipts[work_id][released["id"]] = released
+        adopted_claim = claim(repository, 2, with_candidate=False)
+        adopted_claim["candidate"] = copy.deepcopy(prior_claim["candidate"])
+        work["claim"] = adopted_claim
+        self.fixture.write_work(work_id)
+
+        snapshot = MAILBOX.reconstruct_mailbox(self.root)
+
+        self.assertEqual(snapshot["views"]["active"], [work_id])
+
+    def test_git_refs_and_github_reference_identities_fail_closed(self) -> None:
+        work_id = self.fixture.add_work(1, "delivered")
+        work = self.fixture.works[work_id]
+        work["claim"]["candidate"]["remote_ref"] = "refs/heads/main..malformed"
+        self.fixture.write_work(work_id)
+        self.assert_invalid("git-ref")
+
+        shutil.rmtree(self.root)
+        self.root.mkdir()
+        self.fixture = MailboxFixture(self.root)
+        work_id = self.fixture.add_work(1, "delivered")
+        work = self.fixture.works[work_id]
+        work["native_ticket"]["url"] = "https://github.com/example/project-1/issues/999"
+        self.fixture.write_work(work_id)
+        self.assert_invalid("ticket-url")
+
+        work["native_ticket"]["url"] = "https://github.com/example/project-1/issues/1"
+        receipt_id = work["delivery_receipt_id"]
+        mismatched_url = "https://github.com/another/project/pull/1"
+        work["claim"]["candidate"]["pull_request"] = mismatched_url
+        self.fixture.receipts[work_id][receipt_id]["candidate"]["pull_request"] = mismatched_url
+        self.fixture.write_work(work_id)
+        self.assert_invalid("candidate-pull-request")
 
     def test_delivery_and_acceptance_bind_exact_receipt_candidate(self) -> None:
         work_id = self.fixture.add_work(1, "accepted")
