@@ -715,6 +715,28 @@ class GitMailboxWriteContract(unittest.TestCase):
             )
         self.assertEqual(self.remote_head(), before)
 
+    def test_declared_non_mailbox_paths_fail_before_push(self) -> None:
+        before = self.remote_head()
+        for path in (
+            "unexpected.txt",
+            f"work/{self.work_id}/cache.json",
+            f"projects/{fixtures.identifier('prj', 1)}/unexpected.md",
+        ):
+            with self.subTest(path=path):
+                with self.assertRaisesRegex(
+                    MailboxTransitionRejected,
+                    "unsafe mailbox path",
+                ):
+                    self.writer().publish(
+                        "declare non-mailbox file",
+                        revalidate=lambda context: None,
+                        plan=lambda context, path=path: TransitionPlan(
+                            "declare non-mailbox file",
+                            (FileChange(path, "not mailbox state\n"),),
+                        ),
+                    )
+                self.assertEqual(self.remote_head(), before)
+
     def test_callback_mutation_is_rejected_before_commit(self) -> None:
         before = self.remote_head()
 

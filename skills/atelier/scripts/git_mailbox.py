@@ -110,6 +110,39 @@ Revalidate = Callable[[TransitionContext], None]
 PlanTransition = Callable[[TransitionContext], TransitionPlan]
 
 
+def _valid_mailbox_document_path(path: PurePosixPath) -> bool:
+    parts = path.parts
+    if parts == ("atelier.yaml",):
+        return True
+    if len(parts) == 3:
+        collection, identifier, document = parts
+        return (
+            collection == "projects"
+            and identifier.startswith("prj_")
+            and document == "project.md"
+        ) or (
+            collection == "initiatives"
+            and identifier.startswith("ini_")
+            and document == "initiative.md"
+        ) or (
+            collection == "work"
+            and identifier.startswith("wrk_")
+            and document == "work.md"
+        )
+    if len(parts) == 4 and parts[0] == "work" and parts[1].startswith("wrk_"):
+        collection, document = parts[2:]
+        return (
+            collection == "messages"
+            and document.startswith("msg_")
+            and document.endswith(".md")
+        ) or (
+            collection == "receipts"
+            and document.startswith("rcp_")
+            and document.endswith(".md")
+        )
+    return False
+
+
 def run_git(
     cwd: Path | None,
     arguments: Sequence[str],
@@ -306,6 +339,7 @@ class GitMailboxWriter:
                 or change.path != pure.as_posix()
                 or ".." in pure.parts
                 or ".git" in pure.parts
+                or not _valid_mailbox_document_path(pure)
             ):
                 raise MailboxTransitionRejected(f"unsafe mailbox path: {change.path!r}")
             if change.path in by_path:
