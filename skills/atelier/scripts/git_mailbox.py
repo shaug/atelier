@@ -15,6 +15,7 @@ from typing import Any, Protocol
 from .mailbox import reconstruct_mailbox
 
 READBACK_REF = "refs/remotes/atelier/canonical"
+GIT_COMMAND_TIMEOUT_SECONDS = 30
 
 
 class MailboxWriteError(RuntimeError):
@@ -162,6 +163,8 @@ def run_git(
             "GIT_PREFIX",
         }
     }
+    environment["GIT_TERMINAL_PROMPT"] = "0"
+    environment["GCM_INTERACTIVE"] = "Never"
     return subprocess.run(
         ["git", *arguments],
         cwd=cwd,
@@ -169,6 +172,7 @@ def run_git(
         check=False,
         capture_output=True,
         text=True,
+        timeout=GIT_COMMAND_TIMEOUT_SECONDS,
     )
 
 
@@ -185,6 +189,8 @@ class GitMailboxWriter:
     ):
         if not remote:
             raise ValueError("remote must not be empty")
+        if remote.startswith("-"):
+            raise ValueError("remote must not begin with '-'")
         if max_attempts < 1:
             raise ValueError("max_attempts must be at least one")
         self.remote = remote
@@ -244,12 +250,20 @@ class GitMailboxWriter:
                     base_revision=base_revision,
                     changes=changes,
                 )
-                pushed = self._run(
-                    checkout,
-                    ("push", "--porcelain", self.remote, f"{commit}:refs/heads/{self.branch}"),
-                )
                 try:
-                    recovered = pushed.returncode != 0
+                    pushed = self._run(
+                        checkout,
+                        (
+                            "push",
+                            "--porcelain",
+                            self.remote,
+                            f"{commit}:refs/heads/{self.branch}",
+                        ),
+                    )
+                except subprocess.TimeoutExpired:
+                    pushed = None
+                try:
+                    recovered = pushed is None or pushed.returncode != 0
                     if self._read_back(checkout, pending):
                         return WriteResult(
                             operation=operation,
@@ -261,7 +275,7 @@ class GitMailboxWriter:
                         )
                 except MailboxRemoteUnavailable as error:
                     raise MailboxPersistenceUnknown(pending) from error
-                if pushed.returncode == 0:
+                if pushed is not None and pushed.returncode == 0:
                     raise MailboxReadBackError(
                         f"{operation}: successful push omitted commit {commit} from remote history"
                     )
@@ -297,15 +311,20 @@ class GitMailboxWriter:
             raise MailboxWriteError("could not initialize isolated mailbox checkout")
 
     def _fetch_current(self, checkout: Path) -> str:
-        fetched = self._run(
-            checkout,
-            (
-                "fetch",
-                "--no-tags",
-                self.remote,
-                f"+refs/heads/{self.branch}:{READBACK_REF}",
-            ),
-        )
+        try:
+            fetched = self._run(
+                checkout,
+                (
+                    "fetch",
+                    "--no-tags",
+                    self.remote,
+                    f"+refs/heads/{self.branch}:{READBACK_REF}",
+                ),
+            )
+        except subprocess.TimeoutExpired as error:
+            raise MailboxRemoteUnavailable(
+                f"canonical mailbox branch {self.branch!r} timed out"
+            ) from error
         if fetched.returncode != 0:
             raise MailboxRemoteUnavailable(
                 f"canonical mailbox branch {self.branch!r} is unavailable"
@@ -437,6 +456,17 @@ class GitMailboxWriter:
             raise MailboxTransitionRejected(
                 "committed mailbox transition differs from its declared document set"
             )
+        for change in changes:
+            shown = self._run(checkout, ("show", f"{commit}:{change.path}"))
+            if change.content is None:
+                if shown.returncode == 0:
+                    raise MailboxTransitionRejected(
+                        f"committed mailbox transition retained deleted path {change.path}"
+                    )
+            elif shown.returncode != 0 or shown.stdout != change.content:
+                raise MailboxTransitionRejected(
+                    f"committed mailbox content differs from declaration for {change.path}"
+                )
 
     def _read_back(self, checkout: Path, pending: PendingWrite) -> bool:
         self._fetch_current(checkout)

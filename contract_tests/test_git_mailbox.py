@@ -103,6 +103,37 @@ class LostPushResponse:
         return result
 
 
+class TimeoutAfterSuccessfulPush:
+    """Raise a real timeout after one push has reached the remote."""
+
+    def __init__(self):
+        self.timeout_push = True
+
+    def __call__(
+        self,
+        cwd: Path | None,
+        arguments: tuple[str, ...] | list[str],
+    ) -> subprocess.CompletedProcess[str]:
+        result = run_git(cwd, arguments)
+        if arguments and arguments[0] == "push" and self.timeout_push and result.returncode == 0:
+            self.timeout_push = False
+            raise subprocess.TimeoutExpired(["git", *arguments], timeout=1)
+        return result
+
+
+class FetchTimeout:
+    """Raise a real timeout at the first canonical fetch."""
+
+    def __call__(
+        self,
+        cwd: Path | None,
+        arguments: tuple[str, ...] | list[str],
+    ) -> subprocess.CompletedProcess[str]:
+        if arguments and arguments[0] == "fetch":
+            raise subprocess.TimeoutExpired(["git", *arguments], timeout=1)
+        return run_git(cwd, arguments)
+
+
 class AdvanceBeforeFirstPush:
     """Run one concurrent transition before allowing a stale push to continue."""
 
@@ -407,6 +438,34 @@ class GitMailboxWriteContract(unittest.TestCase):
             ),
         )
         self.assertEqual(ancestor.returncode, 0)
+
+    def test_timeout_after_success_enters_exact_read_back_recovery(self) -> None:
+        path, content = planner_message(self.work_id, 1)
+        result = self.writer(runner=TimeoutAfterSuccessfulPush()).publish(
+            "append timed-out instruction",
+            revalidate=lambda context: None,
+            plan=lambda context: TransitionPlan(
+                "append timed-out instruction",
+                (FileChange(path, content),),
+            ),
+        )
+
+        self.assertTrue(result.recovered)
+        self.assertEqual(result.commit, self.remote_head())
+        shown = git(None, "--git-dir", str(self.remote), "show", f"{result.commit}:{path}")
+        self.assertEqual(shown.stdout, content)
+
+    def test_fetch_timeout_fails_as_unavailable_current_state(self) -> None:
+        with self.assertRaises(MailboxRemoteUnavailable):
+            self.writer(runner=FetchTimeout()).publish(
+                "unavailable fetch",
+                revalidate=lambda context: None,
+                plan=lambda context: TransitionPlan(
+                    "unavailable fetch",
+                    (FileChange("atelier.yaml", "unreachable"),),
+                ),
+            )
+        self.assertEqual(self.remote_head(), self.seed_revision)
 
     def test_absent_ambiguous_commit_recovers_as_safely_retryable(self) -> None:
         path, content = planner_message(self.work_id, 1)
@@ -789,6 +848,53 @@ class GitMailboxWriteContract(unittest.TestCase):
                 plan=plan,
             )
         self.assertEqual(self.remote_head(), before)
+
+    def test_commit_hook_content_mutation_fails_before_push(self) -> None:
+        before = self.remote_head()
+        path, content = planner_message(self.work_id, 1)
+
+        def plan(context: TransitionContext) -> TransitionPlan:
+            hook = context.checkout / ".git" / "hooks" / "pre-commit"
+            hook.write_text(
+                "#!/bin/sh\n"
+                f"printf 'corrupted\\n' > {path}\n"
+                f"git add -- {path}\n",
+                encoding="utf-8",
+            )
+            hook.chmod(0o700)
+            return TransitionPlan(
+                "declared transition",
+                (FileChange(path, content),),
+            )
+
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "committed mailbox content differs",
+        ):
+            self.writer().publish(
+                "commit hook content mutation",
+                revalidate=lambda context: None,
+                plan=plan,
+            )
+        self.assertEqual(self.remote_head(), before)
+
+    def test_option_looking_remote_is_rejected_before_git_runs(self) -> None:
+        calls: list[tuple[str, ...]] = []
+
+        def recording_runner(
+            cwd: Path | None,
+            arguments: tuple[str, ...] | list[str],
+        ) -> subprocess.CompletedProcess[str]:
+            calls.append(tuple(arguments))
+            return run_git(cwd, arguments)
+
+        with self.assertRaisesRegex(ValueError, "must not begin"):
+            GitMailboxWriter(
+                "--upload-pack=/tmp/untrusted",
+                "main",
+                runner=recording_runner,
+            )
+        self.assertEqual(calls, [])
 
     def _append_instruction(self, number: int) -> None:
         path, content = planner_message(self.work_id, number)

@@ -19,15 +19,22 @@ commit, reconstructs current state, and invokes both callbacks again. A
 transition callback is read-only; it returns complete UTF-8 replacements or
 deletions and cannot mutate its checkout directly.
 
+Git commands are noninteractive and have a finite timeout. A mailbox remote
+must be a repository operand and cannot begin with `-`. Fetch timeouts fail as
+unavailable current state. Push timeouts enter the same exact read-back and
+recovery path as any other ambiguous push result.
+
 Each successful operation:
 
 1. starts from the fetched canonical commit in an isolated temporary checkout;
 2. validates current mailbox documents and caller-owned external preconditions;
 3. applies and validates one declared semantic transition;
 4. creates one ordinary Git commit;
-5. pushes that exact commit to the canonical branch without force;
-6. fetches the branch again; and
-7. verifies that the commit is an ancestor of the remote head and that its
+5. verifies that the commit is the single child of the fetched base and contains
+   exactly the declared paths and bytes;
+6. pushes that exact commit to the canonical branch without force;
+7. fetches the branch again; and
+8. verifies that the commit is an ancestor of the remote head and that its
    historical tree contains the exact declared content.
 
 Retries are bounded. A non-fast-forward result is not mechanically rebased:
