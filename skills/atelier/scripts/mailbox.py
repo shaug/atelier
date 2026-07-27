@@ -531,6 +531,18 @@ def validate_project_policy(
             "git-ref",
             "repository canonical_ref is not a valid full Git branch ref",
         )
+    if not _valid_branch_name(value["mailbox"]["canonical_branch"]):
+        raise _fail(
+            path.as_posix(),
+            "git-ref",
+            "mailbox canonical_branch is not a valid Git branch name",
+        )
+    if _remote_has_embedded_credentials(value["mailbox"]["remote"]):
+        raise _fail(
+            path.as_posix(),
+            "remote-credentials",
+            "mailbox remote must not contain embedded credentials",
+        )
     return value
 
 
@@ -549,6 +561,17 @@ def _valid_branch_ref(value: str) -> bool:
         and not component.startswith(".")
         and not component.endswith(".lock")
         for component in components
+    )
+
+
+def _valid_branch_name(value: str) -> bool:
+    return not value.startswith("-") and _valid_branch_ref(f"refs/heads/{value}")
+
+
+def _remote_has_embedded_credentials(value: str) -> bool:
+    parsed = urlsplit(value)
+    return parsed.password is not None or (
+        parsed.scheme.lower() in {"http", "https"} and parsed.username is not None
     )
 
 
@@ -1230,6 +1253,8 @@ def _global_identity_diagnostics(
     diagnostics: list[Diagnostic] = []
     owners: dict[str, str] = {}
     execution_owners: dict[str, tuple[str, str]] = {}
+    claim_runs: dict[str, tuple[str, str]] = {}
+    run_claims: dict[str, tuple[str, str]] = {}
 
     def record(identifier: str, path: str) -> None:
         prior = owners.get(identifier)
@@ -1244,7 +1269,7 @@ def _global_identity_diagnostics(
         else:
             owners[identifier] = path
 
-    def record_execution(identifier: str, work_id: str, path: str) -> None:
+    def record_execution_owner(identifier: str, work_id: str, path: str) -> None:
         prior = execution_owners.get(identifier)
         if prior is not None and prior[0] != work_id:
             diagnostics.append(
@@ -1257,6 +1282,34 @@ def _global_identity_diagnostics(
         elif prior is None:
             execution_owners[identifier] = (work_id, path)
 
+    def record_execution_pair(
+        claim_id: str, worker_run_id: str, work_id: str, path: str
+    ) -> None:
+        record_execution_owner(claim_id, work_id, path)
+        record_execution_owner(worker_run_id, work_id, path)
+        prior_run = claim_runs.get(claim_id)
+        if prior_run is not None and prior_run[0] != worker_run_id:
+            diagnostics.append(
+                Diagnostic(
+                    path,
+                    "identity-collision",
+                    f"{claim_id} is already paired with {prior_run[0]} at {prior_run[1]}",
+                )
+            )
+        elif prior_run is None:
+            claim_runs[claim_id] = (worker_run_id, path)
+        prior_claim = run_claims.get(worker_run_id)
+        if prior_claim is not None and prior_claim[0] != claim_id:
+            diagnostics.append(
+                Diagnostic(
+                    path,
+                    "identity-collision",
+                    f"{worker_run_id} is already paired with {prior_claim[0]} at {prior_claim[1]}",
+                )
+            )
+        elif prior_claim is None:
+            run_claims[worker_run_id] = (claim_id, path)
+
     for project_id in sorted(projects):
         record(project_id, f"projects/{project_id}/project.md")
     for initiative_id in sorted(initiatives):
@@ -1268,16 +1321,23 @@ def _global_identity_diagnostics(
         if claim is not None:
             record(claim["id"], work_path)
             record(claim["worker_run_id"], work_path)
-            record_execution(claim["id"], work_id, work_path)
-            record_execution(claim["worker_run_id"], work_id, work_path)
+            record_execution_pair(claim["id"], claim["worker_run_id"], work_id, work_path)
         for message_id in sorted(messages[work_id]):
-            record(message_id, f"work/{work_id}/messages/{message_id}.md")
+            message_path = f"work/{work_id}/messages/{message_id}.md"
+            record(message_id, message_path)
+            worker_run_id = messages[work_id][message_id]["worker_run_id"]
+            if worker_run_id is not None:
+                record_execution_owner(worker_run_id, work_id, message_path)
         for receipt_id in sorted(receipts[work_id]):
             receipt_path = f"work/{work_id}/receipts/{receipt_id}.md"
             record(receipt_id, receipt_path)
             receipt = receipts[work_id][receipt_id]
-            record_execution(receipt["claim_id"], work_id, receipt_path)
-            record_execution(receipt["worker_run_id"], work_id, receipt_path)
+            record_execution_pair(
+                receipt["claim_id"],
+                receipt["worker_run_id"],
+                work_id,
+                receipt_path,
+            )
     return diagnostics
 
 
@@ -1592,6 +1652,12 @@ def reconstruct_mailbox(
     manifest, projects, initiatives, works, messages, receipts = _load_documents(
         root, schema_bundle
     )
+    if not _valid_branch_name(manifest["canonical_branch"]):
+        raise _fail(
+            "atelier.yaml",
+            "git-ref",
+            "canonical_branch is not a valid Git branch name",
+        )
     _validate_relationships(projects, initiatives, works, messages, receipts)
     if readiness is not None:
         unknown = sorted(set(readiness) - set(works))

@@ -505,6 +505,22 @@ class MailboxContract(unittest.TestCase):
         write_yaml(path, policy)
         with self.assertRaisesRegex(MAILBOX.MailboxValidationError, "git-ref"):
             MAILBOX.validate_project_policy(path)
+        policy["repository"]["canonical_ref"] = "refs/heads/main"
+        policy["mailbox"]["canonical_branch"] = "main..malformed"
+        write_yaml(path, policy)
+        before = path.read_bytes()
+        with self.assertRaisesRegex(MAILBOX.MailboxValidationError, "git-ref"):
+            MAILBOX.validate_project_policy(path)
+        self.assertEqual(path.read_bytes(), before)
+        policy["mailbox"]["canonical_branch"] = "main"
+        policy["mailbox"]["remote"] = "https://user:secret@github.com/example/mailbox.git"
+        write_yaml(path, policy)
+        before = path.read_bytes()
+        with self.assertRaisesRegex(
+            MAILBOX.MailboxValidationError, "remote-credentials"
+        ):
+            MAILBOX.validate_project_policy(path)
+        self.assertEqual(path.read_bytes(), before)
 
     def test_fresh_clones_reconstruct_all_views_identically(self) -> None:
         initiative_id = identifier("ini", 1)
@@ -970,6 +986,45 @@ class MailboxContract(unittest.TestCase):
         self.fixture.write_work(second)
 
         self.assert_invalid("identity-collision")
+
+    def test_historical_execution_identity_pairing_is_bijective(self) -> None:
+        work_id = self.fixture.add_work(1, "accepted")
+        delivery_id = self.fixture.works[work_id]["delivery_receipt_id"]
+        delivery = self.fixture.receipts[work_id][delivery_id]
+        released = copy.deepcopy(delivery)
+        released["id"] = identifier("rcp", 2)
+        released["outcome"] = "released"
+        released["worker_run_id"] = identifier("run", 2)
+        released["mutation_ownership"] = "relinquished"
+        self.fixture.receipts[work_id][released["id"]] = released
+        self.fixture.write_work(work_id)
+
+        self.assert_invalid("identity-collision")
+
+    def test_worker_message_run_identity_stays_in_one_work(self) -> None:
+        first = self.fixture.add_work(1, "accepted")
+        second = self.fixture.add_work(2, "blocked")
+        first_receipt_id = self.fixture.works[first]["delivery_receipt_id"]
+        first_run_id = self.fixture.receipts[first][first_receipt_id]["worker_run_id"]
+        blocker_id = self.fixture.works[second]["blocking_message_id"]
+        self.fixture.messages[second][blocker_id]["worker_run_id"] = first_run_id
+        self.fixture.write_work(second)
+
+        self.assert_invalid("identity-collision")
+
+    def test_mailbox_canonical_branch_must_be_a_git_branch_name(self) -> None:
+        manifest = self.root / "atelier.yaml"
+        for branch in ("main..malformed", "-hidden"):
+            with self.subTest(branch=branch):
+                write_yaml(
+                    manifest,
+                    {
+                        "schema": "atelier.mailbox/v1",
+                        "realm_id": "personal",
+                        "canonical_branch": branch,
+                    },
+                )
+                self.assert_invalid("git-ref")
 
     def test_timestamps_and_candidate_remote_urls_fail_closed(self) -> None:
         work_id = self.fixture.add_work(1, "delivered")
