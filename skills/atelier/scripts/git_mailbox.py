@@ -429,6 +429,10 @@ class GitMailboxWriter:
             if current_claim is None:
                 continue
             if current_claim["id"] != prior_claim["id"]:
+                if current_claim["candidate"] != prior_claim["candidate"]:
+                    raise MailboxTransitionRejected(
+                        f"{path}: takeover must preserve the prior claim candidate"
+                    )
                 work_id = PurePosixPath(path).parts[1]
                 for change in changes:
                     receipt_path = PurePosixPath(change.path)
@@ -451,25 +455,42 @@ class GitMailboxWriter:
                             f"{path}: release and new claim require distinct transitions"
                         )
                 continue
+            binding_fields = (
+                "worker_run_id",
+                "work_revision",
+                "approved_commit",
+                "policy_commit",
+                "ticket_observation_digest",
+                "claimed_at",
+                "host",
+            )
+            if any(current_claim[field] != prior_claim[field] for field in binding_fields):
+                raise MailboxTransitionRejected(
+                    f"{path}: current claim authority bindings are immutable"
+                )
             prior_checkpoint = prior_claim["checkpoint"]
             current_checkpoint = current_claim["checkpoint"]
             prior_ledger = prior_checkpoint["authorizations"]
             current_ledger = current_checkpoint["authorizations"]
-            if (
-                current_checkpoint["sequence"] < prior_checkpoint["sequence"]
-                or current_ledger[: len(prior_ledger)] != prior_ledger
-            ):
+            sequence_delta = current_checkpoint["sequence"] - prior_checkpoint["sequence"]
+            if current_ledger[: len(prior_ledger)] != prior_ledger:
                 raise MailboxTransitionRejected(
                     f"{path}: checkpoint authorization ledger is append-only"
                 )
-            sequence_advanced = (
-                current_checkpoint["sequence"] > prior_checkpoint["sequence"]
-            )
+            if sequence_delta not in {0, 1}:
+                raise MailboxTransitionRejected(
+                    f"{path}: one transition may advance only one checkpoint sequence"
+                )
+            expected_ledger_size = len(prior_ledger) + sequence_delta
+            if len(current_ledger) != expected_ledger_size:
+                raise MailboxTransitionRejected(
+                    f"{path}: one checkpoint sequence requires one authorization entry"
+                )
             token_rotated = (
                 current_checkpoint["continuation_token"]
                 != prior_checkpoint["continuation_token"]
             )
-            if sequence_advanced != token_rotated:
+            if (sequence_delta == 1) != token_rotated:
                 raise MailboxTransitionRejected(
                     f"{path}: checkpoint sequence and continuation token must advance together"
                 )

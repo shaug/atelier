@@ -1077,6 +1077,69 @@ class GitMailboxWriteContract(unittest.TestCase):
                     )
                 self.assertEqual(self.remote_head(), before)
 
+    def test_same_claim_cannot_rebind_authority_or_batch_checkpoints(self) -> None:
+        self._claim(with_candidate=False)
+        batched_claim = fixtures.claim(self.repository, 1, with_candidate=True)
+        before = self.remote_head()
+
+        def mutate_claim(
+            context: TransitionContext,
+            mutation: str,
+        ) -> TransitionPlan:
+            path = f"work/{self.work_id}/work.md"
+            work = read_markdown(context.checkout / path)
+            if mutation == "rebind":
+                work["claim"]["ticket_observation_digest"] = "sha256:" + ("f" * 64)
+            else:
+                work["claim"] = copy.deepcopy(batched_claim)
+            return TransitionPlan(
+                f"{mutation} current claim",
+                (FileChange(path, markdown(work)),),
+            )
+
+        expectations = {
+            "rebind": "current claim authority bindings are immutable",
+            "batch": "one transition may advance only one checkpoint sequence",
+        }
+        for mutation, message in expectations.items():
+            with self.subTest(mutation=mutation):
+                with self.assertRaisesRegex(MailboxTransitionRejected, message):
+                    self.writer().publish(
+                        f"{mutation} current claim",
+                        revalidate=lambda context: None,
+                        plan=lambda context, mutation=mutation: mutate_claim(
+                            context,
+                            mutation,
+                        ),
+                    )
+                self.assertEqual(self.remote_head(), before)
+
+    def test_takeover_must_preserve_verified_candidate(self) -> None:
+        original_claim = self._claim(with_candidate=True)
+        self.assertIsNotNone(original_claim["candidate"])
+        replacement_claim = fixtures.claim(self.repository, 2, with_candidate=False)
+        path = f"work/{self.work_id}/work.md"
+        before = self.remote_head()
+
+        def drop_candidate(context: TransitionContext) -> TransitionPlan:
+            work = read_markdown(context.checkout / path)
+            work["claim"] = copy.deepcopy(replacement_claim)
+            return TransitionPlan(
+                "take over without candidate",
+                (FileChange(path, markdown(work)),),
+            )
+
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "takeover must preserve the prior claim candidate",
+        ):
+            self.writer().publish(
+                "take over without candidate",
+                revalidate=lambda context: None,
+                plan=drop_candidate,
+            )
+        self.assertEqual(self.remote_head(), before)
+
     def test_option_looking_remote_is_rejected_before_git_runs(self) -> None:
         calls: list[tuple[str, ...]] = []
 
