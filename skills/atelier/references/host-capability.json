@@ -1,0 +1,41 @@
+{
+  "schema": "atelier.host-capability/v1",
+  "reference_host": "codex",
+  "delegated_capability": "agent-scripts.implement-ticket/delegated-execution/v1",
+  "delegated_authority_actions": [
+    "repository.candidate.create",
+    "repository.candidate.push",
+    "pull_request.create",
+    "pull_request.update",
+    "review.reply",
+    "review.resolve"
+  ],
+  "accepted_terminal_states": [
+    "ready_pr",
+    "blocked",
+    "requires_epic"
+  ],
+  "delegated_skill": {
+    "stable_name": "agent-scripts:implement-ticket",
+    "frontmatter_name": "implement-ticket",
+    "skill_sha256": "307b660864b15a167e755d0f47840acb56d20e1e8ec940d110d84548aec85243",
+    "capability_manifest": "references/delegated-execution/capability.json",
+    "capability_manifest_sha256": "551d2e883d226d2a1e7e39eae66eb2bd3d9d88ec18c56cfba190253677e34156"
+  },
+  "native_state": {
+    "access": "read-only",
+    "connector": "github@openai-curated",
+    "observation_schema": "github-observation.schema.json",
+    "required_operations": [
+      "github.issue.read",
+      "github.issue.relationships.read",
+      "github.pull-request.read",
+      "github.pull-request.comments.read",
+      "github.pull-request.reviews.read",
+      "github.pull-request.checks.read",
+      "github.pull-request.threads.read"
+    ]
+  },
+  "native_state_access": "read-only",
+  "fallback_to_copied_workflows": false
+}

@@ -1,0 +1,595 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shaug/atelier/blob/main/skills/atelier/references/github-observation.schema.json",
+  "title": "Atelier GitHub native-state observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "observed_at",
+    "repository",
+    "issue",
+    "issue_comments",
+    "pull_request",
+    "pull_request_comments",
+    "reviews",
+    "checks",
+    "threads",
+    "completeness"
+  ],
+  "properties": {
+    "schema": {
+      "const": "atelier.github-observation/v1"
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "repository": {
+      "$ref": "#/$defs/repository"
+    },
+    "issue": {
+      "$ref": "#/$defs/issue"
+    },
+    "issue_comments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/comment"
+      }
+    },
+    "pull_request": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/pull_request"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "pull_request_comments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/comment"
+      }
+    },
+    "reviews": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/review"
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/check"
+      }
+    },
+    "threads": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/thread"
+      }
+    },
+    "completeness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issue",
+        "issue_comments",
+        "issue_relationships",
+        "pull_request",
+        "pull_request_comments",
+        "reviews",
+        "checks",
+        "threads"
+      ],
+      "properties": {
+        "issue": {
+          "const": true
+        },
+        "issue_comments": {
+          "const": true
+        },
+        "issue_relationships": {
+          "const": true
+        },
+        "pull_request": {
+          "const": true
+        },
+        "pull_request_comments": {
+          "const": true
+        },
+        "reviews": {
+          "const": true
+        },
+        "checks": {
+          "const": true
+        },
+        "threads": {
+          "const": true
+        }
+      }
+    }
+  },
+  "$defs": {
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name_with_owner",
+        "url"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name_with_owner": {
+          "type": "string",
+          "pattern": "^[^/]+/[^/]+$"
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "issue_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "number",
+        "title",
+        "state",
+        "url"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "OPEN",
+            "CLOSED"
+          ]
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "number",
+        "title",
+        "state",
+        "url",
+        "body",
+        "updated_at",
+        "parent",
+        "sub_issues",
+        "blocked_by",
+        "blocking"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "OPEN",
+            "CLOSED"
+          ]
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "body": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "parent": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/issue_reference"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sub_issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/issue_reference"
+          }
+        },
+        "blocked_by": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/issue_reference"
+          }
+        },
+        "blocking": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/issue_reference"
+          }
+        }
+      }
+    },
+    "comment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "author",
+        "body",
+        "created_at",
+        "updated_at",
+        "url"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "author": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "body": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "git_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "ref",
+        "sha"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "pattern": "^[^/]+/[^/]+$"
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        }
+      }
+    },
+    "pull_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "number",
+        "title",
+        "body",
+        "url",
+        "state",
+        "is_draft",
+        "merged",
+        "mergeable",
+        "merge_state_status",
+        "review_decision",
+        "base",
+        "head",
+        "updated_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state": {
+          "enum": [
+            "OPEN",
+            "CLOSED",
+            "MERGED"
+          ]
+        },
+        "is_draft": {
+          "type": "boolean"
+        },
+        "merged": {
+          "type": "boolean"
+        },
+        "mergeable": {
+          "enum": [
+            "MERGEABLE",
+            "CONFLICTING",
+            "UNKNOWN"
+          ]
+        },
+        "merge_state_status": {
+          "type": "string"
+        },
+        "review_decision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "base": {
+          "$ref": "#/$defs/git_ref"
+        },
+        "head": {
+          "$ref": "#/$defs/git_ref"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "pull_request_number",
+        "author",
+        "state",
+        "body",
+        "submitted_at",
+        "commit_sha",
+        "url"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pull_request_number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "author": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "minLength": 1
+        },
+        "body": {
+          "type": "string"
+        },
+        "submitted_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "commit_sha": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "pull_request_number",
+        "kind",
+        "name",
+        "status",
+        "conclusion",
+        "candidate_sha",
+        "details_url"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pull_request_number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "enum": [
+            "CHECK_RUN",
+            "STATUS_CONTEXT"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1
+        },
+        "conclusion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "candidate_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "details_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "thread_comment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "author",
+        "body",
+        "created_at",
+        "updated_at",
+        "url"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "author": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "body": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "thread": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "pull_request_number",
+        "is_resolved",
+        "is_outdated",
+        "path",
+        "line",
+        "start_line",
+        "comments"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pull_request_number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "is_resolved": {
+          "type": "boolean"
+        },
+        "is_outdated": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "start_line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "comments": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/thread_comment"
+          }
+        }
+      }
+    }
+  }
+}
