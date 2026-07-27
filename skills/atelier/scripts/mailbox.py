@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from dataclasses import dataclass
@@ -158,19 +159,32 @@ def _parse_yaml(text: str, path: str) -> dict[str, Any]:
 
     active_collections: set[int] = set()
 
-    def reject_recursive_aliases(value: Any) -> None:
-        if not isinstance(value, dict | list):
+    def validate_json_shape(value: Any, at: str = "$") -> None:
+        if value is None or isinstance(value, str | bool | int):
             return
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                raise _fail(path, "yaml-value", f"{at} contains a non-finite number")
+            return
+        if not isinstance(value, dict | list):
+            raise _fail(
+                path,
+                "yaml-value",
+                f"{at} has unsupported YAML type {type(value).__name__}",
+            )
         identity = id(value)
         if identity in active_collections:
             raise _fail(path, "yaml-recursion", "document contains a recursive alias")
         active_collections.add(identity)
-        children = value.values() if isinstance(value, dict) else value
-        for child in children:
-            reject_recursive_aliases(child)
+        if isinstance(value, dict):
+            for key, child in value.items():
+                validate_json_shape(child, f"{at}.{key}")
+        else:
+            for index, child in enumerate(value):
+                validate_json_shape(child, f"{at}[{index}]")
         active_collections.remove(identity)
 
-    reject_recursive_aliases(parsed)
+    validate_json_shape(parsed)
     return parsed
 
 

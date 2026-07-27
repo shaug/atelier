@@ -1432,6 +1432,20 @@ class MailboxContract(unittest.TestCase):
 
         self.assert_invalid("yaml-recursion")
 
+    def test_safe_yaml_reader_rejects_non_json_values(self) -> None:
+        work_id = self.fixture.add_work(1, "draft")
+        work_path = self.root / "work" / work_id / "work.md"
+        work_text = work_path.read_text(encoding="utf-8")
+        work_path.write_text(
+            work_text.replace(
+                "dependencies: []",
+                "dependencies: [!!binary aGVsbG8=]",
+            ),
+            encoding="utf-8",
+        )
+
+        self.assert_invalid("yaml-value")
+
     def test_mailbox_collection_file_has_a_relative_layout_diagnostic(self) -> None:
         (self.root / "projects").write_text("not a directory\n", encoding="utf-8")
 
