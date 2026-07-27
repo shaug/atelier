@@ -585,7 +585,7 @@ def _valid_branch_name(value: str) -> bool:
 
 def _remote_has_embedded_credentials(value: str) -> bool:
     parsed = urlsplit(value)
-    return parsed.password is not None or (
+    return bool(parsed.query or parsed.fragment) or parsed.password is not None or (
         parsed.scheme.lower() in {"http", "https"} and parsed.username is not None
     )
 
@@ -935,6 +935,36 @@ def _check_dependency_cycles(works: dict[str, dict[str, Any]]) -> list[Diagnosti
     return diagnostics
 
 
+def _check_replacement_cycles(works: dict[str, dict[str, Any]]) -> list[Diagnostic]:
+    diagnostics: list[Diagnostic] = []
+    visiting: list[str] = []
+    visited: set[str] = set()
+
+    def visit(work_id: str) -> None:
+        if work_id in visited:
+            return
+        if work_id in visiting:
+            cycle = visiting[visiting.index(work_id) :] + [work_id]
+            diagnostics.append(
+                Diagnostic(
+                    f"work/{work_id}/work.md",
+                    "replacement-cycle",
+                    " -> ".join(cycle),
+                )
+            )
+            return
+        visiting.append(work_id)
+        for replaced in works[work_id]["replaces"]:
+            if replaced in works:
+                visit(replaced)
+        visiting.pop()
+        visited.add(work_id)
+
+    for work_id in sorted(works):
+        visit(work_id)
+    return diagnostics
+
+
 def _message_reference_cycle(
     work_messages: dict[str, dict[str, Any]],
 ) -> str | None:
@@ -997,6 +1027,17 @@ def _validate_claim(
             Diagnostic(path, "checkpoint-invocation", "authorization names another worker run")
         )
     authority_ceiling = set(approval["authority_ceiling"]) if approval is not None else set()
+    transferable_handoff = (
+        attempt_receipt is not None
+        and attempt_receipt["handoff"] == "transferable"
+        and attempt_receipt["claim_id"] != claim["id"]
+    )
+    latest_acknowledged_head = (
+        attempt_receipt["candidate"]["head_revision"]
+        if transferable_handoff and attempt_receipt["candidate"] is not None
+        else None
+    )
+    previous_entry: dict[str, Any] | None = None
     for entry in ledger:
         action = entry["action"]
         phase = entry["phase"]
@@ -1011,6 +1052,21 @@ def _validate_claim(
                 )
             )
         if phase == "candidate_published":
+            paired_push = (
+                previous_entry is not None
+                and previous_entry["phase"] == "pre_external_mutation"
+                and previous_entry["action"] == "repository.candidate.push"
+                and previous_entry["candidate_head"] == candidate_head
+            )
+            if not paired_push:
+                diagnostics.append(
+                    Diagnostic(
+                        path,
+                        "checkpoint-candidate-history",
+                        "candidate publication must immediately follow "
+                        "its exact push authorization",
+                    )
+                )
             if (
                 action != "repository.candidate.push"
                 or candidate_head is None
@@ -1023,6 +1079,8 @@ def _validate_claim(
                         "candidate_published must acknowledge an exact repository candidate push",
                     )
                 )
+            elif paired_push:
+                latest_acknowledged_head = candidate_head
         else:
             if acknowledged_head is not None:
                 diagnostics.append(
@@ -1040,17 +1098,26 @@ def _validate_claim(
                         f"authorization action {action!r} requires an exact candidate head",
                     )
                 )
+            elif (
+                action in CANDIDATE_REQUIRED_ACTIONS
+                and action != "repository.candidate.push"
+                and candidate_head != latest_acknowledged_head
+            ):
+                diagnostics.append(
+                    Diagnostic(
+                        path,
+                        "checkpoint-candidate-history",
+                        f"authorization action {action!r} does not name "
+                        "the latest acknowledged candidate",
+                    )
+                )
+        previous_entry = entry
     candidate = claim["candidate"]
     publication_entries = [entry for entry in ledger if entry["phase"] == "candidate_published"]
     internally_invalid = any(
         entry["candidate_head"] is None
         or entry["acknowledged_candidate_head"] != entry["candidate_head"]
         for entry in publication_entries
-    )
-    transferable_handoff = (
-        attempt_receipt is not None
-        and attempt_receipt["handoff"] == "transferable"
-        and attempt_receipt["claim_id"] != claim["id"]
     )
     inherited_candidate = (
         candidate is not None
@@ -1696,13 +1763,29 @@ def _validate_relationships(
                 not transferable
                 or receipt["candidate"]["pull_request"] is None
                 or receipt["mutation_ownership"] != "retained"
+                or any(
+                    item["outcome"] != "passed"
+                    for item in receipt["validation"]
+                )
                 or not any(item["verdict"] == "clean" for item in receipt["reviews"])
             ):
                 diagnostics.append(
                     Diagnostic(
                         receipt_path,
                         "delivered-receipt",
-                        "delivered receipt requires a retained PR candidate",
+                        "delivered receipt requires a retained PR candidate "
+                        "with passing validation",
+                    )
+                )
+            if (
+                receipt["outcome"] == "blocked"
+                and receipt["mutation_ownership"] != "retained"
+            ):
+                diagnostics.append(
+                    Diagnostic(
+                        receipt_path,
+                        "blocked-ownership",
+                        "blocked receipt must retain mutation ownership",
                     )
                 )
             if receipt["outcome"] == "released" and receipt["mutation_ownership"] != "relinquished":
@@ -1723,6 +1806,7 @@ def _validate_relationships(
                 )
             )
     diagnostics.extend(_check_dependency_cycles(works))
+    diagnostics.extend(_check_replacement_cycles(works))
     if diagnostics:
         raise MailboxValidationError(diagnostics)
 

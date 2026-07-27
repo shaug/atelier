@@ -528,6 +528,15 @@ class MailboxContract(unittest.TestCase):
             MAILBOX.MailboxValidationError, "repository-identity"
         ):
             MAILBOX.validate_project_policy(path)
+        policy["repository"]["identity"] = repository
+        policy["mailbox"]["remote"] = (
+            "https://github.com/example/mailbox.git?access_token=secret"
+        )
+        write_yaml(path, policy)
+        with self.assertRaisesRegex(
+            MAILBOX.MailboxValidationError, "remote-credentials"
+        ):
+            MAILBOX.validate_project_policy(path)
 
     def test_fresh_clones_reconstruct_all_views_identically(self) -> None:
         initiative_id = identifier("ini", 1)
@@ -666,6 +675,16 @@ class MailboxContract(unittest.TestCase):
         self.fixture.write_work(first)
         self.fixture.write_work(second)
         self.assert_invalid("dependency-cycle")
+
+    def test_replacement_lineage_must_be_acyclic(self) -> None:
+        first = self.fixture.add_work(1, "cancelled")
+        second = self.fixture.add_work(2, "cancelled")
+        self.fixture.works[first]["replaces"] = [second]
+        self.fixture.works[second]["replaces"] = [first]
+        self.fixture.write_work(first)
+        self.fixture.write_work(second)
+
+        self.assert_invalid("replacement-cycle")
 
     def test_resolved_message_cannot_remain_the_current_blocker(self) -> None:
         work_id = self.fixture.add_work(1, "blocked")
@@ -850,6 +869,38 @@ class MailboxContract(unittest.TestCase):
         ledger[0]["candidate_head"] = None
         self.fixture.write_work(work_id)
         self.assert_invalid("checkpoint-candidate")
+
+    def test_checkpoint_ledger_tracks_acknowledged_candidate_history(self) -> None:
+        work_id = self.fixture.add_work(1, "delivered")
+        work = self.fixture.works[work_id]
+        ledger = work["claim"]["checkpoint"]["authorizations"]
+        ledger.append(
+            {
+                "sequence": 3,
+                "invocation_id": work["claim"]["worker_run_id"],
+                "phase": "pre_external_mutation",
+                "action": "pull_request.create",
+                "proposed_effect_digest": DIGEST,
+                "candidate_head": "d" * 40,
+                "acknowledged_candidate_head": None,
+                "recorded_at": TIMESTAMP,
+            }
+        )
+        work["claim"]["checkpoint"]["sequence"] = 3
+        self.fixture.write_work(work_id)
+        self.assert_invalid("checkpoint-candidate-history")
+
+        shutil.rmtree(self.root)
+        self.root.mkdir()
+        self.fixture = MailboxFixture(self.root)
+        work_id = self.fixture.add_work(1, "delivered")
+        work = self.fixture.works[work_id]
+        publication = work["claim"]["checkpoint"]["authorizations"][-1]
+        publication["sequence"] = 1
+        work["claim"]["checkpoint"]["authorizations"] = [publication]
+        work["claim"]["checkpoint"]["sequence"] = 1
+        self.fixture.write_work(work_id)
+        self.assert_invalid("checkpoint-candidate-history")
 
     def test_current_candidate_requires_publication_acknowledgement(self) -> None:
         work_id = self.fixture.add_work(1, "delivered")
@@ -1045,6 +1096,31 @@ class MailboxContract(unittest.TestCase):
         self.fixture.write_work(work_id)
 
         self.assert_invalid("attempt-outcome")
+
+    def test_historical_blocked_receipt_retains_mutation_ownership(self) -> None:
+        work_id = self.fixture.add_work(1, "blocked")
+        work = self.fixture.works[work_id]
+        receipt_id = work["attempt_receipt_id"]
+        work["status"] = "approved"
+        work["claim"] = None
+        work["blocking_message_id"] = None
+        work["attempt_receipt_id"] = None
+        self.fixture.receipts[work_id][receipt_id]["mutation_ownership"] = (
+            "relinquished"
+        )
+        self.fixture.write_work(work_id)
+
+        self.assert_invalid("blocked-ownership")
+
+    def test_delivered_receipt_rejects_failed_validation(self) -> None:
+        work_id = self.fixture.add_work(1, "delivered")
+        receipt_id = self.fixture.works[work_id]["delivery_receipt_id"]
+        self.fixture.receipts[work_id][receipt_id]["validation"][0]["outcome"] = (
+            "failed"
+        )
+        self.fixture.write_work(work_id)
+
+        self.assert_invalid("delivered-receipt")
 
     def test_generated_identifiers_are_global_across_work_threads(self) -> None:
         first = self.fixture.add_work(1, "delivered")
