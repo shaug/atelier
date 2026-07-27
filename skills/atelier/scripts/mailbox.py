@@ -1380,6 +1380,14 @@ def _validate_relationships(
         diagnostics.extend(
             _validate_lifecycle(work_id, work, messages[work_id], receipts[work_id])
         )
+        current_receipt_ids = {
+            receipt_id
+            for receipt_id in (
+                work["attempt_receipt_id"],
+                work["delivery_receipt_id"],
+            )
+            if receipt_id is not None
+        }
         for receipt_id, receipt in receipts[work_id].items():
             receipt_path = f"work/{work_id}/receipts/{receipt_id}.md"
             transferable = receipt["handoff"] == "transferable"
@@ -1391,10 +1399,14 @@ def _validate_relationships(
                         "transferable handoff and candidate must appear together",
                     )
                 )
-            if native_ticket is None or receipt["native_ticket"] != {
-                "provider": native_ticket["provider"],
-                "id": native_ticket["id"],
-            }:
+            if receipt_id in current_receipt_ids and (
+                native_ticket is None
+                or receipt["native_ticket"]
+                != {
+                    "provider": native_ticket["provider"],
+                    "id": native_ticket["id"],
+                }
+            ):
                 diagnostics.append(
                     Diagnostic(
                         receipt_path,
@@ -1407,7 +1419,8 @@ def _validate_relationships(
                 _candidate_reference_diagnostics(receipt_path, receipt_candidate)
             )
             if (
-                receipt_candidate is not None
+                receipt_id in current_receipt_ids
+                and receipt_candidate is not None
                 and project is not None
                 and receipt_candidate["repository"] != project["repository"]
             ):

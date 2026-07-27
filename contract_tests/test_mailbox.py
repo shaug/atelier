@@ -890,6 +890,41 @@ class MailboxContract(unittest.TestCase):
 
         self.assert_invalid("attempt-outcome")
 
+    def test_historical_receipts_survive_project_and_ticket_revision(self) -> None:
+        work_id = self.fixture.add_work(1, "delivered")
+        work = self.fixture.works[work_id]
+        old_repository = self.fixture.projects[work["project_id"]]["repository"]
+        released = receipt(
+            work,
+            old_repository,
+            2,
+            outcome="released",
+            with_candidate=True,
+        )
+        released["mutation_ownership"] = "relinquished"
+        self.fixture.receipts[work_id][released["id"]] = released
+
+        next_project_id, _ = self.fixture.add_project(2)
+        work["project_id"] = next_project_id
+        work["revision"] = 2
+        work["status"] = "draft"
+        work["native_ticket"] = {
+            "provider": "github",
+            "id": "2",
+            "url": "https://github.com/example/project-2/issues/2",
+        }
+        work["approval"] = None
+        work["claim"] = None
+        work["attempt_receipt_id"] = None
+        work["delivery_receipt_id"] = None
+        self.fixture.write_work(work_id)
+
+        snapshot = MAILBOX.reconstruct_mailbox(self.root)
+
+        self.assertEqual(snapshot["work"][0]["status"], "draft")
+        self.assertEqual(snapshot["work"][0]["project_id"], next_project_id)
+        self.assertEqual(len(self.fixture.receipts[work_id]), 2)
+
     def test_blocked_work_requires_a_blocked_retained_attempt(self) -> None:
         work_id = self.fixture.add_work(1, "blocked")
         work = self.fixture.works[work_id]
