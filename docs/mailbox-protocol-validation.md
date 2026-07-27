@@ -9,6 +9,14 @@ The experiment is implemented in `experiments/mailbox_protocol_v0.py` and runs
 entirely against temporary local bare Git repositories and independent clones.
 It removes those repositories after each run.
 
+The production persistence boundary is implemented in
+`skills/atelier/scripts/git_mailbox.py`. Its executable contracts live in
+`contract_tests/test_git_mailbox.py` and repeat the write-critical scenarios
+through that helper: claim races, independent append retry, atomic
+multi-document transitions, external-state drift after contention, ambiguous
+push recovery after later commits, unavailable remotes, malformed transitions,
+fresh-clone reconstruction, and exact historical read-back.
+
 ## Command
 
 ```text

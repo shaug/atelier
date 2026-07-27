@@ -7,9 +7,9 @@ human acceptance distinct across agentic tasks.
 ## Status
 
 This repository is the post-CLI reset implementation. It contains a valid Codex
-plugin, an explicit `/atelier` skill entrypoint, the Codex host boundary, and
-strict read-only v1 mailbox reconstruction. Production `plan`, `work`, and
-`audit` behavior is intentionally unavailable.
+plugin, an explicit `/atelier` skill entrypoint, the Codex host boundary, strict
+v1 mailbox reconstruction, and verified fast-forward mailbox writes. Production
+`plan`, `work`, and `audit` behavior is intentionally unavailable.
 
 Invoking an unavailable mode fails closed without mutating a mailbox,
 repository, ticket, pull request, or acceptance record.

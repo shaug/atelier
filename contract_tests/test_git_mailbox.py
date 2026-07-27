@@ -1,0 +1,538 @@
+"""Executable contract for verified fast-forward Git mailbox writes."""
+
+from __future__ import annotations
+
+import copy
+import subprocess
+import tempfile
+import threading
+import unittest
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from contract_tests import test_mailbox as fixtures
+from skills.atelier.scripts.git_mailbox import (
+    FileChange,
+    GitMailboxWriter,
+    MailboxPersistenceUnknown,
+    MailboxRemoteUnavailable,
+    MailboxTransitionRejected,
+    TransitionContext,
+    TransitionPlan,
+    run_git,
+)
+from skills.atelier.scripts.mailbox import MailboxValidationError
+
+
+def git(cwd: Path | None, *arguments: str) -> subprocess.CompletedProcess[str]:
+    result = run_git(cwd, arguments)
+    if result.returncode != 0:
+        raise AssertionError(result.stderr)
+    return result
+
+
+def markdown(value: dict[str, Any], body: str = "Fixture.\n") -> str:
+    return f"---\n{fixtures.yaml_text(value)}---\n{body}"
+
+
+def read_markdown(path: Path) -> dict[str, Any]:
+    text = path.read_text(encoding="utf-8")
+    _, frontmatter, _ = text.split("---", 2)
+    value = yaml.safe_load(frontmatter)
+    if not isinstance(value, dict):
+        raise AssertionError("fixture frontmatter is not a mapping")
+    return value
+
+
+def planner_message(work_id: str, number: int) -> tuple[str, str]:
+    message_id = fixtures.identifier("msg", number)
+    value = {
+        "schema": "atelier.message/v1",
+        "id": message_id,
+        "work_id": work_id,
+        "kind": "instruction",
+        "author_role": "planner",
+        "worker_run_id": None,
+        "audience": "worker",
+        "in_reply_to": None,
+        "resolves": None,
+        "blocks": None,
+        "created_at": fixtures.TIMESTAMP,
+        "subject": f"Instruction {number}",
+    }
+    return (
+        f"work/{work_id}/messages/{message_id}.md",
+        markdown(value),
+    )
+
+
+class LostPushResponse:
+    """Let one push succeed, then hide its response and immediate read-back."""
+
+    def __init__(self):
+        self.hide_push = True
+        self.hide_fetch = False
+
+    def __call__(
+        self,
+        cwd: Path | None,
+        arguments: tuple[str, ...] | list[str],
+    ) -> subprocess.CompletedProcess[str]:
+        result = run_git(cwd, arguments)
+        if arguments and arguments[0] == "push" and self.hide_push and result.returncode == 0:
+            self.hide_push = False
+            self.hide_fetch = True
+            return subprocess.CompletedProcess(
+                ["git", *arguments],
+                1,
+                result.stdout,
+                "simulated lost push response",
+            )
+        if arguments and arguments[0] == "fetch" and self.hide_fetch:
+            self.hide_fetch = False
+            return subprocess.CompletedProcess(
+                ["git", *arguments],
+                1,
+                "",
+                "simulated read-back outage",
+            )
+        return result
+
+
+class AdvanceBeforeFirstPush:
+    """Advance the canonical branch and external observation before one stale push."""
+
+    def __init__(
+        self,
+        remote: Path,
+        work_id: str,
+        external_observation: dict[str, str],
+    ):
+        self.remote = remote
+        self.work_id = work_id
+        self.external_observation = external_observation
+        self.advance = True
+
+    def __call__(
+        self,
+        cwd: Path | None,
+        arguments: tuple[str, ...] | list[str],
+    ) -> subprocess.CompletedProcess[str]:
+        if arguments and arguments[0] == "push" and self.advance:
+            self.advance = False
+            self.external_observation["ticket"] = "changed"
+            path, content = planner_message(self.work_id, 99)
+            GitMailboxWriter(str(self.remote), "main").publish(
+                "publish concurrent instruction",
+                revalidate=lambda context: None,
+                plan=lambda context: TransitionPlan(
+                    "publish concurrent instruction",
+                    (FileChange(path, content),),
+                ),
+            )
+        return run_git(cwd, arguments)
+
+
+class GitMailboxWriteContract(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory(prefix="atelier-git-write-test-")
+        self.root = Path(self.temporary.name)
+        self.remote = self.root / "mailbox.git"
+        git(None, "init", "--bare", "--initial-branch=main", str(self.remote))
+        seed = self.root / "seed"
+        git(None, "clone", str(self.remote), str(seed))
+        mailbox = fixtures.MailboxFixture(seed)
+        self.work_id = mailbox.add_work(1, "approved")
+        self.repository = mailbox.projects[mailbox.works[self.work_id]["project_id"]][
+            "repository"
+        ]
+        git(seed, "add", "-A")
+        git(
+            seed,
+            "-c",
+            "user.name=Atelier Test",
+            "-c",
+            "user.email=atelier-test@invalid",
+            "commit",
+            "-m",
+            "seed valid mailbox",
+        )
+        git(seed, "push", "origin", "HEAD:main")
+        self.seed_revision = git(seed, "rev-parse", "HEAD").stdout.strip()
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def writer(self, **kwargs: Any) -> GitMailboxWriter:
+        return GitMailboxWriter(str(self.remote), "main", **kwargs)
+
+    def remote_head(self) -> str:
+        return git(None, "--git-dir", str(self.remote), "rev-parse", "main").stdout.strip()
+
+    def test_one_transition_is_committed_and_read_back_exactly(self) -> None:
+        path, content = planner_message(self.work_id, 1)
+        result = self.writer().publish(
+            "append instruction",
+            revalidate=lambda context: None,
+            plan=lambda context: TransitionPlan(
+                "append instruction",
+                (FileChange(path, content),),
+            ),
+        )
+
+        self.assertEqual(result.base_revision, self.seed_revision)
+        self.assertEqual(result.commit, self.remote_head())
+        self.assertEqual(result.attempts, 1)
+        self.assertFalse(result.recovered)
+        shown = git(None, "--git-dir", str(self.remote), "show", f"{result.commit}:{path}")
+        self.assertEqual(shown.stdout, content)
+        parent_count = git(
+            None,
+            "--git-dir",
+            str(self.remote),
+            "rev-list",
+            "--count",
+            f"{self.seed_revision}..{result.commit}",
+        )
+        self.assertEqual(parent_count.stdout.strip(), "1")
+
+    def test_concurrent_independent_messages_are_each_published_once(self) -> None:
+        barrier = threading.Barrier(2)
+        outcomes: list[Any] = []
+
+        def publish(number: int) -> None:
+            path, content = planner_message(self.work_id, number)
+
+            def revalidate(context: TransitionContext) -> None:
+                if context.attempt == 1:
+                    barrier.wait(timeout=5)
+
+            try:
+                outcomes.append(
+                    self.writer().publish(
+                        f"append instruction {number}",
+                        revalidate=revalidate,
+                        plan=lambda context: TransitionPlan(
+                            f"append instruction {number}",
+                            (FileChange(path, content),),
+                        ),
+                    )
+                )
+            except Exception as error:  # pragma: no cover - assertion reports the exception
+                outcomes.append(error)
+
+        threads = [threading.Thread(target=publish, args=(number,)) for number in (1, 2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+        self.assertEqual(len(outcomes), 2)
+        self.assertTrue(all(not isinstance(outcome, Exception) for outcome in outcomes), outcomes)
+        self.assertEqual(sorted(outcome.attempts for outcome in outcomes), [1, 2])
+        listing = git(
+            None,
+            "--git-dir",
+            str(self.remote),
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "main",
+            f"work/{self.work_id}/messages",
+        ).stdout.splitlines()
+        self.assertEqual(len(listing), 2)
+        self.assertEqual(len(set(listing)), 2)
+
+    def test_concurrent_claims_have_exactly_one_winner(self) -> None:
+        barrier = threading.Barrier(2)
+        outcomes: list[Any] = []
+
+        def publish(number: int) -> None:
+            def revalidate(context: TransitionContext) -> None:
+                work = read_markdown(context.checkout / f"work/{self.work_id}/work.md")
+                if work["status"] != "approved" or work["claim"] is not None:
+                    raise MailboxTransitionRejected("claim already exists")
+                if context.attempt == 1:
+                    barrier.wait(timeout=5)
+
+            def plan(context: TransitionContext) -> TransitionPlan:
+                work = read_markdown(context.checkout / f"work/{self.work_id}/work.md")
+                work["status"] = "active"
+                work["claim"] = fixtures.claim(
+                    self.repository,
+                    number,
+                    with_candidate=False,
+                )
+                return TransitionPlan(
+                    f"claim work {number}",
+                    (FileChange(f"work/{self.work_id}/work.md", markdown(work)),),
+                )
+
+            try:
+                outcomes.append(
+                    self.writer().publish(
+                        f"claim work {number}",
+                        revalidate=revalidate,
+                        plan=plan,
+                    )
+                )
+            except Exception as error:
+                outcomes.append(error)
+
+        threads = [threading.Thread(target=publish, args=(number,)) for number in (1, 2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+        winners = [outcome for outcome in outcomes if not isinstance(outcome, Exception)]
+        losers = [outcome for outcome in outcomes if isinstance(outcome, Exception)]
+        self.assertEqual(len(winners), 1, outcomes)
+        self.assertEqual(len(losers), 1, outcomes)
+        self.assertIsInstance(losers[0], MailboxTransitionRejected)
+        fresh = self.root / "fresh-claim"
+        git(None, "clone", str(self.remote), str(fresh))
+        snapshot = fixtures.MAILBOX.reconstruct_mailbox(fresh)
+        self.assertEqual(snapshot["views"]["active"], [self.work_id])
+
+    def test_atomic_multi_document_transition_is_valid_in_a_fresh_clone(self) -> None:
+        claim_result = self._claim()
+        blocker_id = fixtures.identifier("msg", 9)
+        receipt_id = fixtures.identifier("rcp", 9)
+
+        def revalidate(context: TransitionContext) -> None:
+            work = read_markdown(context.checkout / f"work/{self.work_id}/work.md")
+            if work["claim"]["id"] != claim_result["claim_id"]:
+                raise MailboxTransitionRejected("claim changed")
+
+        def plan(context: TransitionContext) -> TransitionPlan:
+            work_path = f"work/{self.work_id}/work.md"
+            work = read_markdown(context.checkout / work_path)
+            work["status"] = "blocked"
+            work["blocking_message_id"] = blocker_id
+            work["attempt_receipt_id"] = receipt_id
+            message = {
+                "schema": "atelier.message/v1",
+                "id": blocker_id,
+                "work_id": self.work_id,
+                "kind": "needs-decision",
+                "author_role": "worker",
+                "worker_run_id": work["claim"]["worker_run_id"],
+                "audience": "planner",
+                "in_reply_to": None,
+                "resolves": None,
+                "blocks": "worker",
+                "created_at": fixtures.TIMESTAMP,
+                "subject": "Choose the bounded behavior",
+            }
+            receipt = fixtures.receipt(
+                work,
+                self.repository,
+                1,
+                outcome="blocked",
+                with_candidate=False,
+            )
+            receipt["id"] = receipt_id
+            return TransitionPlan(
+                "block work atomically",
+                (
+                    FileChange(work_path, markdown(work)),
+                    FileChange(
+                        f"work/{self.work_id}/messages/{blocker_id}.md",
+                        markdown(message),
+                    ),
+                    FileChange(
+                        f"work/{self.work_id}/receipts/{receipt_id}.md",
+                        markdown(receipt),
+                    ),
+                ),
+            )
+
+        result = self.writer().publish(
+            "block work",
+            revalidate=revalidate,
+            plan=plan,
+        )
+        fresh = self.root / "fresh-blocked"
+        git(None, "clone", str(self.remote), str(fresh))
+        snapshot = fixtures.MAILBOX.reconstruct_mailbox(fresh)
+        self.assertEqual(snapshot["views"]["blocked"], [self.work_id])
+        changed = git(
+            None,
+            "--git-dir",
+            str(self.remote),
+            "diff-tree",
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            result.commit,
+        ).stdout.splitlines()
+        self.assertEqual(len(changed), 3)
+
+    def test_ambiguous_push_recovers_after_later_commit_without_duplication(self) -> None:
+        path, content = planner_message(self.work_id, 1)
+        writer = self.writer(runner=LostPushResponse())
+        with self.assertRaises(MailboxPersistenceUnknown) as raised:
+            writer.publish(
+                "append ambiguous instruction",
+                revalidate=lambda context: None,
+                plan=lambda context: TransitionPlan(
+                    "append ambiguous instruction",
+                    (FileChange(path, content),),
+                ),
+            )
+        pending = raised.exception.pending
+
+        later_path, later_content = planner_message(self.work_id, 2)
+        self.writer().publish(
+            "append later instruction",
+            revalidate=lambda context: None,
+            plan=lambda context: TransitionPlan(
+                "append later instruction",
+                (FileChange(later_path, later_content),),
+            ),
+        )
+        recovered = self.writer().recover(pending)
+
+        self.assertIsNotNone(recovered)
+        self.assertTrue(recovered.recovered)
+        history = git(
+            None,
+            "--git-dir",
+            str(self.remote),
+            "rev-list",
+            "--all",
+            "--",
+            path,
+        ).stdout.splitlines()
+        self.assertEqual(history, [pending.commit])
+        current = git(None, "--git-dir", str(self.remote), "rev-parse", "main").stdout.strip()
+        ancestor = run_git(
+            None,
+            (
+                "--git-dir",
+                str(self.remote),
+                "merge-base",
+                "--is-ancestor",
+                pending.commit,
+                current,
+            ),
+        )
+        self.assertEqual(ancestor.returncode, 0)
+
+    def test_unavailable_remote_never_reports_shared_success(self) -> None:
+        missing = self.root / "missing.git"
+        writer = GitMailboxWriter(str(missing), "main")
+        with self.assertRaises(MailboxRemoteUnavailable):
+            writer.publish(
+                "unavailable transition",
+                revalidate=lambda context: None,
+                plan=lambda context: TransitionPlan(
+                    "unavailable transition",
+                    (FileChange("atelier.yaml", "unreachable"),),
+                ),
+            )
+        self.assertEqual(self.remote_head(), self.seed_revision)
+
+    def test_external_preconditions_are_reread_after_concurrent_update(self) -> None:
+        observation = {"ticket": "approved"}
+        attempts: list[int] = []
+        path, content = planner_message(self.work_id, 1)
+
+        def revalidate(context: TransitionContext) -> None:
+            attempts.append(context.attempt)
+            if observation["ticket"] != "approved":
+                raise MailboxTransitionRejected("material ticket observation changed")
+
+        writer = self.writer(
+            runner=AdvanceBeforeFirstPush(self.remote, self.work_id, observation)
+        )
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "material ticket observation changed",
+        ):
+            writer.publish(
+                "append instruction under approved ticket",
+                revalidate=revalidate,
+                plan=lambda context: TransitionPlan(
+                    "append instruction under approved ticket",
+                    (FileChange(path, content),),
+                ),
+            )
+
+        self.assertEqual(attempts, [1, 2])
+        target = run_git(
+            None,
+            (
+                "--git-dir",
+                str(self.remote),
+                "show",
+                f"main:{path}",
+            ),
+        )
+        self.assertNotEqual(target.returncode, 0)
+        concurrent_path, _ = planner_message(self.work_id, 99)
+        concurrent = git(
+            None,
+            "--git-dir",
+            str(self.remote),
+            "show",
+            f"main:{concurrent_path}",
+        )
+        self.assertTrue(concurrent.stdout)
+
+    def test_invalid_transition_fails_closed_before_push(self) -> None:
+        path = f"work/{fixtures.identifier('wrk', 9)}/work.md"
+        before = self.remote_head()
+        with self.assertRaises(MailboxValidationError):
+            self.writer().publish(
+                "publish unsupported schema",
+                revalidate=lambda context: None,
+                plan=lambda context: TransitionPlan(
+                    "publish unsupported schema",
+                    (
+                        FileChange(
+                            path,
+                            "---\nschema: atelier.work/v2\n---\nUnsupported.\n",
+                        ),
+                    ),
+                ),
+            )
+        self.assertEqual(self.remote_head(), before)
+
+    def test_callback_mutation_is_rejected_before_commit(self) -> None:
+        before = self.remote_head()
+
+        def plan(context: TransitionContext) -> TransitionPlan:
+            (context.checkout / "unexpected.txt").write_text("hidden", encoding="utf-8")
+            path, content = planner_message(self.work_id, 1)
+            return TransitionPlan("hidden mutation", (FileChange(path, content),))
+
+        with self.assertRaises(MailboxTransitionRejected):
+            self.writer().publish(
+                "hidden mutation",
+                revalidate=lambda context: None,
+                plan=plan,
+            )
+        self.assertEqual(self.remote_head(), before)
+
+    def _claim(self) -> dict[str, str]:
+        claim_value = fixtures.claim(self.repository, 1, with_candidate=False)
+
+        def plan(context: TransitionContext) -> TransitionPlan:
+            work = read_markdown(context.checkout / f"work/{self.work_id}/work.md")
+            work["status"] = "active"
+            work["claim"] = copy.deepcopy(claim_value)
+            return TransitionPlan(
+                "claim work",
+                (FileChange(f"work/{self.work_id}/work.md", markdown(work)),),
+            )
+
+        self.writer().publish(
+            "claim work",
+            revalidate=lambda context: None,
+            plan=plan,
+        )
+        return {"claim_id": claim_value["id"]}
