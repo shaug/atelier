@@ -593,6 +593,10 @@ def _github_remote_url(url: str, *, repository: str) -> bool:
     return actual == expected
 
 
+def _repository_identity_key(repository: str) -> str:
+    return repository.lower() if repository.startswith("github:") else repository
+
+
 def _candidate_reference_diagnostics(
     path: str, candidate: dict[str, Any] | None
 ) -> list[Diagnostic]:
@@ -1245,17 +1249,20 @@ def _validate_relationships(
     )
     repositories: dict[str, str] = {}
     active_by_project: dict[str, list[str]] = {}
+    active_project_paths: dict[str, str] = {}
     for project_id, project in projects.items():
         repository = project["repository"]
-        if repository in repositories:
+        repository_key = _repository_identity_key(repository)
+        if repository_key in repositories:
             diagnostics.append(
                 Diagnostic(
                     f"projects/{project_id}/project.md",
                     "duplicate-repository",
-                    f"repository already belongs to {repositories[repository]}",
+                    f"repository already belongs to {repositories[repository_key]}",
                 )
             )
-        repositories[repository] = project_id
+        else:
+            repositories[repository_key] = project_id
         if project["policy"]["repository"] != repository:
             diagnostics.append(
                 Diagnostic(
@@ -1267,9 +1274,22 @@ def _validate_relationships(
 
     for work_id, work in works.items():
         path = f"work/{work_id}/work.md"
-        if work["status"] in ACTIVE_STATES:
-            active_by_project.setdefault(work["project_id"], []).append(work_id)
         project = projects.get(work["project_id"])
+        if work["status"] in ACTIVE_STATES:
+            active_key = (
+                _repository_identity_key(project["repository"])
+                if project is not None
+                else f"missing:{work['project_id']}"
+            )
+            active_by_project.setdefault(active_key, []).append(work_id)
+            active_project_paths.setdefault(
+                active_key,
+                (
+                    f"projects/{work['project_id']}/project.md"
+                    if project is not None
+                    else path
+                ),
+            )
         if project is None:
             diagnostics.append(Diagnostic(path, "project-reference", "project does not exist"))
         if work["initiative_id"] is not None and work["initiative_id"] not in initiatives:
@@ -1426,11 +1446,11 @@ def _validate_relationships(
                         "released receipt must relinquish mutation ownership",
                     )
                 )
-    for project_id, active_work in sorted(active_by_project.items()):
+    for project_key, active_work in sorted(active_by_project.items()):
         if len(active_work) > 1:
             diagnostics.append(
                 Diagnostic(
-                    f"projects/{project_id}/project.md",
+                    active_project_paths[project_key],
                     "parallel-assignments",
                     "multiple active assignments: " + ", ".join(sorted(active_work)),
                 )

@@ -987,6 +987,29 @@ class MailboxContract(unittest.TestCase):
         self.fixture.write_work(second)
         self.assert_invalid("parallel-assignments")
 
+    def test_github_repository_case_aliases_share_one_identity(self) -> None:
+        self.fixture.add_work(1, "active")
+        second = self.fixture.add_work(2, "active")
+        second_project_id = self.fixture.works[second]["project_id"]
+        repository_alias = "github:EXAMPLE/PROJECT-1"
+        second_project = self.fixture.projects[second_project_id]
+        second_project["repository"] = repository_alias
+        second_project["policy"]["repository"] = repository_alias
+        second_work = self.fixture.works[second]
+        second_work["approval"]["policy"]["repository"] = repository_alias
+        second_work["native_ticket"]["url"] = (
+            "https://github.com/EXAMPLE/PROJECT-1/issues/2"
+        )
+        self.fixture.write_project(second_project_id)
+        self.fixture.write_work(second)
+
+        with self.assertRaises(MAILBOX.MailboxValidationError) as caught:
+            MAILBOX.reconstruct_mailbox(self.root)
+        codes = {item.code for item in caught.exception.diagnostics}
+        self.assertTrue(
+            {"duplicate-repository", "parallel-assignments"}.issubset(codes)
+        )
+
     def test_duplicate_yaml_keys_and_unexpected_layout_fail_closed(self) -> None:
         manifest = self.root / "atelier.yaml"
         manifest.write_text(
