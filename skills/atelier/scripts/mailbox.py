@@ -1038,6 +1038,20 @@ def _validate_lifecycle(
                     "only a worker-blocking message can be resolved",
                 )
             )
+    unresolved_worker_blockers = sorted(
+        message_id
+        for message_id, message in work_messages.items()
+        if message["blocks"] == "worker" and message_id not in resolutions
+    )
+    expected_worker_blockers = [blocker] if blocker is not None else []
+    if unresolved_worker_blockers != expected_worker_blockers:
+        diagnostics.append(
+            Diagnostic(
+                path,
+                "blocking-message",
+                "unresolved worker blockers do not match the canonical blocker pointer",
+            )
+        )
     if blocker is not None:
         message = work_messages.get(blocker)
         if (
@@ -1074,6 +1088,21 @@ def _validate_lifecycle(
                     path,
                     "attempt-outcome",
                     "approved work may retain only its latest released attempt receipt",
+                )
+            )
+        if (
+            status == "blocked"
+            and attempt_receipt is not None
+            and (
+                attempt_receipt["outcome"] != "blocked"
+                or attempt_receipt["mutation_ownership"] != "retained"
+            )
+        ):
+            diagnostics.append(
+                Diagnostic(
+                    path,
+                    "attempt-outcome",
+                    "blocked work requires a blocked attempt receipt with retained ownership",
                 )
             )
         if claim is not None and status in {"blocked", "delivered"} and (

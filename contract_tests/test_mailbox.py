@@ -666,6 +666,26 @@ class MailboxContract(unittest.TestCase):
         self.fixture.write_work(work_id)
         self.assert_invalid("blocking-message")
 
+    def test_unresolved_worker_blocker_requires_the_canonical_pointer(self) -> None:
+        work_id = self.fixture.add_work(1, "blocked")
+        work = self.fixture.works[work_id]
+        work["status"] = "active"
+        work["blocking_message_id"] = None
+        self.fixture.write_work(work_id)
+
+        self.assert_invalid("blocking-message")
+
+    def test_blocked_work_has_exactly_one_unresolved_worker_blocker(self) -> None:
+        work_id = self.fixture.add_work(1, "blocked")
+        blocker_id = self.fixture.works[work_id]["blocking_message_id"]
+        second_id = identifier("msg", 2)
+        second = copy.deepcopy(self.fixture.messages[work_id][blocker_id])
+        second["id"] = second_id
+        self.fixture.messages[work_id][second_id] = second
+        self.fixture.write_work(work_id)
+
+        self.assert_invalid("blocking-message")
+
     def test_message_authorship_and_candidate_observations_are_bound(self) -> None:
         blocked = self.fixture.add_work(1, "blocked")
         blocker_id = self.fixture.works[blocked]["blocking_message_id"]
@@ -796,6 +816,17 @@ class MailboxContract(unittest.TestCase):
         work["status"] = "approved"
         work["claim"] = None
         work["blocking_message_id"] = None
+        self.fixture.write_work(work_id)
+
+        self.assert_invalid("attempt-outcome")
+
+    def test_blocked_work_requires_a_blocked_retained_attempt(self) -> None:
+        work_id = self.fixture.add_work(1, "blocked")
+        work = self.fixture.works[work_id]
+        receipt_id = work["attempt_receipt_id"]
+        attempt = self.fixture.receipts[work_id][receipt_id]
+        attempt["outcome"] = "released"
+        attempt["mutation_ownership"] = "relinquished"
         self.fixture.write_work(work_id)
 
         self.assert_invalid("attempt-outcome")
