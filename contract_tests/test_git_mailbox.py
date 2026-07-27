@@ -20,6 +20,7 @@ from skills.atelier.scripts.git_mailbox import (
     MailboxPersistenceUnknown,
     MailboxRemoteUnavailable,
     MailboxTransitionRejected,
+    PendingWrite,
     TransitionContext,
     TransitionPlan,
     run_git,
@@ -407,6 +408,19 @@ class GitMailboxWriteContract(unittest.TestCase):
         )
         self.assertEqual(ancestor.returncode, 0)
 
+    def test_absent_ambiguous_commit_recovers_as_safely_retryable(self) -> None:
+        path, content = planner_message(self.work_id, 1)
+        pending = PendingWrite(
+            operation="append absent instruction",
+            branch="main",
+            commit="f" * 40,
+            base_revision=self.seed_revision,
+            changes=(FileChange(path, content),),
+        )
+
+        self.assertIsNone(self.writer().recover(pending))
+        self.assertEqual(self.remote_head(), self.seed_revision)
+
     def test_unavailable_remote_never_reports_shared_success(self) -> None:
         missing = self.root / "missing.git"
         writer = GitMailboxWriter(str(missing), "main")
@@ -712,6 +726,43 @@ class GitMailboxWriteContract(unittest.TestCase):
         with self.assertRaises(MailboxTransitionRejected):
             self.writer().publish(
                 "hidden mutation",
+                revalidate=lambda context: None,
+                plan=plan,
+            )
+        self.assertEqual(self.remote_head(), before)
+
+    def test_callback_history_mutation_cannot_publish_an_extra_commit(self) -> None:
+        before = self.remote_head()
+
+        def plan(context: TransitionContext) -> TransitionPlan:
+            committed = run_git(
+                context.checkout,
+                (
+                    "-c",
+                    "user.name=Atelier Test",
+                    "-c",
+                    "user.email=atelier-test@invalid",
+                    "commit",
+                    "--quiet",
+                    "--no-gpg-sign",
+                    "--allow-empty",
+                    "-m",
+                    "hidden callback commit",
+                ),
+            )
+            self.assertEqual(committed.returncode, 0)
+            path, content = planner_message(self.work_id, 1)
+            return TransitionPlan(
+                "declared transition",
+                (FileChange(path, content),),
+            )
+
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "one commit directly atop the fetched base",
+        ):
+            self.writer().publish(
+                "callback history mutation",
                 revalidate=lambda context: None,
                 plan=plan,
             )

@@ -198,6 +198,12 @@ class GitMailboxWriter:
                 reconstruct_mailbox(checkout)
                 self._stage_exact_changes(checkout, changes)
                 commit = self._commit(checkout, transition.commit_message)
+                self._verify_commit_shape(
+                    checkout,
+                    commit=commit,
+                    base_revision=base_revision,
+                    changes=changes,
+                )
                 pending = PendingWrite(
                     operation=operation,
                     branch=self.branch,
@@ -370,8 +376,39 @@ class GitMailboxWriter:
             raise MailboxWriteError("could not commit mailbox transition")
         return self._output(checkout, ("rev-parse", "HEAD"), "resolve mailbox commit")
 
+    def _verify_commit_shape(
+        self,
+        checkout: Path,
+        *,
+        commit: str,
+        base_revision: str,
+        changes: tuple[FileChange, ...],
+    ) -> None:
+        lineage = self._output(
+            checkout,
+            ("rev-list", "--parents", "-n", "1", commit),
+            "inspect mailbox commit lineage",
+        ).split()
+        if lineage != [commit, base_revision]:
+            raise MailboxTransitionRejected(
+                "mailbox transition must be one commit directly atop the fetched base"
+            )
+        changed = self._output_lines(
+            checkout,
+            ("diff-tree", "--no-commit-id", "--name-only", "-r", commit),
+            "inspect committed mailbox transition",
+        )
+        declared = sorted(change.path for change in changes)
+        if changed != declared:
+            raise MailboxTransitionRejected(
+                "committed mailbox transition differs from its declared document set"
+            )
+
     def _read_back(self, checkout: Path, pending: PendingWrite) -> bool:
         self._fetch_current(checkout)
+        exists = self._run(checkout, ("cat-file", "-e", f"{pending.commit}^{{commit}}"))
+        if exists.returncode != 0:
+            return False
         ancestry = self._run(
             checkout,
             ("merge-base", "--is-ancestor", pending.commit, READBACK_REF),
