@@ -37,7 +37,8 @@ Each successful operation:
 4. creates one ordinary Git commit;
 5. verifies that the commit is the single child of the fetched base and contains
    exactly the declared paths and bytes;
-6. pushes that exact commit to the canonical branch without force;
+6. pushes that exact commit with an expected-old-ref lease equal to the fetched
+   base;
 7. fetches the branch again; and
 8. verifies that the commit is an ancestor of the remote head and that its
    historical tree contains the exact declared content.
@@ -46,7 +47,9 @@ Retries are bounded. A non-fast-forward result is not mechanically rebased:
 the operation is replanned only after fresh semantic revalidation. Callers
 reject losing claims, changed approvals, resolved questions, stale checkpoints,
 policy or ticket drift, and any other invalidated transition with
-`MailboxTransitionRejected`.
+`MailboxTransitionRejected`. A deleted, rewound, or divergent canonical ref
+cannot satisfy the lease; deletion remains unavailable, while rewind or
+divergence fails closed instead of becoming a new retry base.
 
 If a push response is lost and read-back is unavailable,
 `MailboxPersistenceUnknown` exposes a `PendingWrite`. Preserve it and call

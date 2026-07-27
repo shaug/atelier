@@ -258,6 +258,7 @@ class GitMailboxWriter:
                         (
                             "push",
                             "--porcelain",
+                            f"--force-with-lease=refs/heads/{self.branch}:{base_revision}",
                             self.remote,
                             f"{commit}:refs/heads/{self.branch}",
                         ),
@@ -281,6 +282,11 @@ class GitMailboxWriter:
                     raise MailboxReadBackError(
                         f"{operation}: successful push omitted commit {commit} from remote history"
                     )
+                self._require_canonical_descendant(
+                    checkout,
+                    base_revision=base_revision,
+                    operation=operation,
+                )
                 if attempt == self.max_attempts:
                     raise MailboxRetryExhausted(
                         f"{operation}: remote contention exceeded {self.max_attempts} attempts"
@@ -566,6 +572,26 @@ class GitMailboxWriter:
                     f"{pending.operation}: {change.path} differs in the verified commit"
                 )
         return True
+
+    def _require_canonical_descendant(
+        self,
+        checkout: Path,
+        *,
+        base_revision: str,
+        operation: str,
+    ) -> None:
+        ancestry = self._run(
+            checkout,
+            ("merge-base", "--is-ancestor", base_revision, READBACK_REF),
+        )
+        if ancestry.returncode == 1:
+            raise MailboxTransitionRejected(
+                f"{operation}: canonical mailbox branch moved backwards or diverged"
+            )
+        if ancestry.returncode != 0:
+            raise MailboxReadBackError(
+                f"{operation}: could not verify canonical branch continuity"
+            )
 
     def _output(self, cwd: Path, arguments: Sequence[str], purpose: str) -> str:
         result = self._run(cwd, arguments)

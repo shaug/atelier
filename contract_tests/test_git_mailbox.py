@@ -494,6 +494,70 @@ class GitMailboxWriteContract(unittest.TestCase):
             )
         self.assertEqual(self.remote_head(), self.seed_revision)
 
+    def test_deleted_canonical_ref_is_not_recreated_after_fetch(self) -> None:
+        path, content = planner_message(self.work_id, 1)
+
+        def delete_canonical_ref() -> None:
+            git(
+                None,
+                "--git-dir",
+                str(self.remote),
+                "update-ref",
+                "-d",
+                "refs/heads/main",
+            )
+
+        with self.assertRaises(MailboxPersistenceUnknown):
+            self.writer(runner=AdvanceBeforeFirstPush(delete_canonical_ref)).publish(
+                "append after deleted canonical ref",
+                revalidate=lambda context: None,
+                plan=lambda context: TransitionPlan(
+                    "append after deleted canonical ref",
+                    (FileChange(path, content),),
+                ),
+            )
+        missing = run_git(
+            None,
+            ("--git-dir", str(self.remote), "rev-parse", "--verify", "refs/heads/main"),
+        )
+        self.assertNotEqual(missing.returncode, 0)
+
+    def test_rewound_canonical_ref_fails_closed_after_fetch(self) -> None:
+        self._append_instruction(1)
+        fetched_head = self.remote_head()
+        revalidations = 0
+
+        def rewind_canonical_ref() -> None:
+            git(
+                None,
+                "--git-dir",
+                str(self.remote),
+                "update-ref",
+                "refs/heads/main",
+                self.seed_revision,
+                fetched_head,
+            )
+
+        def revalidate(context: TransitionContext) -> None:
+            nonlocal revalidations
+            revalidations += 1
+
+        path, content = planner_message(self.work_id, 2)
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "moved backwards or diverged",
+        ):
+            self.writer(runner=AdvanceBeforeFirstPush(rewind_canonical_ref)).publish(
+                "append after canonical rewind",
+                revalidate=revalidate,
+                plan=lambda context: TransitionPlan(
+                    "append after canonical rewind",
+                    (FileChange(path, content),),
+                ),
+            )
+        self.assertEqual(revalidations, 1)
+        self.assertEqual(self.remote_head(), self.seed_revision)
+
     def test_external_preconditions_are_reread_after_concurrent_update(self) -> None:
         observation = {"ticket": "approved"}
         attempts: list[int] = []
