@@ -1254,6 +1254,85 @@ class GitMailboxWriteContract(unittest.TestCase):
             )
         self.assertEqual(self.remote_head(), released_head)
 
+    def test_claim_and_run_identities_are_fenced_across_work_history(self) -> None:
+        second_work_id = fixtures.identifier("wrk", 2)
+        second_path = f"work/{second_work_id}/work.md"
+
+        def add_second_work(context: TransitionContext) -> TransitionPlan:
+            current = read_markdown(
+                context.checkout / f"work/{self.work_id}/work.md"
+            )
+            second = fixtures.base_work(
+                second_work_id,
+                current["project_id"],
+                2,
+            )
+            second["status"] = "approved"
+            second["approval"] = fixtures.approval(self.repository)
+            second["native_ticket"]["url"] = (
+                current["native_ticket"]["url"].rsplit("/", 1)[0] + "/2"
+            )
+            return TransitionPlan(
+                "add second approved work",
+                (FileChange(second_path, markdown(second)),),
+            )
+
+        self.writer().publish(
+            "add second approved work",
+            revalidate=lambda context: None,
+            plan=add_second_work,
+        )
+        released_claim = self._claim(with_candidate=False)
+        first_path = f"work/{self.work_id}/work.md"
+
+        def release_first(context: TransitionContext) -> TransitionPlan:
+            work = read_markdown(context.checkout / first_path)
+            work["status"] = "approved"
+            work["claim"] = None
+            return TransitionPlan(
+                "release first work claim",
+                (FileChange(first_path, markdown(work)),),
+            )
+
+        self.writer().publish(
+            "release first work claim",
+            revalidate=lambda context: None,
+            plan=release_first,
+        )
+        before = self.remote_head()
+
+        for identity in ("claim", "worker_run"):
+            reused = fixtures.claim(self.repository, 2, with_candidate=False)
+            if identity == "claim":
+                reused["id"] = released_claim["id"]
+            else:
+                reused["worker_run_id"] = released_claim["worker_run_id"]
+
+            def reuse_on_second(
+                context: TransitionContext,
+                reused: dict[str, Any] = reused,
+                identity: str = identity,
+            ) -> TransitionPlan:
+                work = read_markdown(context.checkout / second_path)
+                work["status"] = "active"
+                work["claim"] = copy.deepcopy(reused)
+                return TransitionPlan(
+                    f"reuse {identity} identity on second work",
+                    (FileChange(second_path, markdown(work)),),
+                )
+
+            with self.subTest(identity=identity):
+                with self.assertRaisesRegex(
+                    MailboxTransitionRejected,
+                    "released or replaced claim identities cannot become current again",
+                ):
+                    self.writer().publish(
+                        f"reuse {identity} identity on second work",
+                        revalidate=lambda context: None,
+                        plan=reuse_on_second,
+                    )
+                self.assertEqual(self.remote_head(), before)
+
     def test_same_claim_candidate_rebinding_requires_publication_checkpoint(self) -> None:
         self._claim(with_candidate=True)
         path = f"work/{self.work_id}/work.md"

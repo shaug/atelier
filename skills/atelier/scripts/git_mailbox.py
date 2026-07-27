@@ -530,7 +530,7 @@ class GitMailboxWriter:
             raise MailboxTransitionRejected(
                 f"{path}: a new claim must begin with an empty checkpoint ledger"
             )
-        historical_claims, historical_runs = self._historical_claim_identities(checkout, path)
+        historical_claims, historical_runs = self._historical_claim_identities(checkout)
         if claim["id"] in historical_claims or claim["worker_run_id"] in historical_runs:
             raise MailboxTransitionRejected(
                 f"{path}: released or replaced claim identities cannot become current again"
@@ -539,38 +539,53 @@ class GitMailboxWriter:
     def _historical_claim_identities(
         self,
         checkout: Path,
-        path: str,
     ) -> tuple[set[str], set[str]]:
+        work_pathspec = ":(glob)work/*/work.md"
         revisions = self._output_lines(
             checkout,
-            ("log", "--format=%H", READBACK_REF, "--", path),
+            ("log", "--format=%H", READBACK_REF, "--", work_pathspec),
             "inspect historical claim identities",
         )
         claim_ids: set[str] = set()
         worker_run_ids: set[str] = set()
         for revision in revisions:
-            shown = self._run(checkout, ("show", f"{revision}:{path}"))
-            if shown.returncode != 0:
-                continue
-            lines = shown.stdout.splitlines()
-            if not lines or lines[0] != "---":
-                raise MailboxTransitionRejected(
-                    f"{path}: historical work document has invalid frontmatter"
-                )
-            try:
-                end = lines.index("---", 1)
-            except ValueError as error:
-                raise MailboxTransitionRejected(
-                    f"{path}: historical work document has invalid frontmatter"
-                ) from error
-            document = _parse_yaml(
-                "\n".join(lines[1:end]),
-                f"{path}@{revision}",
+            changed_paths = self._output_lines(
+                checkout,
+                (
+                    "diff-tree",
+                    "--root",
+                    "--no-commit-id",
+                    "--name-only",
+                    "-r",
+                    revision,
+                    "--",
+                    work_pathspec,
+                ),
+                "inspect historical work document paths",
             )
-            historical_claim = document["claim"]
-            if historical_claim is not None:
-                claim_ids.add(historical_claim["id"])
-                worker_run_ids.add(historical_claim["worker_run_id"])
+            for path in changed_paths:
+                shown = self._run(checkout, ("show", f"{revision}:{path}"))
+                if shown.returncode != 0:
+                    continue
+                lines = shown.stdout.splitlines()
+                if not lines or lines[0] != "---":
+                    raise MailboxTransitionRejected(
+                        f"{path}: historical work document has invalid frontmatter"
+                    )
+                try:
+                    end = lines.index("---", 1)
+                except ValueError as error:
+                    raise MailboxTransitionRejected(
+                        f"{path}: historical work document has invalid frontmatter"
+                    ) from error
+                document = _parse_yaml(
+                    "\n".join(lines[1:end]),
+                    f"{path}@{revision}",
+                )
+                historical_claim = document["claim"]
+                if historical_claim is not None:
+                    claim_ids.add(historical_claim["id"])
+                    worker_run_ids.add(historical_claim["worker_run_id"])
         return claim_ids, worker_run_ids
 
     def _apply(self, checkout: Path, changes: tuple[FileChange, ...]) -> None:

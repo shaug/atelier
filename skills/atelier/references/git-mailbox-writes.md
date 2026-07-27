@@ -28,8 +28,8 @@ and host bindings are immutable. Release, takeover, and a new claim remain
 distinct lifecycle transitions. A takeover preserves the replaced claim's exact
 candidate, and one plan cannot both append the current claim's release receipt
 and install a different claim. Every installed claim starts at checkpoint zero
-with an empty ledger and claim/run identities absent from the work document's
-canonical Git history.
+with an empty ledger and claim/run identities absent from every work document
+version in canonical Git history.
 
 A same-claim candidate change consumes exactly one checkpoint whose
 `candidate_published` entry acknowledges the new exact head. Recovery returns a
