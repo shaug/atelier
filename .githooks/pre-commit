@@ -1,53 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-resolve_repo_root() {
-  local git_dir worktree_gitdir script_dir
-
-  git_dir="$(git rev-parse --path-format=absolute --git-dir 2>/dev/null || true)"
-  if [[ -n "${git_dir}" && -f "${git_dir}/gitdir" ]]; then
-    worktree_gitdir="$(<"${git_dir}/gitdir")"
-    (
-      cd "$(dirname "${worktree_gitdir}")"
-      pwd -P
-    )
-    return 0
-  fi
-
-  if git rev-parse --show-toplevel >/dev/null 2>&1; then
-    git rev-parse --show-toplevel
-    return 0
-  fi
-
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  git -C "${script_dir}/.." rev-parse --show-toplevel
-}
-
-repo_root="$(resolve_repo_root)" || {
-  echo "pre-commit: unable to resolve the active git work tree" >&2
-  exit 1
-}
-
-mapfile -t staged_python_files < <(
-  git -C "${repo_root}" diff --cached --name-only --diff-filter=ACMR \
-    | awk '/\.(py|pyi)$/'
-)
-
-if [[ ${#staged_python_files[@]} -eq 0 ]]; then
-  exit 0
-fi
-
-if [[ ! -x "${repo_root}/scripts/lint-gate.sh" ]]; then
-  echo "pre-commit: missing executable lint gate script at scripts/lint-gate.sh." >&2
-  exit 1
-fi
-
-if ! (
-  cd "${repo_root}" && bash scripts/lint-gate.sh --staged-python "${staged_python_files[@]}"
-); then
-  cat >&2 <<'EOF'
-pre-commit: lint gate failed.
-pre-commit: run 'just lint' (or 'just format' first), then stage updated files before committing.
-EOF
-  exit 1
-fi
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+just lint

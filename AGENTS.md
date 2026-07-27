@@ -1,451 +1,87 @@
 # Atelier — Agent Instructions
 
-This repository defines **Atelier**, an installable CLI tool for managing
-workspace-based, agent-assisted development within a single project.
+This repository defines the skill-based Atelier product. The standalone CLI is
+archived at `atelier-cli-v2-final` and must not be restored through
+compatibility code.
 
-Agents working in this repository are expected to help **implement Atelier v2**
-according to the behavior overview in `docs/behavior.md` and the module-level
-docstrings in `src/atelier`.
+## Product claim
 
-______________________________________________________________________
+Atelier exists to support development at the speed of accountability. It keeps
+durable intent, delegated implementation, current evidence, and human acceptance
+distinct across agentic tasks.
 
-## Core Philosophy
+The [Atelier as a Skill], [Git Mailbox Contract], [Project Policy Contract], and
+[Implementation Plan] are authoritative.
 
-Atelier is:
+## Current state
 
-- a **project-scoped tool**, not a global project manager
-- a **workspace-first workflow**, not a branch-switching helper
-- a **convention with sharp edges**, not a flexible framework
+The repository is a reset scaffold. The `/atelier` skill is discoverable but
+production `plan`, `work`, and `audit` modes are not implemented. The open
+native issue graph beginning at #772 defines implementation order.
 
-Atelier exists to make one thing easy:
+Do not claim unavailable behavior or emulate it with ad hoc orchestration.
 
-> Treat every branch-worthy unit of work as its own isolated workspace, with
-> explicit intent captured before code is written.
+## Architecture boundaries
 
-The filesystem is the source of truth. Configuration is explicit. Automation is
-opt-in and conservative.
+- Codex is the v0 reference host.
+- The Git mailbox is Atelier's only shared state.
+- Native tickets describe project work.
+- Agent Scripts is an independently installed platform dependency.
+- Agent Scripts owns ticket implementation and its transitive workflow.
+- Atelier owns approved intent, project policy, authority fencing, durable
+  coordination, terminal validation, audit, and operator acceptance.
+- Delivery, acceptance, merge, deployment, and native-ticket completion are
+  distinct events.
 
-______________________________________________________________________
+Do not add Beads, Dolt, SQLite, a daemon, a server, a persistent projection,
+backward compatibility, or a migration reader.
 
-## What This Repository Is
+## Repository shape
 
-This repository is:
+- `.codex-plugin/plugin.json` is the plugin manifest.
+- `skills/atelier/` is the only production skill entrypoint.
+- `contract_tests/` defines the next honest implementation boundary.
+- `scripts/validate_repository.py` validates the reset shape.
+- `docs/` contains only surviving product doctrine and contracts.
+- `experiments/` contains the preserved mailbox and composition evidence.
 
-- the **source code** for the Atelier CLI
-- the **owner** of default templates (project and workspace `AGENTS.md`)
-- the **authority** for how `atelier init` and `atelier open` behave
+Add product code only when an approved graph issue requires it. Keep each change
+independently reviewable and avoid building later graph nodes early.
 
-This repository is **not**:
+## Authority
 
-- an Atelier-managed project
-- a workspace container
-- a place where user workspaces live
+Implementation authority does not imply merge, deployment, issue closure,
+acceptance, or cleanup authority. Every consequential external mutation must be
+explicitly granted and revalidated against current state.
 
-Atelier manages *other* projects — not itself.
+## Quality gates
 
-______________________________________________________________________
+Run:
 
-## Architecture
-
-**CLI layer**: `src/atelier/cli.py` defines the Typer app. Commands in
-`src/atelier/commands/` are thin controllers that parse inputs, orchestrate
-calls, and render output — domain logic lives in separate modules.
-
-**Beads data store** (`src/atelier/beads.py`): Large wrapper around the `bd`
-tool for task/issue management. Uses Pydantic boundary models, Dolt databases,
-and concurrency-safe atomic writes. Core concepts: epics (top-level work),
-changesets (leaf work nodes), lifecycle statuses
-(`deferred|open|in_progress|blocked|closed`).
-
-**Worker runtime** (`src/atelier/worker/`): Multi-module subsystem managing
-changeset execution — branching, PR creation, integration, and linear rebase
-after merge. Key files: `runtime.py` (orchestrator), `integration_service.py`
-(PR logic), `reconcile.py` (restack/rebase), `changeset_state.py` (state
-machine).
-
-**Skills system** (`src/atelier/skills/`): 30+ skill directories with
-frontmatter-based metadata, projected into workspace `.atelier-skills/` at
-session launch. Validated by `atelier.skill_frontmatter_validation`.
-
-**Configuration** (`src/atelier/config.py`, `models.py`): Pydantic models for
-project config. Two files per project: `config.sys.json` (system-managed) and
-`config.user.json` (user-editable), stored in
-`~/.local/share/atelier/projects/<project-key>/`.
-
-**Worktree/session management** (`worktrees.py`, `sessions.py`): Maps workspaces
-to git worktrees and manages agent session discovery/resumption.
-
-______________________________________________________________________
-
-## Scope of Work
-
-When working in this repository, you may:
-
-- implement or refine the Atelier CLI
-- update templates shipped with the tool
-- adjust schemas for `config.sys.json`/`config.user.json` files
-- improve documentation and examples
-- simplify behavior while preserving correctness
-
-You should **not**:
-
-- add global registries or background services
-- auto-modify user files after creation
-- invent migration or upgrade systems
-- enforce coding conventions for managed projects
-- add features not explicitly described in the behavior docs or code
-
-If a behavior is not in `docs/behavior.md` or documented in code, do not add it.
-
-______________________________________________________________________
-
-## Development Model (Dogfooding)
-
-Atelier v2 should be developed **using Atelier itself**.
-
-That means:
-
-- Non-trivial changes should be worked on in real workspaces
-- Each workspace should have a clear `AGENTS.md` describing intent
-- Agents should follow the same “Read AGENTS.md and go” contract
-- Humans should be able to interrupt, inspect, and continue work easily
-
-However:
-
-- This repository itself is **not** an Atelier project
-- Do not assume `config.sys.json`/`config.user.json` exists here
-- Do not manage this repo as a workspace
-
-Dogfooding applies to *how* we work, not *where* state lives.
-
-______________________________________________________________________
-
-## Implementation Constraints
-
-### Language & Tooling
-
-- Implement Atelier in **Python 3.11+**
-- Use **uv** for dependency and packaging management
-- Produce an **installable CLI** (`atelier`), built with hatchling + hatch-vcs
-- Prefer standard library functionality where possible
-- In runtime orchestration code, avoid `Any` and `Callable[..., ...]`; prefer
-  explicit `Protocol`/typed call signatures and validated boundary models.
-
-### CLI Behavior
-
-- Commands must be deterministic and explicit
-- Interactive prompting is preferred when information is missing
-- Side effects must be obvious and scoped to the project directory
-- Failure modes must be loud and safe
-
-Do not add hidden behavior or implicit defaults.
-
-### Concurrency-Safe External Writes
-
-When code writes local external state that can be touched by multiple agents or
-processes, it must be designed to avoid corruption by default.
-
-- Prefer atomic write primitives where available (for example: temp-file + fsync
-  \+ atomic rename, atomic ref updates, or compare-and-swap style updates).
-- If atomic writes are not available, require explicit read-after-write
-  verification and bounded retries before reporting success.
-- Make write operations idempotent where practical so retries do not duplicate
-  side effects.
-- Fail closed on uncertainty (verification mismatch, partial write, stale
-  precondition, lock contention timeout) and preserve the previous known-good
-  state.
-- Never treat best-effort writes as success when persistence cannot be
-  confirmed.
-- Apply this policy to representative external-state targets, including:
-  - project-scoped Beads state
-  - worktree metadata and mapping files
-  - branch refs and ref-like coordination state
-  - runtime lock, lease, heartbeat, and queue claim files
-
-### Code Shape & Module Boundaries
-
-- Keep modules cognitively scoped:
-  - target **200-500 LOC** for most modules
-  - if a module exceeds **~1,000 LOC**, treat it as a refactor candidate and
-    split by responsibility
-- Treat `src/atelier/commands/*.py` as thin CLI controllers:
-  - parse/normalize inputs
-  - orchestrate calls
-  - render user-facing output
-  - delegate domain/business logic to non-command modules
-- Prefer small, composable functions over monolithic command implementations.
-- Keep command tests thin and focused on wiring/CLI behavior; place business
-  logic tests next to the extracted modules they exercise.
-- Prefer explicit typing over weak typing:
-  - avoid `Any` in new code and during refactors
-  - define `Protocol`/typed dataclasses for dependency boundaries
-  - pass grouped typed dependencies instead of long untyped parameter lists
-- Treat CLI/process boundaries as typed contracts:
-  - prefer `CommandRequest` + `CommandSpec[T]` + `run_typed(...)` over ad-hoc
-    subprocess parsing
-  - validate external JSON payloads with Pydantic at the edge before business
-    logic consumes them
-- Treat `_`-prefixed functions as module-private implementation details:
-  - do not export `_`-prefixed names via `__all__`
-  - do not rely on wildcard re-export patterns (`from module import *`) to share
-    private helpers across modules
-  - if a function is intended for cross-module use, make it public
-    (non-underscore) and type it explicitly
-
-______________________________________________________________________
-
-## API Documentation & Style Rules
-
-- Every exported function (public name or included in `__all__`) must have a
-  thorough docstring in **Google style** (summary plus `Args:`/`Returns:`;
-  include `Raises:` where relevant).
-- Exported docstrings should describe behavior, inputs, return values, and
-  expected failure modes (for example, raised exceptions or blocking
-  conditions).
-- In authored markdown, prefer inline reference links with the visible text as
-  the link label (for example `[Atelier Store Contract]`) and place the
-  definitions at the end of the file under
-  `<!-- inline reference link definitions. please keep alphabetized -->`.
-- When linking to other documentation, use the document title as the link text.
-- Keep line lengths strict:
-  - code lines: **100** max
-  - comments and docstring prose: **80** max
-
-______________________________________________________________________
-
-## Templates
-
-Templates shipped with Atelier are:
-
-- copied at creation time
-- never referenced live
-- never auto-updated
-- owned by the user after creation
-
-The tool may ship updated templates in new versions, but existing files must
-never be modified automatically.
-
-______________________________________________________________________
-
-## Authority Model
-
-This `AGENTS.md` is authoritative for **work on the Atelier tool itself**.
-
-When Atelier manages other projects:
-
-- Project-level `AGENTS.md` defines the Atelier overlay
-- Workspace-level `AGENTS.md` defines execution and intent
-- Repository-level rules (if any) define coding conventions
-
-Atelier must respect those boundaries strictly.
-
-______________________________________________________________________
-
-## Commit Messages
-
-- Use Conventional Commits format: `<type>(<scope>): <subject>`
-- Allowed types: feat, fix, docs, refactor, test, chore, build, ci, perf, style,
-  revert
-- Subject is imperative, present tense, no trailing period.
-- Every commit must include a body that summarizes all changes since the
-  previous commit. For the first commit, summarize the full change set.
-- If squashing or rebasing, update the body to reflect the aggregated change.
-- Use markdown in the body; prefer bullets for multiple changes.
-- If a commit fixes an issue, add this as the final line of the commit body:
-  `Fixes #<issue-number>`
-- For multiple issues, add one `Fixes #...` line per issue.
-
-______________________________________________________________________
-
-## Build & Development Commands
-
-```bash
-# Install for development (local venv)
-just install-dev
-
-# Install editable globally
-just install-editable
-
-# Run full test suite (pytest + shell tests + skill frontmatter validation)
-just test
-
-# Run a single test file
-uv run pytest tests/atelier/test_beads.py -v
-
-# Run a single test by name
-uv run pytest -k test_name
-
-# Run shell tests only
-bash tests/shell/run.sh
-
-# Lint (ruff format/check + pyright + shellcheck)
+```text
 just lint
-
-# Auto-format (ruff + mdformat)
-just format
-
-# Type checking only
-just typecheck
+just test
 ```
 
-______________________________________________________________________
+The expected-failure contract test is intentional. It names the missing `HOST`
+capability and must become an ordinary passing test when #774 implements that
+contract.
 
-## Verification
+## Commits and publication
 
-After the workspace goals are met, run:
+Use Conventional Commits:
 
-- `just test`
-- `just format`
-- `just lint`
-
-Doctests are collected only for curated modules listed in `tests/conftest.py`.
-
-If any command is missing or fails due to missing tooling, do not substitute
-alternatives; record the failure and reason.
-
-### Testing Notes
-
-- `conftest.py` auto-patches: agent names mocked to `("codex", "claude")`,
-  questionary disabled, `input()` raises on unexpected prompts, git network
-  prompts disabled
-- Property-based tests use Hypothesis
-- Integration tests (`just test-integration`) require `codex` CLI on PATH
-- Local publish/test gates intentionally pin Python 3.11 to match CI until the
-  supported matrix expands; do not rely on an ambient interpreter or a
-  pre-existing `.venv`.
-
-______________________________________________________________________
-
-## Workflow Requirements
-
-- Keep repo-local hooks bootstrapped (`bash .githooks/worktree-bootstrap.sh`) so
-  `pre-commit` lint/format checks and `pre-push` test checks run in both the
-  main enlistment and linked worktrees.
-- Run `just format` before making commits.
-- Use `bash scripts/lint-gate.sh` as the canonical lint gate (also exposed as
-  `just lint` and used by CI).
-- Keep `just test` as the canonical full test command; `pre-push` should invoke
-  it, with CI as the backstop.
-- Ensure `just lint` and `just test` pass before shipping changes.
-- CI requires both `ci / lint` and `ci / test` to pass. The canonical lint gate
-  is `bash scripts/lint-gate.sh`.
-- When merging PRs to `main`, keep merge commit messages non-Conventional (use
-  the default “Merge pull request #...” message) so Release Please does not
-  double-count changelog entries.
-
-## Landing the Plane (Session Completion)
-
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT
-complete until `git push` succeeds.
-
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs
-   follow-up
-1. **Run quality gates** (if code changed) - Tests, linters, builds
-1. **Update issue status** - Close finished work, update in-progress items
-1. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-1. **Clean up** - Clear stashes, prune remote branches
-1. **Verify** - All changes committed AND pushed
-1. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-
-<!-- BEGIN BEADS INTEGRATION -->
-
-## Issue Tracking with bd (beads)
-
-**IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking. Do NOT
-use markdown TODOs, task lists, or other tracking methods.
-
-### Why bd?
-
-- Dependency-aware: Track blockers and relationships between issues
-- Git-friendly: Auto-syncs to JSONL for version control
-- Agent-optimized: JSON output, ready work detection, discovered-from links
-- Prevents duplicate tracking systems and confusion
-
-### Quick Start
-
-**Check for ready work:**
-
-```bash
-bd ready --json
+```text
+<type>(<scope>): <imperative subject>
 ```
 
-**Create new issues:**
+Include a body that summarizes the complete commit. Run the quality gates before
+committing and pushing. Publish changes through a pull request; do not merge
+without explicit authority.
 
-```bash
-bd create "Issue title" --description="Detailed context" -t bug|feature|task -p 0-4 --json
-bd create "Issue title" --description="What this issue is about" -p 1 --deps discovered-from:bd-123 --json
-```
+<!-- inline reference link definitions. please keep alphabetized -->
 
-**Claim and update:**
-
-```bash
-bd update bd-42 --status in_progress --json
-bd update bd-42 --priority 1 --json
-```
-
-**Complete work:**
-
-```bash
-bd close bd-42 --reason "Completed" --json
-```
-
-### Issue Types
-
-- `bug` - Something broken
-- `feature` - New functionality
-- `task` - Work item (tests, docs, refactoring)
-- `epic` - Large feature with subtasks
-- `chore` - Maintenance (dependencies, tooling)
-
-### Priorities
-
-- `0` - Critical (security, data loss, broken builds)
-- `1` - High (major features, important bugs)
-- `2` - Medium (default, nice-to-have)
-- `3` - Low (polish, optimization)
-- `4` - Backlog (future ideas)
-
-### Workflow for AI Agents
-
-1. **Check ready work**: `bd ready` shows unblocked issues
-1. **Claim your task**: `bd update <id> --status in_progress`
-1. **Work on it**: Implement, test, document
-1. **Discover new work?** Create linked issue:
-   - `bd create "Found bug" --description="Details about what was found" -p 1 --deps discovered-from:<parent-id>`
-1. **Complete**: `bd close <id> --reason "Done"`
-
-### Auto-Sync
-
-bd automatically syncs with git:
-
-- Exports to `.beads/issues.jsonl` after changes (5s debounce)
-- Imports from JSONL when newer (e.g., after `git pull`)
-- No manual export/import needed!
-
-### Important Rules
-
-- ✅ Use bd for ALL task tracking
-- ✅ Always use `--json` flag for programmatic use
-- ✅ Link discovered work with `discovered-from` dependencies
-- ✅ Check `bd ready` before asking "what should I work on?"
-- ❌ Do NOT create markdown TODO lists
-- ❌ Do NOT use external issue trackers
-- ❌ Do NOT duplicate tracking systems
-
-For more details, see README.md and docs/QUICKSTART.md.
-
-<!-- END BEADS INTEGRATION -->
+[atelier as a skill]: docs/atelier-skill-design.md
+[git mailbox contract]: docs/git-mailbox-contract.md
+[implementation plan]: docs/implementation-plan.md
+[project policy contract]: docs/project-policy-contract.md

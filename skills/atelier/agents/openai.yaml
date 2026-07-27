@@ -1,0 +1,6 @@
+interface:
+  display_name: "Atelier"
+  short_description: "Accountable, durable agentic development"
+  default_prompt: "Use $atelier to plan accountable software work."
+policy:
+  allow_implicit_invocation: false
