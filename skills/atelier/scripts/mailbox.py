@@ -751,20 +751,27 @@ def _validate_claim(work_id: str, work: dict[str, Any]) -> list[Diagnostic]:
             Diagnostic(path, "checkpoint-invocation", "authorization names another worker run")
         )
     candidate = claim["candidate"]
-    for entry in ledger:
-        if entry["phase"] == "candidate_published":
-            if (
-                candidate is None
-                or entry["candidate_head"] != candidate["head_revision"]
-                or entry["acknowledged_candidate_head"] != candidate["head_revision"]
-            ):
-                diagnostics.append(
-                    Diagnostic(
-                        path,
-                        "candidate-acknowledgement",
-                        "candidate_published entry does not acknowledge the current candidate",
-                    )
-                )
+    publication_entries = [entry for entry in ledger if entry["phase"] == "candidate_published"]
+    internally_invalid = any(
+        entry["candidate_head"] is None
+        or entry["acknowledged_candidate_head"] != entry["candidate_head"]
+        for entry in publication_entries
+    )
+    current_unacknowledged = (
+        candidate is not None
+        and (
+            not publication_entries
+            or publication_entries[-1]["candidate_head"] != candidate["head_revision"]
+        )
+    )
+    if internally_invalid or current_unacknowledged or (candidate is None and publication_entries):
+        diagnostics.append(
+            Diagnostic(
+                path,
+                "candidate-acknowledgement",
+                "candidate publication history does not acknowledge the current candidate",
+            )
+        )
     return diagnostics
 
 

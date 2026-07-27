@@ -161,9 +161,36 @@ def candidate(repository: str, number: int) -> dict[str, Any]:
 
 
 def claim(repository: str, number: int, *, with_candidate: bool) -> dict[str, Any]:
+    worker_run_id = identifier("run", number)
+    authorizations = (
+        [
+            {
+                "sequence": 1,
+                "invocation_id": worker_run_id,
+                "phase": "pre_external_mutation",
+                "action": "repository.candidate.push",
+                "proposed_effect_digest": DIGEST,
+                "candidate_head": None,
+                "acknowledged_candidate_head": None,
+                "recorded_at": TIMESTAMP,
+            },
+            {
+                "sequence": 2,
+                "invocation_id": worker_run_id,
+                "phase": "candidate_published",
+                "action": "repository.candidate.push",
+                "proposed_effect_digest": DIGEST,
+                "candidate_head": SHA_B,
+                "acknowledged_candidate_head": SHA_B,
+                "recorded_at": TIMESTAMP,
+            },
+        ]
+        if with_candidate
+        else []
+    )
     return {
         "id": identifier("clm", number),
-        "worker_run_id": identifier("run", number),
+        "worker_run_id": worker_run_id,
         "work_revision": 1,
         "approved_commit": SHA_A,
         "policy_commit": SHA_A,
@@ -171,9 +198,9 @@ def claim(repository: str, number: int, *, with_candidate: bool) -> dict[str, An
         "claimed_at": TIMESTAMP,
         "host": "codex",
         "checkpoint": {
-            "sequence": 0,
+            "sequence": len(authorizations),
             "continuation_token": f"token-{number}",
-            "authorizations": [],
+            "authorizations": authorizations,
         },
         "candidate": candidate(repository, number) if with_candidate else None,
     }
@@ -629,6 +656,57 @@ class MailboxContract(unittest.TestCase):
         self.fixture.works[work_id]["claim"]["checkpoint"]["sequence"] = 1
         self.fixture.write_work(work_id)
         self.assert_invalid("checkpoint-sequence")
+
+    def test_current_candidate_requires_publication_acknowledgement(self) -> None:
+        work_id = self.fixture.add_work(1, "delivered")
+        checkpoint = self.fixture.works[work_id]["claim"]["checkpoint"]
+        checkpoint["sequence"] = 0
+        checkpoint["authorizations"] = []
+        self.fixture.write_work(work_id)
+        self.assert_invalid("candidate-acknowledgement")
+
+    def test_append_only_candidate_publication_history_reconstructs(self) -> None:
+        work_id = self.fixture.add_work(1, "delivered")
+        work = self.fixture.works[work_id]
+        next_head = "d" * 40
+        checkpoint = work["claim"]["checkpoint"]
+        checkpoint["sequence"] = 4
+        checkpoint["continuation_token"] = "token-1-next"
+        checkpoint["authorizations"].extend(
+            [
+                {
+                    "sequence": 3,
+                    "invocation_id": work["claim"]["worker_run_id"],
+                    "phase": "pre_external_mutation",
+                    "action": "repository.candidate.push",
+                    "proposed_effect_digest": DIGEST,
+                    "candidate_head": SHA_B,
+                    "acknowledged_candidate_head": None,
+                    "recorded_at": TIMESTAMP,
+                },
+                {
+                    "sequence": 4,
+                    "invocation_id": work["claim"]["worker_run_id"],
+                    "phase": "candidate_published",
+                    "action": "repository.candidate.push",
+                    "proposed_effect_digest": DIGEST,
+                    "candidate_head": next_head,
+                    "acknowledged_candidate_head": next_head,
+                    "recorded_at": TIMESTAMP,
+                },
+            ]
+        )
+        work["claim"]["candidate"]["head_revision"] = next_head
+        receipt_id = work["delivery_receipt_id"]
+        receipt_document = self.fixture.receipts[work_id][receipt_id]
+        receipt_document["candidate"]["head_revision"] = next_head
+        receipt_document["validation"][0]["candidate_revision"] = next_head
+        receipt_document["reviews"][0]["candidate_revision"] = next_head
+        self.fixture.write_work(work_id)
+
+        snapshot = MAILBOX.reconstruct_mailbox(self.root)
+
+        self.assertEqual(snapshot["views"]["delivered"], [work_id])
 
     def test_delivery_and_acceptance_bind_exact_receipt_candidate(self) -> None:
         work_id = self.fixture.add_work(1, "accepted")
