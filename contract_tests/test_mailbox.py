@@ -686,6 +686,39 @@ class MailboxContract(unittest.TestCase):
 
         self.assert_invalid("blocking-message")
 
+    def test_nonblocking_decision_can_be_resolved(self) -> None:
+        work_id = self.fixture.add_work(1, "blocked")
+        work = self.fixture.works[work_id]
+        decision_id = work["blocking_message_id"]
+        decision = self.fixture.messages[work_id][decision_id]
+        work["status"] = "active"
+        work["blocking_message_id"] = None
+        decision["blocks"] = None
+        self.fixture.write_work(work_id)
+        unresolved = MAILBOX.reconstruct_mailbox(self.root)
+        self.assertEqual(unresolved["views"]["decision_needed"], [work_id])
+
+        resolution_id = identifier("msg", 2)
+        resolution = copy.deepcopy(decision)
+        resolution.update(
+            {
+                "id": resolution_id,
+                "kind": "instruction",
+                "author_role": "planner",
+                "worker_run_id": None,
+                "in_reply_to": decision_id,
+                "resolves": decision_id,
+                "subject": "Decision supplied",
+            }
+        )
+        self.fixture.messages[work_id][resolution_id] = resolution
+        self.fixture.write_work(work_id)
+
+        resolved = MAILBOX.reconstruct_mailbox(self.root)
+
+        self.assertEqual(resolved["views"]["decision_needed"], [])
+        self.assertEqual(resolved["views"]["active"], [work_id])
+
     def test_message_authorship_and_candidate_observations_are_bound(self) -> None:
         blocked = self.fixture.add_work(1, "blocked")
         blocker_id = self.fixture.works[blocked]["blocking_message_id"]

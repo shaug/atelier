@@ -1041,12 +1041,16 @@ def _validate_lifecycle(
                 )
             )
         target_message = work_messages.get(target)
-        if target_message is not None and target_message["blocks"] != "worker":
+        if (
+            target_message is not None
+            and target_message["blocks"] != "worker"
+            and target_message["kind"] != "needs-decision"
+        ):
             diagnostics.append(
                 Diagnostic(
                     f"work/{work_id}/messages/{target}.md",
                     "invalid-resolution",
-                    "only a worker-blocking message can be resolved",
+                    "only a worker blocker or non-blocking decision can be resolved",
                 )
             )
     unresolved_worker_blockers = sorted(
