@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import subprocess
 import tempfile
 import threading
@@ -1145,6 +1146,58 @@ class GitMailboxWriteContract(unittest.TestCase):
             revalidate=lambda context: None,
             plan=plan,
         )
+
+        self.assertNotEqual(result.commit, canonical_before)
+        self.assertEqual(self.remote_head(), result.commit)
+        alternate_after = git(
+            None,
+            "--git-dir",
+            str(alternate),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+        self.assertEqual(alternate_after, alternate_before)
+
+    def test_callback_environment_cannot_redirect_canonical_remote(self) -> None:
+        alternate = self.root / "environment-alternate.git"
+        git(None, "clone", "--bare", str(self.remote), str(alternate))
+        canonical_before = self.remote_head()
+        alternate_before = git(
+            None,
+            "--git-dir",
+            str(alternate),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+        injected_keys = (
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_KEY_0",
+            "GIT_CONFIG_VALUE_0",
+        )
+        original_environment = {key: os.environ.get(key) for key in injected_keys}
+
+        def plan(context: TransitionContext) -> TransitionPlan:
+            os.environ["GIT_CONFIG_COUNT"] = "1"
+            os.environ["GIT_CONFIG_KEY_0"] = f"url.{alternate}.insteadOf"
+            os.environ["GIT_CONFIG_VALUE_0"] = str(self.remote)
+            path, content = planner_message(self.work_id, 1)
+            return TransitionPlan(
+                "publish with sealed transport environment",
+                (FileChange(path, content),),
+            )
+
+        try:
+            result = self.writer().publish(
+                "ignore callback transport environment",
+                revalidate=lambda context: None,
+                plan=plan,
+            )
+        finally:
+            for key, value in original_environment.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
         self.assertNotEqual(result.commit, canonical_before)
         self.assertEqual(self.remote_head(), result.commit)

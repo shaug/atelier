@@ -148,12 +148,15 @@ def _valid_mailbox_document_path(path: PurePosixPath) -> bool:
 def run_git(
     cwd: Path | None,
     arguments: Sequence[str],
+    *,
+    environment: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run Git without inheriting repository-scoped environment variables."""
 
+    source_environment = os.environ if environment is None else environment
     environment = {
         key: value
-        for key, value in os.environ.items()
+        for key, value in source_environment.items()
         if key
         not in {
             "GIT_DIR",
@@ -162,7 +165,9 @@ def run_git(
             "GIT_OBJECT_DIRECTORY",
             "GIT_ALTERNATE_OBJECT_DIRECTORIES",
             "GIT_PREFIX",
+            "GIT_CONFIG_PARAMETERS",
         }
+        and not key.startswith("GIT_CONFIG_")
     }
     environment["GIT_TERMINAL_PROMPT"] = "0"
     environment["GCM_INTERACTIVE"] = "Never"
@@ -197,7 +202,22 @@ class GitMailboxWriter:
         self.remote = remote
         self.branch = branch
         self.max_attempts = max_attempts
-        self._run = runner
+        if runner is run_git:
+            sealed_environment = dict(os.environ)
+
+            def sealed_runner(
+                cwd: Path | None,
+                arguments: Sequence[str],
+            ) -> subprocess.CompletedProcess[str]:
+                return run_git(
+                    cwd,
+                    arguments,
+                    environment=sealed_environment,
+                )
+
+            self._run = sealed_runner
+        else:
+            self._run = runner
         branch_check = self._run(None, ("check-ref-format", "--branch", branch))
         if branch_check.returncode != 0:
             raise ValueError(f"invalid canonical branch: {branch}")
