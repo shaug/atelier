@@ -18,6 +18,8 @@ Unknown fields, unsupported versions, malformed identities, path/identity
 mismatches, invalid lifecycle combinations, duplicate normative documents,
 contradictory cross-document references, dependency cycles, and concurrent
 active work for one project fail closed with path-specific diagnostics.
+Normative documents use safe YAML 1.2-compatible parsing; duplicate keys,
+non-string mapping keys, and unsafe tags are rejected.
 
 A non-null candidate `workspace_id` is an opaque durable host identifier using
 only letters, digits, `.`, `_`, `:`, `@`, or `-`. Filesystem paths are invalid.

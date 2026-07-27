@@ -13,6 +13,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+try:
+    import yaml
+except ModuleNotFoundError:  # pragma: no cover - exercised only on an incomplete host
+    yaml = None
+
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCHEMA = ROOT / "references" / "mailbox-v1.schema.json"
 
@@ -73,226 +78,81 @@ def _fail(path: str, code: str, message: str) -> MailboxValidationError:
     return MailboxValidationError([Diagnostic(path, code, message)])
 
 
-def _strip_yaml_comment(value: str) -> str:
-    quote: str | None = None
-    index = 0
-    while index < len(value):
-        character = value[index]
-        if quote == '"' and character == "\\":
-            index += 2
-            continue
-        if character in {'"', "'"}:
-            if quote is None:
-                quote = character
-            elif quote == character:
-                if quote == "'" and index + 1 < len(value) and value[index + 1] == "'":
-                    index += 2
-                    continue
-                quote = None
-        elif character == "#" and quote is None and (index == 0 or value[index - 1].isspace()):
-            return value[:index].rstrip()
-        index += 1
-    return value.rstrip()
+class _YamlDuplicateKey(ValueError):
+    pass
 
 
-def _split_mapping(line: str, path: str, line_number: int) -> tuple[str, str]:
-    quote: str | None = None
-    for index, character in enumerate(line):
-        if quote == '"' and character == "\\":
-            continue
-        if character in {'"', "'"}:
-            quote = None if quote == character else character if quote is None else quote
-        elif character == ":" and quote is None and (
-            index + 1 == len(line) or line[index + 1].isspace()
-        ):
-            key = line[:index]
-            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", key) is None:
-                raise _fail(path, "yaml-key", f"line {line_number} has an invalid mapping key")
-            return key, line[index + 1 :].lstrip()
-    raise _fail(path, "yaml-mapping", f"line {line_number} must be a key/value mapping")
+class _YamlNonStringKey(ValueError):
+    pass
 
 
-def _parse_scalar(value: str, path: str, line_number: int) -> Any:
-    if value == "":
-        raise _fail(path, "yaml-scalar", f"line {line_number} has an empty scalar")
-    if value == "null" or value == "~":
-        return None
-    if value == "true":
-        return True
-    if value == "false":
-        return False
-    if re.fullmatch(r"-?(0|[1-9][0-9]*)", value):
-        return int(value)
-    if value.startswith("[") and value.endswith("]"):
-        inner = value[1:-1].strip()
-        if not inner:
-            return []
-        items: list[str] = []
-        start = 0
-        quote: str | None = None
-        escaped = False
-        for index, character in enumerate(inner):
-            if escaped:
-                escaped = False
-                continue
-            if quote == '"' and character == "\\":
-                escaped = True
-                continue
-            if character in {'"', "'"}:
-                if quote is None:
-                    quote = character
-                elif quote == character:
-                    quote = None
-            elif character == "," and quote is None:
-                items.append(inner[start:index].strip())
-                start = index + 1
-            elif character in "[]{}" and quote is None:
-                raise _fail(
-                    path,
-                    "yaml-flow",
-                    f"line {line_number} nests a flow collection",
+if yaml is not None:
+
+    class _StrictSafeLoader(yaml.SafeLoader):
+        """Safe YAML loader with JSON-shaped, YAML 1.2 scalar semantics."""
+
+    _StrictSafeLoader.yaml_implicit_resolvers = {
+        character: list(resolvers)
+        for character, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+    }
+    for character, resolvers in _StrictSafeLoader.yaml_implicit_resolvers.items():
+        _StrictSafeLoader.yaml_implicit_resolvers[character] = [
+            resolver
+            for resolver in resolvers
+            if resolver[0]
+            not in {
+                "tag:yaml.org,2002:bool",
+                "tag:yaml.org,2002:int",
+                "tag:yaml.org,2002:timestamp",
+            }
+        ]
+    _StrictSafeLoader.add_implicit_resolver(
+        "tag:yaml.org,2002:bool",
+        re.compile(r"^(?:true|false)$"),
+        list("tf"),
+    )
+    _StrictSafeLoader.add_implicit_resolver(
+        "tag:yaml.org,2002:int",
+        re.compile(r"^-?(?:0|[1-9][0-9]*)$"),
+        list("-0123456789"),
+    )
+
+    def _construct_mapping(
+        loader: Any, node: Any, *, deep: bool = False
+    ) -> dict[str, Any]:
+        loader.flatten_mapping(node)
+        mapping: dict[str, Any] = {}
+        for key_node, value_node in node.value:
+            key = loader.construct_object(key_node, deep=deep)
+            if not isinstance(key, str):
+                raise _YamlNonStringKey(f"line {key_node.start_mark.line + 1}")
+            if key in mapping:
+                raise _YamlDuplicateKey(
+                    f"line {key_node.start_mark.line + 1} repeats {key!r}"
                 )
-        if quote is not None:
-            raise _fail(path, "yaml-string", f"line {line_number} has an unterminated string")
-        items.append(inner[start:].strip())
-        if any(not item for item in items):
-            raise _fail(path, "yaml-flow", f"line {line_number} has an empty flow item")
-        return [_parse_scalar(item, path, line_number) for item in items]
-    if value == "{}":
-        return {}
-    if value.startswith("[") or value.startswith("{"):
-        raise _fail(
-            path,
-            "yaml-flow",
-            f"line {line_number} uses a nonempty flow collection; use block YAML",
-        )
-    if value.startswith('"'):
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError as error:
-            raise _fail(
-                path,
-                "yaml-string",
-                f"line {line_number} has an invalid double-quoted string: {error.msg}",
-            ) from error
-        if not isinstance(parsed, str):
-            raise _fail(path, "yaml-string", f"line {line_number} must contain a string")
-        return parsed
-    if value.startswith("'"):
-        if len(value) < 2 or not value.endswith("'"):
-            raise _fail(path, "yaml-string", f"line {line_number} has an unterminated string")
-        inner = value[1:-1]
-        index = 0
-        while index < len(inner):
-            if inner[index] != "'":
-                index += 1
-                continue
-            if index + 1 == len(inner) or inner[index + 1] != "'":
-                raise _fail(
-                    path,
-                    "yaml-string",
-                    f"line {line_number} has an invalid single-quoted string",
-                )
-            index += 2
-        return inner.replace("''", "'")
-    if value[0] in "!&*|>@`" or value.endswith(":"):
-        raise _fail(
-            path,
-            "yaml-feature",
-            f"line {line_number} uses unsupported YAML syntax",
-        )
-    return value
+            mapping[key] = loader.construct_object(value_node, deep=deep)
+        return mapping
+
+    _StrictSafeLoader.add_constructor(
+        yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+        _construct_mapping,
+    )
 
 
 def _parse_yaml(text: str, path: str) -> dict[str, Any]:
-    source: list[tuple[int, int, str]] = []
-    for line_number, raw in enumerate(text.splitlines(), start=1):
-        if "\t" in raw:
-            raise _fail(path, "yaml-indent", f"line {line_number} contains a tab")
-        without_comment = _strip_yaml_comment(raw)
-        if not without_comment.strip():
-            continue
-        indent = len(without_comment) - len(without_comment.lstrip(" "))
-        if indent % 2:
-            raise _fail(path, "yaml-indent", f"line {line_number} has odd indentation")
-        source.append((line_number, indent, without_comment[indent:]))
-    if not source:
+    if yaml is None:
+        raise _fail(path, "yaml-dependency", "safe YAML support is unavailable")
+    try:
+        parsed = yaml.load(text, Loader=_StrictSafeLoader)
+    except _YamlDuplicateKey as error:
+        raise _fail(path, "yaml-duplicate-key", str(error)) from error
+    except _YamlNonStringKey as error:
+        raise _fail(path, "yaml-key", f"{error} has a non-string mapping key") from error
+    except yaml.YAMLError as error:
+        detail = getattr(error, "problem", None) or "document is not valid YAML"
+        raise _fail(path, "yaml-syntax", detail) from error
+    if parsed is None:
         raise _fail(path, "yaml-empty", "document is empty")
-
-    def parse_block(position: int, indent: int) -> tuple[Any, int]:
-        if position >= len(source) or source[position][1] != indent:
-            line_number = source[position][0] if position < len(source) else source[-1][0]
-            raise _fail(path, "yaml-indent", f"line {line_number} has unexpected indentation")
-        is_sequence = source[position][2] == "-" or source[position][2].startswith("- ")
-        result: Any = [] if is_sequence else {}
-        while position < len(source):
-            line_number, current_indent, content = source[position]
-            if current_indent < indent:
-                break
-            if current_indent > indent:
-                raise _fail(path, "yaml-indent", f"line {line_number} has unexpected indentation")
-            item_is_sequence = content == "-" or content.startswith("- ")
-            if item_is_sequence != is_sequence:
-                raise _fail(path, "yaml-shape", f"line {line_number} changes collection kind")
-            if is_sequence:
-                remainder = content[1:].lstrip()
-                if not remainder:
-                    child, position = parse_block(position + 1, indent + 2)
-                    result.append(child)
-                    continue
-                if re.match(r"[A-Za-z_][A-Za-z0-9_-]*:", remainder):
-                    key, raw_value = _split_mapping(remainder, path, line_number)
-                    item: dict[str, Any] = {}
-                    if raw_value:
-                        item[key] = _parse_scalar(raw_value, path, line_number)
-                        position += 1
-                    else:
-                        item[key], position = parse_block(position + 1, indent + 4)
-                    while position < len(source) and source[position][1] == indent + 2:
-                        nested_line, _, nested_content = source[position]
-                        nested_key, nested_value = _split_mapping(
-                            nested_content, path, nested_line
-                        )
-                        if nested_key in item:
-                            raise _fail(
-                                path,
-                                "yaml-duplicate-key",
-                                f"line {nested_line} repeats {nested_key!r}",
-                            )
-                        if nested_value:
-                            item[nested_key] = _parse_scalar(
-                                nested_value, path, nested_line
-                            )
-                            position += 1
-                        else:
-                            item[nested_key], position = parse_block(
-                                position + 1, indent + 4
-                            )
-                    result.append(item)
-                    continue
-                result.append(_parse_scalar(remainder, path, line_number))
-                position += 1
-                continue
-
-            key, raw_value = _split_mapping(content, path, line_number)
-            if key in result:
-                raise _fail(
-                    path,
-                    "yaml-duplicate-key",
-                    f"line {line_number} repeats {key!r}",
-                )
-            if raw_value:
-                result[key] = _parse_scalar(raw_value, path, line_number)
-                position += 1
-            else:
-                result[key], position = parse_block(position + 1, indent + 2)
-        return result, position
-
-    parsed, consumed = parse_block(0, source[0][1])
-    if source[0][1] != 0:
-        raise _fail(path, "yaml-indent", "the document root must not be indented")
-    if consumed != len(source):
-        raise _fail(path, "yaml-trailing", "document contains unparsed YAML")
     if not isinstance(parsed, dict):
         raise _fail(path, "yaml-root", "document root must be a mapping")
     return parsed
@@ -1149,6 +1009,24 @@ def _validate_claim(
                 "candidate publication history does not acknowledge the current candidate",
             )
         )
+    if (
+        work["status"] == "delivered"
+        and candidate is not None
+        and candidate["pull_request"] is not None
+        and not any(
+            entry["phase"] == "pre_external_mutation"
+            and entry["action"] in {"pull_request.create", "pull_request.update"}
+            and entry["candidate_head"] == candidate["head_revision"]
+            for entry in ledger
+        )
+    ):
+        diagnostics.append(
+            Diagnostic(
+                path,
+                "checkpoint-pr-authority",
+                "delivered PR candidate lacks pre-mutation authority for its exact head",
+            )
+        )
     return diagnostics
 
 
@@ -1542,6 +1420,22 @@ def _global_identity_diagnostics(
     return diagnostics
 
 
+def _latest_review_is_clean(reviews: list[dict[str, Any]]) -> bool:
+    if not reviews:
+        return False
+    dated_verdicts = [
+        (
+            datetime.fromisoformat(review["observed_at"].replace("Z", "+00:00")),
+            review["verdict"],
+        )
+        for review in reviews
+    ]
+    latest = max(observed_at for observed_at, _ in dated_verdicts)
+    return {
+        verdict for observed_at, verdict in dated_verdicts if observed_at == latest
+    } == {"clean"}
+
+
 def _validate_relationships(
     projects: dict[str, dict[str, Any]],
     initiatives: dict[str, dict[str, Any]],
@@ -1767,7 +1661,7 @@ def _validate_relationships(
                     item["outcome"] != "passed"
                     for item in receipt["validation"]
                 )
-                or not any(item["verdict"] == "clean" for item in receipt["reviews"])
+                or not _latest_review_is_clean(receipt["reviews"])
             ):
                 diagnostics.append(
                     Diagnostic(

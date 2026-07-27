@@ -6,6 +6,7 @@ import copy
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -182,6 +183,16 @@ def claim(repository: str, number: int, *, with_candidate: bool) -> dict[str, An
                 "proposed_effect_digest": DIGEST,
                 "candidate_head": SHA_B,
                 "acknowledged_candidate_head": SHA_B,
+                "recorded_at": TIMESTAMP,
+            },
+            {
+                "sequence": 3,
+                "invocation_id": worker_run_id,
+                "phase": "pre_external_mutation",
+                "action": "pull_request.create",
+                "proposed_effect_digest": DIGEST,
+                "candidate_head": SHA_B,
+                "acknowledged_candidate_head": None,
                 "recorded_at": TIMESTAMP,
             },
         ]
@@ -454,6 +465,33 @@ class MailboxContract(unittest.TestCase):
         ):
             self.assertIn(name, schema["$defs"])
         self.assertFalse(schema["$defs"]["work"]["additionalProperties"])
+
+    def test_frozen_bundle_patterns_use_whole_string_semantics(self) -> None:
+        schema = json.loads(MAILBOX_SCHEMA.read_text(encoding="utf-8"))
+        patterns: list[str] = []
+
+        def collect_patterns(value: Any) -> None:
+            if isinstance(value, dict):
+                if isinstance(value.get("pattern"), str):
+                    patterns.append(value["pattern"])
+                for child in value.values():
+                    collect_patterns(child)
+            elif isinstance(value, list):
+                for child in value:
+                    collect_patterns(child)
+
+        collect_patterns(schema)
+
+        self.assertTrue(patterns)
+        self.assertTrue(
+            all(pattern.startswith("^") and pattern.endswith("$") for pattern in patterns)
+        )
+        self.assertIsNone(
+            re.search(
+                schema["$defs"]["work_id"]["pattern"],
+                f"prefix-{identifier('wrk', 1)}-suffix",
+            )
+        )
 
     def test_project_policy_is_strict_and_read_only(self) -> None:
         project_id, repository = self.fixture.add_project(1)
@@ -856,11 +894,11 @@ class MailboxContract(unittest.TestCase):
         self.fixture = MailboxFixture(self.root)
         work_id = self.fixture.add_work(1, "delivered")
         ledger = self.fixture.works[work_id]["claim"]["checkpoint"]["authorizations"]
-        ledger[-1]["action"] = "review.reply"
+        ledger[1]["action"] = "review.reply"
         self.fixture.write_work(work_id)
         self.assert_invalid("checkpoint-phase")
 
-        ledger[-1]["action"] = "repository.candidate.push"
+        ledger[1]["action"] = "repository.candidate.push"
         ledger[0]["acknowledged_candidate_head"] = SHA_B
         self.fixture.write_work(work_id)
         self.assert_invalid("checkpoint-acknowledgement")
@@ -876,7 +914,7 @@ class MailboxContract(unittest.TestCase):
         ledger = work["claim"]["checkpoint"]["authorizations"]
         ledger.append(
             {
-                "sequence": 3,
+                "sequence": 4,
                 "invocation_id": work["claim"]["worker_run_id"],
                 "phase": "pre_external_mutation",
                 "action": "pull_request.create",
@@ -886,16 +924,25 @@ class MailboxContract(unittest.TestCase):
                 "recorded_at": TIMESTAMP,
             }
         )
-        work["claim"]["checkpoint"]["sequence"] = 3
+        work["claim"]["checkpoint"]["sequence"] = 4
         self.fixture.write_work(work_id)
         self.assert_invalid("checkpoint-candidate-history")
+
+    def test_delivered_pr_requires_authority_for_the_exact_current_head(self) -> None:
+        work_id = self.fixture.add_work(1, "delivered")
+        checkpoint = self.fixture.works[work_id]["claim"]["checkpoint"]
+        checkpoint["authorizations"] = checkpoint["authorizations"][:2]
+        checkpoint["sequence"] = 2
+        self.fixture.write_work(work_id)
+
+        self.assert_invalid("checkpoint-pr-authority")
 
         shutil.rmtree(self.root)
         self.root.mkdir()
         self.fixture = MailboxFixture(self.root)
         work_id = self.fixture.add_work(1, "delivered")
         work = self.fixture.works[work_id]
-        publication = work["claim"]["checkpoint"]["authorizations"][-1]
+        publication = work["claim"]["checkpoint"]["authorizations"][1]
         publication["sequence"] = 1
         work["claim"]["checkpoint"]["authorizations"] = [publication]
         work["claim"]["checkpoint"]["sequence"] = 1
@@ -915,12 +962,12 @@ class MailboxContract(unittest.TestCase):
         work = self.fixture.works[work_id]
         next_head = "d" * 40
         checkpoint = work["claim"]["checkpoint"]
-        checkpoint["sequence"] = 4
+        checkpoint["sequence"] = 6
         checkpoint["continuation_token"] = "token-1-next"
         checkpoint["authorizations"].extend(
             [
                 {
-                    "sequence": 3,
+                    "sequence": 4,
                     "invocation_id": work["claim"]["worker_run_id"],
                     "phase": "pre_external_mutation",
                     "action": "repository.candidate.push",
@@ -930,13 +977,23 @@ class MailboxContract(unittest.TestCase):
                     "recorded_at": TIMESTAMP,
                 },
                 {
-                    "sequence": 4,
+                    "sequence": 5,
                     "invocation_id": work["claim"]["worker_run_id"],
                     "phase": "candidate_published",
                     "action": "repository.candidate.push",
                     "proposed_effect_digest": DIGEST,
                     "candidate_head": next_head,
                     "acknowledged_candidate_head": next_head,
+                    "recorded_at": TIMESTAMP,
+                },
+                {
+                    "sequence": 6,
+                    "invocation_id": work["claim"]["worker_run_id"],
+                    "phase": "pre_external_mutation",
+                    "action": "pull_request.update",
+                    "proposed_effect_digest": DIGEST,
+                    "candidate_head": next_head,
+                    "acknowledged_candidate_head": None,
                     "recorded_at": TIMESTAMP,
                 },
             ]
@@ -1118,6 +1175,29 @@ class MailboxContract(unittest.TestCase):
         self.fixture.receipts[work_id][receipt_id]["validation"][0]["outcome"] = (
             "failed"
         )
+        self.fixture.write_work(work_id)
+
+        self.assert_invalid("delivered-receipt")
+
+    def test_delivered_receipt_uses_only_the_latest_review_verdict(self) -> None:
+        work_id = self.fixture.add_work(1, "delivered")
+        receipt_id = self.fixture.works[work_id]["delivery_receipt_id"]
+        reviews = self.fixture.receipts[work_id][receipt_id]["reviews"]
+        later_review = copy.deepcopy(reviews[0])
+        later_review["verdict"] = "changes_required"
+        later_review["observed_at"] = "2026-07-27T13:00:00Z"
+        reviews.append(later_review)
+        self.fixture.write_work(work_id)
+
+        self.assert_invalid("delivered-receipt")
+
+    def test_delivered_receipt_rejects_conflicting_latest_reviews(self) -> None:
+        work_id = self.fixture.add_work(1, "delivered")
+        receipt_id = self.fixture.works[work_id]["delivery_receipt_id"]
+        reviews = self.fixture.receipts[work_id][receipt_id]["reviews"]
+        conflicting_review = copy.deepcopy(reviews[0])
+        conflicting_review["verdict"] = "changes_required"
+        reviews.append(conflicting_review)
         self.fixture.write_work(work_id)
 
         self.assert_invalid("delivered-receipt")
@@ -1315,6 +1395,41 @@ class MailboxContract(unittest.TestCase):
         (self.root / "projects" / project_id / "cache.json").write_text("{}\n")
         self.assert_invalid("layout")
 
+    def test_safe_yaml_reader_accepts_standard_escapes_and_flow_collections(self) -> None:
+        manifest = self.root / "atelier.yaml"
+        manifest.write_text(
+            'schema: "atelier.mailbox/v1"\n'
+            'realm_id: "personal\\x20realm"\n'
+            'canonical_branch: "main"\n',
+            encoding="utf-8",
+        )
+        dependency = self.fixture.add_work(1, "draft")
+        dependent = self.fixture.add_work(2, "draft", dependencies=[dependency])
+        dependent_path = self.root / "work" / dependent / "work.md"
+        dependent_text = dependent_path.read_text(encoding="utf-8")
+        dependent_path.write_text(
+            dependent_text.replace(
+                f'dependencies:\n  - "{dependency}"',
+                f'dependencies: ["{dependency}"]',
+            ),
+            encoding="utf-8",
+        )
+
+        snapshot = MAILBOX.reconstruct_mailbox(self.root)
+
+        self.assertEqual(snapshot["realm_id"], "personal realm")
+
+    def test_safe_yaml_reader_rejects_unsafe_tags(self) -> None:
+        manifest = self.root / "atelier.yaml"
+        manifest.write_text(
+            'schema: "atelier.mailbox/v1"\n'
+            "realm_id: !!python/object:builtins.object {}\n"
+            'canonical_branch: "main"\n',
+            encoding="utf-8",
+        )
+
+        self.assert_invalid("yaml-syntax")
+
     def test_mailbox_collection_file_has_a_relative_layout_diagnostic(self) -> None:
         (self.root / "projects").write_text("not a directory\n", encoding="utf-8")
 
@@ -1345,7 +1460,7 @@ class MailboxContract(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        self.assert_invalid("yaml-string")
+        self.assert_invalid("yaml-syntax")
 
     def test_symbolic_links_cannot_supply_normative_documents(self) -> None:
         outside = Path(self.temporary.name) / "outside"

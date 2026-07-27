@@ -182,7 +182,7 @@
             },
             {
               "type": "string",
-              "pattern": "https://github\\.com/[^/]+/[^/]+/pull/[1-9][0-9]*"
+              "pattern": "^https://github\\.com/[^/]+/[^/]+/pull/[1-9][0-9]*$"
             }
           ]
         },
@@ -269,15 +269,15 @@
     },
     "branch_ref": {
       "type": "string",
-      "pattern": "refs/heads/[^ ]+"
+      "pattern": "^refs/heads/[^ ]+$"
     },
     "claim_id": {
       "type": "string",
-      "pattern": "clm_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+      "pattern": "^clm_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     },
     "digest": {
       "type": "string",
-      "pattern": "sha256:[0-9a-f]{64}"
+      "pattern": "^sha256:[0-9a-f]{64}$"
     },
     "evidence_name": {
       "enum": [
@@ -352,7 +352,7 @@
     },
     "initiative_id": {
       "type": "string",
-      "pattern": "ini_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+      "pattern": "^ini_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     },
     "mailbox": {
       "type": "object",
@@ -458,7 +458,7 @@
     },
     "message_id": {
       "type": "string",
-      "pattern": "msg_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+      "pattern": "^msg_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     },
     "native_ticket": {
       "type": "object",
@@ -474,11 +474,11 @@
         },
         "id": {
           "type": "string",
-          "pattern": "[1-9][0-9]*"
+          "pattern": "^[1-9][0-9]*$"
         },
         "url": {
           "type": "string",
-          "pattern": "https://github\\.com/[^/]+/[^/]+/issues/[1-9][0-9]*"
+          "pattern": "^https://github\\.com/[^/]+/[^/]+/issues/[1-9][0-9]*$"
         }
       }
     },
@@ -553,7 +553,7 @@
         },
         {
           "type": "string",
-          "pattern": "[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}"
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,255}$"
         }
       ]
     },
@@ -641,7 +641,7 @@
     },
     "project_id": {
       "type": "string",
-      "pattern": "prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+      "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     },
     "project_policy": {
       "type": "object",
@@ -902,11 +902,11 @@
     },
     "receipt_id": {
       "type": "string",
-      "pattern": "rcp_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+      "pattern": "^rcp_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     },
     "repository_identity": {
       "type": "string",
-      "pattern": "github:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"
+      "pattern": "^github:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
     },
     "review_observation": {
       "type": "object",
@@ -942,11 +942,11 @@
     },
     "run_id": {
       "type": "string",
-      "pattern": "run_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+      "pattern": "^run_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     },
     "sha": {
       "type": "string",
-      "pattern": "[0-9a-f]{40}"
+      "pattern": "^[0-9a-f]{40}$"
     },
     "timestamp": {
       "type": "string",
@@ -965,7 +965,7 @@
         },
         "id": {
           "type": "string",
-          "pattern": "[1-9][0-9]*"
+          "pattern": "^[1-9][0-9]*$"
         }
       }
     },
@@ -1110,7 +1110,7 @@
     },
     "work_id": {
       "type": "string",
-      "pattern": "wrk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+      "pattern": "^wrk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     }
   }
 }

@@ -38,6 +38,7 @@ Read [Atelier as a Skill], the [Git Mailbox Contract], and the
 ## Development
 
 ```text
+python3 -m pip install --requirement requirements.txt
 just lint
 just test
 ```
