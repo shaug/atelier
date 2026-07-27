@@ -1053,6 +1053,19 @@ def _validate_lifecycle(
                     "only a worker blocker or non-blocking decision can be resolved",
                 )
             )
+        for resolver_id in resolving:
+            resolver = work_messages[resolver_id]
+            if (
+                resolver["author_role"] not in {"planner", "operator"}
+                or resolver["worker_run_id"] is not None
+            ):
+                diagnostics.append(
+                    Diagnostic(
+                        f"work/{work_id}/messages/{resolver_id}.md",
+                        "resolution-actor",
+                        "decision resolutions require a planner or operator",
+                    )
+                )
     unresolved_worker_blockers = sorted(
         message_id
         for message_id, message in work_messages.items()
@@ -1078,6 +1091,18 @@ def _validate_lifecycle(
         ):
             diagnostics.append(
                 Diagnostic(path, "blocking-message", "current blocker is missing or resolved")
+            )
+        if message is not None and (
+            claim is None
+            or message["author_role"] != "worker"
+            or message["worker_run_id"] != claim["worker_run_id"]
+        ):
+            diagnostics.append(
+                Diagnostic(
+                    path,
+                    "blocker-actor",
+                    "current blocker must be authored by the claiming worker",
+                )
             )
 
     if attempt is not None:

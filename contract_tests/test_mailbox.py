@@ -719,6 +719,39 @@ class MailboxContract(unittest.TestCase):
         self.assertEqual(resolved["views"]["decision_needed"], [])
         self.assertEqual(resolved["views"]["active"], [work_id])
 
+    def test_current_blocker_belongs_to_the_claiming_worker(self) -> None:
+        work_id = self.fixture.add_work(1, "blocked")
+        work = self.fixture.works[work_id]
+        blocker_id = work["blocking_message_id"]
+        self.fixture.messages[work_id][blocker_id]["worker_run_id"] = identifier("run", 99)
+        self.fixture.write_work(work_id)
+
+        self.assert_invalid("blocker-actor")
+
+    def test_worker_cannot_resolve_its_own_decision(self) -> None:
+        work_id = self.fixture.add_work(1, "blocked")
+        work = self.fixture.works[work_id]
+        blocker_id = work["blocking_message_id"]
+        blocker = self.fixture.messages[work_id][blocker_id]
+        resolution_id = identifier("msg", 2)
+        resolution = copy.deepcopy(blocker)
+        resolution.update(
+            {
+                "id": resolution_id,
+                "kind": "instruction",
+                "in_reply_to": blocker_id,
+                "resolves": blocker_id,
+                "blocks": None,
+                "subject": "Worker self-resolution",
+            }
+        )
+        self.fixture.messages[work_id][resolution_id] = resolution
+        work["status"] = "active"
+        work["blocking_message_id"] = None
+        self.fixture.write_work(work_id)
+
+        self.assert_invalid("resolution-actor")
+
     def test_message_authorship_and_candidate_observations_are_bound(self) -> None:
         blocked = self.fixture.add_work(1, "blocked")
         blocker_id = self.fixture.works[blocked]["blocking_message_id"]
