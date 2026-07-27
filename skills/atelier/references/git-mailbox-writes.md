@@ -62,7 +62,9 @@ reject losing claims, changed approvals, resolved questions, stale checkpoints,
 policy or ticket drift, and any other invalidated transition with
 `MailboxTransitionRejected`. A deleted, rewound, or divergent canonical ref
 cannot satisfy the lease; deletion remains unavailable, while rewind or
-divergence fails closed instead of becoming a new retry base.
+divergence fails closed instead of becoming a new retry base. The writer retains
+the latest canonical revision observed during the operation and requires every
+later retry fetch to descend from it.
 
 If a push response is lost and read-back is unavailable,
 `MailboxPersistenceUnknown` exposes a `PendingWrite`. Preserve it and call

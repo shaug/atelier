@@ -153,6 +153,30 @@ class AdvanceBeforeFirstPush:
         return run_git(cwd, arguments)
 
 
+class AdvanceThenRewindBeforeRetry:
+    """Advance before the first push, then rewind before the retry fetch."""
+
+    def __init__(self, advance: Callable[[], None], rewind: Callable[[], None]):
+        self._advance = advance
+        self._rewind = rewind
+        self._advanced = False
+        self._fetches = 0
+
+    def __call__(
+        self,
+        cwd: Path | None,
+        arguments: tuple[str, ...] | list[str],
+    ) -> subprocess.CompletedProcess[str]:
+        if arguments and arguments[0] == "push" and not self._advanced:
+            self._advanced = True
+            self._advance()
+        if arguments and arguments[0] == "fetch":
+            self._fetches += 1
+            if self._fetches == 3:
+                self._rewind()
+        return run_git(cwd, arguments)
+
+
 class GitMailboxWriteContract(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="atelier-git-write-test-")
@@ -603,6 +627,49 @@ class GitMailboxWriteContract(unittest.TestCase):
                 revalidate=revalidate,
                 plan=lambda context: TransitionPlan(
                     "append after canonical rewind",
+                    (FileChange(path, content),),
+                ),
+            )
+        self.assertEqual(revalidations, 1)
+        self.assertEqual(self.remote_head(), self.seed_revision)
+
+    def test_retry_rejects_rewind_after_observing_concurrent_advance(self) -> None:
+        advanced_head: str | None = None
+        revalidations = 0
+
+        def advance() -> None:
+            nonlocal advanced_head
+            self._append_instruction(99)
+            advanced_head = self.remote_head()
+
+        def rewind() -> None:
+            if advanced_head is None:
+                raise AssertionError("concurrent advance was not observed")
+            git(
+                None,
+                "--git-dir",
+                str(self.remote),
+                "update-ref",
+                "refs/heads/main",
+                self.seed_revision,
+                advanced_head,
+            )
+
+        def revalidate(context: TransitionContext) -> None:
+            nonlocal revalidations
+            revalidations += 1
+
+        path, content = planner_message(self.work_id, 1)
+        runner = AdvanceThenRewindBeforeRetry(advance, rewind)
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "moved backwards or diverged",
+        ):
+            self.writer(runner=runner).publish(
+                "append across observed rewind",
+                revalidate=revalidate,
+                plan=lambda context: TransitionPlan(
+                    "append across observed rewind",
                     (FileChange(path, content),),
                 ),
             )

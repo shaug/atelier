@@ -215,8 +215,16 @@ class GitMailboxWriter:
         with tempfile.TemporaryDirectory(prefix="atelier-mailbox-write-") as temporary:
             checkout = Path(temporary) / "mailbox"
             self._initialize(checkout)
+            latest_observed_revision: str | None = None
             for attempt in range(1, self.max_attempts + 1):
                 base_revision = self._fetch_current(checkout)
+                if latest_observed_revision is not None:
+                    self._require_canonical_descendant(
+                        checkout,
+                        base_revision=latest_observed_revision,
+                        operation=operation,
+                    )
+                latest_observed_revision = base_revision
                 self._reset(checkout)
                 snapshot = reconstruct_mailbox(checkout)
                 if snapshot["canonical_branch"] != self.branch:
@@ -286,6 +294,11 @@ class GitMailboxWriter:
                     checkout,
                     base_revision=base_revision,
                     operation=operation,
+                )
+                latest_observed_revision = self._output(
+                    checkout,
+                    ("rev-parse", READBACK_REF),
+                    "resolve observed canonical mailbox head",
                 )
                 if attempt == self.max_attempts:
                     raise MailboxRetryExhausted(
