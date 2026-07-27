@@ -9,7 +9,7 @@ import json
 import re
 import subprocess
 import sys
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -32,11 +32,13 @@ EXPECTED_DELEGATED_KEYS = {
     "skill_sha256",
     "capability_manifest",
     "capability_manifest_sha256",
+    "bundle_sha256",
 }
 EXPECTED_NATIVE_STATE_KEYS = {
     "access",
     "connector",
     "observation_schema",
+    "freshness",
     "required_operations",
 }
 CAPABILITY_FILE_FIELDS = (
@@ -47,6 +49,15 @@ CAPABILITY_FILE_FIELDS = (
     "result_schema",
     "validator",
 )
+BUNDLE_FILES = {
+    "CONTRACT.md",
+    "capability.schema.json",
+    "invocation.schema.json",
+    "checkpoint-request.schema.json",
+    "checkpoint-response.schema.json",
+    "result.schema.json",
+    "validate.py",
+}
 
 
 class HostBoundaryError(ValueError):
@@ -86,6 +97,16 @@ def _matches_type(value: Any, expected: str) -> bool:
     if expected == "null":
         return value is None
     return False
+
+
+def _parse_timestamp(value: str, label: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise HostBoundaryError(f"{label} must be an ISO 8601 date-time") from error
+    if parsed.utcoffset() is None:
+        raise HostBoundaryError(f"{label} must include a UTC offset")
+    return parsed
 
 
 def _resolve_schema_ref(schema: dict[str, Any], root: dict[str, Any]) -> dict[str, Any]:
@@ -137,12 +158,9 @@ def _schema_errors(
                 errors.append(f"{at}: does not match {pattern!r}")
         if schema.get("format") == "date-time":
             try:
-                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            except ValueError:
-                errors.append(f"{at}: expected ISO 8601 date-time")
-            else:
-                if parsed.utcoffset() is None:
-                    errors.append(f"{at}: date-time must include a UTC offset")
+                _parse_timestamp(value, at)
+            except HostBoundaryError as error:
+                errors.append(str(error))
     if isinstance(value, int) and not isinstance(value, bool):
         if "minimum" in schema and value < schema["minimum"]:
             errors.append(f"{at}: must be at least {schema['minimum']}")
@@ -214,6 +232,30 @@ def load_descriptor(path: Path = DEFAULT_DESCRIPTOR) -> dict[str, Any]:
     _require_exact_keys(native_state, EXPECTED_NATIVE_STATE_KEYS, "native_state")
     if native_state["access"] != "read-only":
         raise HostBoundaryError("native_state.access must be read-only")
+    bundle = delegated["bundle_sha256"]
+    if not isinstance(bundle, dict):
+        raise HostBoundaryError("delegated_skill.bundle_sha256 must be an object")
+    _require_exact_keys(bundle, BUNDLE_FILES, "delegated_skill.bundle_sha256")
+    if any(
+        not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+        for digest in bundle.values()
+    ):
+        raise HostBoundaryError("delegated_skill.bundle_sha256 values must be SHA-256 digests")
+    freshness = native_state["freshness"]
+    if not isinstance(freshness, dict):
+        raise HostBoundaryError("native_state.freshness must be an object")
+    _require_exact_keys(
+        freshness,
+        {"max_age_seconds", "max_future_skew_seconds"},
+        "native_state.freshness",
+    )
+    if any(
+        not isinstance(freshness[field], int)
+        or isinstance(freshness[field], bool)
+        or freshness[field] < 0
+        for field in freshness
+    ):
+        raise HostBoundaryError("native_state.freshness values must be nonnegative integers")
     operations = native_state["required_operations"]
     if (
         not isinstance(operations, list)
@@ -280,6 +322,14 @@ def check_host(
         raise HostBoundaryError("delegated capability manifest identifier mismatch")
 
     capability_root = manifest_path.parent
+    for name, expected_digest in delegated["bundle_sha256"].items():
+        bundle_path = _resolve_within(
+            capability_root,
+            name,
+            f"delegated capability bundle file {name}",
+        )
+        if _sha256(bundle_path) != expected_digest:
+            raise HostBoundaryError(f"delegated capability bundle hash mismatch: {name}")
     referenced: dict[str, Path] = {}
     for field in CAPABILITY_FILE_FIELDS:
         relative = manifest.get(field)
@@ -360,6 +410,11 @@ def _require_unique_ids(items: list[dict[str, Any]], label: str) -> None:
 
 def validate_observation(
     path: Path,
+    *,
+    not_before: datetime,
+    now: datetime | None = None,
+    max_age_seconds: int = 300,
+    max_future_skew_seconds: int = 5,
     schema_path: Path = ROOT / "references" / "github-observation.schema.json",
 ) -> dict[str, Any]:
     """Validate one complete, normalized, read-only GitHub observation."""
@@ -371,6 +426,19 @@ def validate_observation(
         if len(errors) > 5:
             detail += f"; and {len(errors) - 5} more"
         raise HostBoundaryError(detail)
+
+    if not_before.utcoffset() is None:
+        raise HostBoundaryError("read boundary must include a UTC offset")
+    validation_time = now or datetime.now(UTC)
+    if validation_time.utcoffset() is None:
+        raise HostBoundaryError("validation time must include a UTC offset")
+    observed_at = _parse_timestamp(value["observed_at"], "observed_at")
+    if observed_at < not_before:
+        raise HostBoundaryError("observation predates the live-read boundary")
+    if observed_at > validation_time + timedelta(seconds=max_future_skew_seconds):
+        raise HostBoundaryError("observation timestamp is implausibly in the future")
+    if validation_time - observed_at > timedelta(seconds=max_age_seconds):
+        raise HostBoundaryError("observation is older than the allowed freshness window")
 
     repository = value["repository"]["name_with_owner"]
     issue = value["issue"]
@@ -421,6 +489,11 @@ def _parser() -> argparse.ArgumentParser:
         help="Validate one normalized GitHub observation",
     )
     observation.add_argument("path", type=Path)
+    observation.add_argument(
+        "--not-before",
+        required=True,
+        help="UTC timestamp captured immediately before the live provider reads",
+    )
     return parser
 
 
@@ -436,7 +509,14 @@ def main() -> int:
                 operations=args.operation,
             )
         else:
-            observation = validate_observation(args.path)
+            descriptor = load_descriptor(args.descriptor)
+            freshness = descriptor["native_state"]["freshness"]
+            observation = validate_observation(
+                args.path,
+                not_before=_parse_timestamp(args.not_before, "--not-before"),
+                max_age_seconds=freshness["max_age_seconds"],
+                max_future_skew_seconds=freshness["max_future_skew_seconds"],
+            )
             pull_request = observation["pull_request"]
             result = {
                 "schema": "atelier.observation-check/v1",

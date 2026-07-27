@@ -13,9 +13,9 @@ Before native-state inspection or future work delegation:
    Use the exact installed skill root supplied by Codex. A same-named repository
    skill, source checkout, copied directory, or guessed cache path is not an
    installed identity.
-   The helper also verifies that the dependency's invocation schema supports
-   every v0 authority action and terminal state declared by
-   `host-capability.json`.
+   The helper pins the complete delegated-execution contract bundle, then
+   verifies that the dependency's invocation schema supports every v0 authority
+   action and terminal state declared by `host-capability.json`.
 2. Prove that `github@openai-curated` is installed and callable in the current
    Codex task. Connector installation and GitHub authorization are separate
    prerequisites.
@@ -40,16 +40,24 @@ Before native-state inspection or future work delegation:
      --operation github.pull-request.threads.read
    ```
 
-5. Read live GitHub state and normalize it to
+5. Capture a UTC `read_started_at` timestamp immediately before the first live
+   provider read. Read live GitHub state and normalize it to
    `github-observation.schema.json`. Preserve GitHub node IDs, exact candidate
    SHAs, timestamps, native `parent`, `subIssues`, `blockedBy`, and `blocking`
    relationships, and complete pagination. Mark every completeness field true
-   only after the corresponding collection is fully read.
+   only after the corresponding collection is fully read. Set `observed_at`
+   after the last required read completes.
 6. Validate the observation:
 
    ```text
-   python3 scripts/host_boundary.py validate-observation <observation.json>
+   python3 scripts/host_boundary.py validate-observation \
+     <observation.json> \
+     --not-before <read_started_at>
    ```
+
+   The descriptor's deterministic freshness fence accepts observations no more
+   than five minutes old, permits five seconds of future clock skew, and rejects
+   evidence captured before this read boundary.
 
 Delete or retain the temporary observation according to the invoking task's
 artifact policy. It is an observation, not shared Atelier state.
@@ -63,7 +71,8 @@ diagnostic emitted by the helper or name the missing connector operation.
 In particular, fail closed when:
 
 - the plugin-qualified skill name is unavailable or resolves ambiguously;
-- the installed skill or capability manifest hash differs;
+- the installed skill, capability manifest, or delegated protocol bundle hash
+  differs;
 - the dependency-owned manifest validator fails;
 - any manifest-referenced schema, contract, or validator is missing;
 - the GitHub connector identity or authorization cannot be proven;

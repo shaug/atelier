@@ -74,7 +74,8 @@ Preserve these boundaries in every future mode:
 - Delivery is not acceptance. Acceptance is not merge, deployment, or native
   ticket completion.
 - Every consequential action is bounded by current authority and fails closed on
-  missing, stale, contradictory, or unverifiable state.
+  missing, pre-read, stale, contradictory, or unverifiable state. Pin the
+  dependency's complete delegated protocol bundle before trusting it.
 - Do not add Beads, Dolt, SQLite, a daemon, a server, a persistent projection,
   or backward compatibility.
 

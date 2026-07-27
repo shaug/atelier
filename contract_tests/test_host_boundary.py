@@ -7,6 +7,7 @@ import importlib.util
 import json
 import tempfile
 import unittest
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 
@@ -197,6 +198,7 @@ class HostBoundaryContract(unittest.TestCase):
         )
         for name in (
             "CONTRACT.md",
+            "capability.schema.json",
             "checkpoint-request.schema.json",
             "checkpoint-response.schema.json",
             "result.schema.json",
@@ -235,6 +237,9 @@ class HostBoundaryContract(unittest.TestCase):
         }
         self.manifest_path = capability_root / "capability.json"
         write_json(self.manifest_path, manifest)
+        bundle_sha256 = {
+            name: sha256(capability_root / name) for name in HOST_BOUNDARY.BUNDLE_FILES
+        }
 
         self.schema_path = self.root / "github-observation.schema.json"
         write_json(self.schema_path, {"type": "object"})
@@ -250,11 +255,16 @@ class HostBoundaryContract(unittest.TestCase):
                 "skill_sha256": sha256(self.skill_file),
                 "capability_manifest": ("references/delegated-execution/capability.json"),
                 "capability_manifest_sha256": sha256(self.manifest_path),
+                "bundle_sha256": bundle_sha256,
             },
             "native_state": {
                 "access": "read-only",
                 "connector": "github@openai-curated",
                 "observation_schema": self.schema_path.name,
+                "freshness": {
+                    "max_age_seconds": 300,
+                    "max_future_skew_seconds": 5,
+                },
                 "required_operations": REQUIRED_OPERATIONS,
             },
             "native_state_access": "read-only",
@@ -278,6 +288,30 @@ class HostBoundaryContract(unittest.TestCase):
         path = self.root / "observation.json"
         write_json(path, value)
         return path
+
+    def validate_observation(
+        self,
+        value: dict[str, object],
+        *,
+        not_before: datetime | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, object]:
+        """Validate an observation against a deterministic live-read window."""
+        read_boundary = not_before or datetime(2026, 7, 27, 3, tzinfo=UTC)
+        validation_time = now or read_boundary + timedelta(seconds=30)
+        return HOST_BOUNDARY.validate_observation(
+            self.write_observation(value),
+            not_before=read_boundary,
+            now=validation_time,
+            schema_path=OBSERVATION_SCHEMA,
+        )
+
+    def trust_changed_bundle_file(self, name: str) -> None:
+        """Update the fixture descriptor to trust one intentionally changed file."""
+        descriptor = json.loads(self.descriptor_path.read_text(encoding="utf-8"))
+        capability_root = self.manifest_path.parent
+        descriptor["delegated_skill"]["bundle_sha256"][name] = sha256(capability_root / name)
+        write_json(self.descriptor_path, descriptor)
 
     def test_host_capability_is_published(self) -> None:
         """Require a versioned, fail-closed host capability descriptor."""
@@ -335,7 +369,28 @@ class HostBoundaryContract(unittest.TestCase):
         (self.manifest_path.parent / "result.schema.json").unlink()
         with self.assertRaisesRegex(
             HOST_BOUNDARY.HostBoundaryError,
-            "result_schema missing",
+            "bundle file result.schema.json missing",
+        ):
+            self.check_host()
+
+    def test_changed_result_schema_fails_closed(self) -> None:
+        """Reject a protocol schema whose bytes differ from the pinned bundle."""
+        write_json(self.manifest_path.parent / "result.schema.json", {"type": "string"})
+        with self.assertRaisesRegex(
+            HOST_BOUNDARY.HostBoundaryError,
+            "bundle hash mismatch: result.schema.json",
+        ):
+            self.check_host()
+
+    def test_changed_dependency_validator_fails_closed(self) -> None:
+        """Reject a dependency validator whose bytes differ from the pinned bundle."""
+        (self.manifest_path.parent / "validate.py").write_text(
+            "raise SystemExit(0)\n",
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(
+            HOST_BOUNDARY.HostBoundaryError,
+            "bundle hash mismatch: validate.py",
         ):
             self.check_host()
 
@@ -348,6 +403,7 @@ class HostBoundaryContract(unittest.TestCase):
                 "$defs": {"action": {"enum": AUTHORITY_ACTIONS[:-1]}},
             },
         )
+        self.trust_changed_bundle_file("invocation.schema.json")
         with self.assertRaisesRegex(
             HOST_BOUNDARY.HostBoundaryError,
             "review.resolve",
@@ -357,8 +413,28 @@ class HostBoundaryContract(unittest.TestCase):
     def test_complete_native_observation_passes(self) -> None:
         """Accept complete issue, PR, review, check, and thread evidence."""
         observation = complete_observation()
-        result = HOST_BOUNDARY.validate_observation(self.write_observation(observation))
+        result = self.validate_observation(observation)
         self.assertEqual(result["pull_request"]["head"]["sha"], HEAD_SHA)
+
+    def test_observation_at_read_boundary_passes(self) -> None:
+        """Accept a fresh observation captured exactly at the live-read boundary."""
+        boundary = datetime(2026, 7, 27, 3, tzinfo=UTC)
+        result = self.validate_observation(
+            complete_observation(),
+            not_before=boundary,
+            now=boundary + timedelta(seconds=300),
+        )
+        self.assertEqual(result["observed_at"], "2026-07-27T03:00:00Z")
+
+    def test_observation_before_read_boundary_fails_closed(self) -> None:
+        """Reject structurally valid evidence captured before the current live read."""
+        observation = complete_observation()
+        observation["observed_at"] = "2026-07-27T02:59:59Z"
+        with self.assertRaisesRegex(
+            HOST_BOUNDARY.HostBoundaryError,
+            "predates the live-read boundary",
+        ):
+            self.validate_observation(observation)
 
     def test_unknown_observation_field_fails_closed(self) -> None:
         """Reject provider drift rather than silently ignoring unknown state."""
@@ -368,7 +444,7 @@ class HostBoundaryContract(unittest.TestCase):
             HOST_BOUNDARY.HostBoundaryError,
             r"\$\.unexpected: unknown property",
         ):
-            HOST_BOUNDARY.validate_observation(self.write_observation(observation))
+            self.validate_observation(observation)
 
     def test_check_candidate_mismatch_fails_closed(self) -> None:
         """Bind check observations to the exact pull-request head."""
@@ -378,7 +454,7 @@ class HostBoundaryContract(unittest.TestCase):
             HOST_BOUNDARY.HostBoundaryError,
             "candidate SHA mismatch",
         ):
-            HOST_BOUNDARY.validate_observation(self.write_observation(observation))
+            self.validate_observation(observation)
 
     def test_incomplete_pagination_fails_closed(self) -> None:
         """Reject a partial collection even when its visible items are valid."""
@@ -388,7 +464,7 @@ class HostBoundaryContract(unittest.TestCase):
             HOST_BOUNDARY.HostBoundaryError,
             r"\$\.completeness\.threads: expected constant True",
         ):
-            HOST_BOUNDARY.validate_observation(self.write_observation(observation))
+            self.validate_observation(observation)
 
     def test_pull_request_collections_require_pull_request_identity(self) -> None:
         """Do not accept orphaned review evidence."""
@@ -398,7 +474,7 @@ class HostBoundaryContract(unittest.TestCase):
             HOST_BOUNDARY.HostBoundaryError,
             "collections require pull_request identity",
         ):
-            HOST_BOUNDARY.validate_observation(self.write_observation(observation))
+            self.validate_observation(observation)
 
 
 if __name__ == "__main__":
