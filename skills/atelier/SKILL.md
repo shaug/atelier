@@ -60,17 +60,21 @@ An explicit host-readiness request may complete the read-only host preflight and
 return its exact compatibility or failure result. That does not make any
 production mode available.
 
-## Mailbox document boundary
+## Mailbox boundary
 
 The strict v1 mailbox schema and fresh-clone reconstruction helper are
-implemented, but canonical Git writes and every production mode remain
-unavailable. Before interpreting mailbox documents, read
-`references/mailbox-validation.md` and use its read-only helper.
+implemented. Verified fast-forward canonical writes are also implemented, but
+every production mode remains unavailable. Before interpreting mailbox
+documents, read `references/mailbox-validation.md` and use its read-only helper.
+Before persisting a transition, read `references/git-mailbox-writes.md` and use
+its isolated compare-and-swap writer.
 
 Fail closed on every unsupported schema, unknown normative field, invalid
 lifecycle combination, contradictory reference, or missing external readiness
 gate. The reconstructed snapshot is invocation-local and must never be written
-back as a manifest, cache, index, or projection.
+back as a manifest, cache, index, or projection. A caller must supply fresh
+operation-specific lifecycle, policy, ticket, claim, candidate, and authority
+checks; the Git writer supplies persistence, not permission.
 
 ## Invariants
 
