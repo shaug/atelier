@@ -20,15 +20,24 @@ from contract_tests.test_planning import (
     write_json,
 )
 from skills.atelier.scripts.claiming import (
+    AttemptEvidence,
     CheckpointRequest,
     ClaimCoordinator,
     ClaimFence,
     ClaimingError,
     HostTarget,
+    _attempt_receipt,
     _candidate_remote_reachable,
+    _render_document,
     new_identifier,
 )
-from skills.atelier.scripts.git_mailbox import MailboxTransitionRejected
+from skills.atelier.scripts.git_mailbox import (
+    FileChange,
+    GitMailboxWriter,
+    MailboxTransitionRejected,
+    TransitionPlan,
+    run_git,
+)
 from skills.atelier.scripts.mailbox import _read_yaml, reconstruct_mailbox
 from skills.atelier.scripts.planning import (
     ApprovalEnvelope,
@@ -258,8 +267,10 @@ class ClaimingContract(unittest.TestCase):
         candidate_head: str | None = None,
         phase: str = "pre_external_mutation",
         candidate: dict[str, Any] | None = None,
+        coordinator: ClaimCoordinator | None = None,
+        host_target: HostTarget | None = None,
     ):
-        return self.coordinator.authorize(
+        return (coordinator or self.coordinator).authorize(
             self.work_id,
             CheckpointRequest(
                 fence=self.fence(result),
@@ -276,6 +287,7 @@ class ClaimingContract(unittest.TestCase):
             ),
             approved_commit=self.approved_commit,
             policy_target=self.policy_target(),
+            host_target=host_target or self.host_target(),
             observation_path=self.observation_path,
             observation_not_before=self.live_at,
             now=OBSERVED_AT + timedelta(minutes=2),
@@ -294,7 +306,7 @@ class ClaimingContract(unittest.TestCase):
             "published_at": "2026-07-28T04:02:00Z",
         }
 
-    def publish_candidate_with_descendant(self):
+    def publish_candidate_with_descendant(self, *, with_pull_request: bool = False):
         candidate_head = git(self.project_checkout, "rev-parse", "HEAD").stdout.strip()
         candidate_ref = "refs/heads/scott/example-work"
         git(self.project_checkout, "push", "origin", f"{candidate_head}:{candidate_ref}")
@@ -323,6 +335,29 @@ class ClaimingContract(unittest.TestCase):
             phase="candidate_published",
             candidate=candidate,
         )
+        if with_pull_request:
+            pull_request = self.checkpoint(
+                published,
+                action="pull_request.create",
+                token="token-3",
+                candidate_head=candidate_head,
+            )
+            republish = self.checkpoint(
+                pull_request,
+                action="repository.candidate.push",
+                token="token-4",
+                candidate_head=candidate_head,
+            )
+            candidate = dict(candidate)
+            candidate["pull_request"] = "https://github.com/example/project-1/pull/778"
+            published = self.checkpoint(
+                republish,
+                action="repository.candidate.push",
+                token="token-5",
+                candidate_head=candidate_head,
+                phase="candidate_published",
+                candidate=candidate,
+            )
         candidate_marker = self.project_checkout / "candidate.txt"
         candidate_marker.write_text("descendant\n", encoding="utf-8")
         git(self.project_checkout, "add", str(candidate_marker))
@@ -338,6 +373,71 @@ class ClaimingContract(unittest.TestCase):
         )
         git(self.project_checkout, "push", "origin", f"HEAD:{candidate_ref}")
         return published, candidate_head
+
+    def deliver_candidate(self, published, candidate_head: str) -> str:
+        receipt_id = new_identifier("rcp")
+        planned: dict[str, Any] = {}
+
+        def revalidate(context) -> None:
+            work, body = _read_yaml(
+                context.checkout / f"work/{self.work_id}/work.md",
+                frontmatter=True,
+                label="work",
+            )
+            self.assertEqual(work["claim"]["id"], published.claim_id)
+            receipt = _attempt_receipt(
+                work,
+                work["claim"],
+                receipt_id=receipt_id,
+                outcome="delivered",
+                mutation_ownership="retained",
+                ended_at=OBSERVED_AT + timedelta(minutes=4),
+                evidence=AttemptEvidence(
+                    validation=(
+                        {
+                            "command": "just test",
+                            "outcome": "passed",
+                            "candidate_revision": candidate_head,
+                            "observed_at": fixtures.TIMESTAMP,
+                        },
+                    ),
+                    reviews=(
+                        {
+                            "mechanism": "review-code-change",
+                            "verdict": "clean",
+                            "candidate_revision": candidate_head,
+                            "comparison_base_revision": work["claim"]["candidate"][
+                                "base_revision"
+                            ],
+                            "observed_at": fixtures.TIMESTAMP,
+                        },
+                    ),
+                ),
+            )
+            planned.clear()
+            planned.update(work=work, body=body, receipt=receipt)
+
+        def plan(context) -> TransitionPlan:
+            work = dict(planned["work"])
+            work["status"] = "delivered"
+            work["attempt_receipt_id"] = receipt_id
+            work["delivery_receipt_id"] = receipt_id
+            return TransitionPlan(
+                commit_message=f"deliver {self.work_id} for takeover contract",
+                changes=(
+                    FileChange(
+                        f"work/{self.work_id}/receipts/{receipt_id}.md",
+                        _render_document(planned["receipt"], "Delivered candidate."),
+                    ),
+                    FileChange(
+                        f"work/{self.work_id}/work.md",
+                        _render_document(work, planned["body"]),
+                    ),
+                ),
+            )
+
+        self.coordinator.writer.publish("deliver", revalidate=revalidate, plan=plan)
+        return receipt_id
 
     def mailbox_clone(self, name: str) -> Path:
         checkout = self.root / name
@@ -529,6 +629,46 @@ class ClaimingContract(unittest.TestCase):
                 ended_at=OBSERVED_AT + timedelta(minutes=5),
             )
 
+    def test_delivered_takeover_returns_active_with_historical_delivery(self) -> None:
+        published, candidate_head = self.publish_candidate_with_descendant(
+            with_pull_request=True
+        )
+        receipt_id = self.deliver_candidate(published, candidate_head)
+        takeover = self.coordinator.takeover(
+            self.work_id,
+            self.fence(published),
+            claim_id=new_identifier("clm"),
+            worker_run_id=new_identifier("run"),
+            continuation_token="delivered-takeover-token-0",
+            takeover_message_id=new_identifier("msg"),
+            reason="Continue from the delivered candidate under a replacement claim.",
+            taken_over_at=OBSERVED_AT + timedelta(minutes=5),
+            approved_commit=self.approved_commit,
+            policy_target=self.policy_target(),
+            host_target=self.host_target(),
+            observation_path=self.observation_path,
+            observation_not_before=self.live_at,
+            now=OBSERVED_AT + timedelta(minutes=5),
+        )
+        checkout = self.mailbox_clone("delivered-takeover-read")
+        work, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="work",
+        )
+        receipt, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/receipts/{receipt_id}.md",
+            frontmatter=True,
+            label="delivery receipt",
+        )
+        snapshot = reconstruct_mailbox(checkout)
+        self.assertEqual(takeover.status, "active")
+        self.assertEqual(work["status"], "active")
+        self.assertEqual(work["attempt_receipt_id"], receipt_id)
+        self.assertIsNone(work["delivery_receipt_id"])
+        self.assertEqual(receipt["candidate"]["head_revision"], candidate_head)
+        self.assertEqual(snapshot["views"]["active"], [self.work_id])
+
     def test_release_and_reclaim_accept_reachable_candidate_ancestor(self) -> None:
         published, candidate_head = self.publish_candidate_with_descendant()
         released = self.coordinator.release(
@@ -548,6 +688,93 @@ class ClaimingContract(unittest.TestCase):
         )
         self.assertEqual(reclaimed.status, "active")
         self.assertEqual(work["claim"]["candidate"]["head_revision"], candidate_head)
+
+    def test_checkpoint_capability_absence_and_retry_drift_fail_before_allowance(self) -> None:
+        claimed = self.claim()
+        unavailable = ClaimCoordinator(
+            str(self.mailbox_remote),
+            "main",
+            capability_verifier=lambda target: False,
+        )
+        with self.assertRaisesRegex(ClaimingError, "capability is unavailable"):
+            self.checkpoint(
+                claimed,
+                action="repository.candidate.push",
+                token="missing-capability-token",
+                candidate_head=HEAD,
+                coordinator=unavailable,
+            )
+
+        message_id = new_identifier("msg")
+        message = {
+            "schema": "atelier.message/v1",
+            "id": message_id,
+            "work_id": self.work_id,
+            "kind": "instruction",
+            "author_role": "planner",
+            "worker_run_id": None,
+            "audience": "worker",
+            "in_reply_to": None,
+            "resolves": None,
+            "blocks": None,
+            "created_at": fixtures.TIMESTAMP,
+            "subject": "Concurrent instruction",
+        }
+        concurrent_writer = GitMailboxWriter(str(self.mailbox_remote), "main")
+
+        def advance() -> None:
+            concurrent_writer.publish(
+                "concurrent instruction",
+                revalidate=lambda context: None,
+                plan=lambda context: TransitionPlan(
+                    commit_message="append concurrent instruction",
+                    changes=(
+                        FileChange(
+                            f"work/{self.work_id}/messages/{message_id}.md",
+                            _render_document(message, "Revalidate before continuing."),
+                        ),
+                    ),
+                ),
+            )
+
+        advance_pending = True
+
+        def runner(cwd, arguments):
+            nonlocal advance_pending
+            if arguments and arguments[0] == "push" and advance_pending:
+                advance_pending = False
+                advance()
+            return run_git(cwd, arguments)
+
+        capability_checks = 0
+
+        def capability_verifier(target) -> bool:
+            nonlocal capability_checks
+            capability_checks += 1
+            return capability_checks == 1
+
+        retrying = ClaimCoordinator(
+            str(self.mailbox_remote),
+            "main",
+            writer=GitMailboxWriter(str(self.mailbox_remote), "main", runner=runner),
+            capability_verifier=capability_verifier,
+        )
+        with self.assertRaisesRegex(ClaimingError, "capability is unavailable"):
+            self.checkpoint(
+                claimed,
+                action="repository.candidate.push",
+                token="drifted-capability-token",
+                candidate_head=HEAD,
+                coordinator=retrying,
+            )
+        checkout = self.mailbox_clone("capability-drift-read")
+        work, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="work",
+        )
+        self.assertEqual(capability_checks, 2)
+        self.assertEqual(work["claim"]["checkpoint"]["sequence"], 0)
 
     def test_missing_capability_and_wrong_approval_commit_fail_before_mailbox_write(self) -> None:
         before = git(

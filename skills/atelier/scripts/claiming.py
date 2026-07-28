@@ -200,11 +200,10 @@ class ClaimCoordinator:
         _require_sha(approved_commit, "approved_commit")
         _require_token(continuation_token, "continuation_token")
         _require_timestamp(claimed_at, "claimed_at")
-        if not self.capability_verifier(host_target):
-            raise ClaimingError("required delegated implement-ticket capability is unavailable")
         planned: dict[str, Any] = {}
 
         def revalidate(context: TransitionContext) -> None:
+            self._verify_capability(host_target)
             state = self._execution_state(
                 context,
                 work_id,
@@ -283,6 +282,7 @@ class ClaimCoordinator:
         *,
         approved_commit: str,
         policy_target: PolicyTarget,
+        host_target: HostTarget,
         observation_path: Path,
         observation_not_before: datetime,
         now: datetime | None = None,
@@ -293,6 +293,7 @@ class ClaimCoordinator:
         planned: dict[str, Any] = {}
 
         def revalidate(context: TransitionContext) -> None:
+            self._verify_capability(host_target)
             state = self._execution_state(
                 context,
                 work_id,
@@ -498,11 +499,10 @@ class ClaimCoordinator:
         _require_token(continuation_token, "continuation_token")
         _require_text(reason, "reason")
         _require_timestamp(taken_over_at, "taken_over_at")
-        if not self.capability_verifier(host_target):
-            raise ClaimingError("required delegated implement-ticket capability is unavailable")
         planned: dict[str, Any] = {}
 
         def revalidate(context: TransitionContext) -> None:
+            self._verify_capability(host_target)
             state = self._execution_state(
                 context,
                 work_id,
@@ -537,6 +537,7 @@ class ClaimCoordinator:
                 "candidate": copy.deepcopy(prior_claim["candidate"]),
             }
             current_status = state.work["status"]
+            takeover_status = "active" if current_status == "delivered" else current_status
             current_blocker = state.work["blocking_message_id"]
             takeover_message = {
                 "schema": "atelier.message/v1",
@@ -557,7 +558,7 @@ class ClaimCoordinator:
                 state=state,
                 claim=new_claim,
                 takeover_message=takeover_message,
-                status=current_status,
+                status=takeover_status,
             )
 
         def plan(context: TransitionContext) -> TransitionPlan:
@@ -784,6 +785,12 @@ class ClaimCoordinator:
         )
         claim["checkpoint"]["sequence"] = next_sequence
         claim["checkpoint"]["continuation_token"] = request.next_continuation_token
+
+    def _verify_capability(self, target: HostTarget) -> None:
+        if not self.capability_verifier(target):
+            raise ClaimingError(
+                "required delegated implement-ticket capability is unavailable"
+            )
 
     def _verify_candidate(self, candidate: Mapping[str, Any] | None) -> None:
         if candidate is not None and not self.candidate_verifier(candidate):
@@ -1279,6 +1286,7 @@ def main() -> int:
                 ),
                 approved_commit=request["approved_commit"],
                 policy_target=policy,
+                host_target=_host_target(request["host"]),
                 observation_path=observation,
                 observation_not_before=not_before,
                 now=now,

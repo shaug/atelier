@@ -23,10 +23,11 @@ Before `claim`, `checkpoint`, or `takeover`:
 5. Supply the exact installed Agent Scripts skill root, stable name, connector
    identity, and complete read-only operation set required by the host descriptor.
 
-The script rereads approved and current policy, the canonical mailbox, the
-approved work transition, and the material ticket observation during every
-write attempt. It combines policy using the Project Policy Contract and fails
-closed on incompatible identity, eligibility, authority, or evidence drift.
+The script rechecks the pinned host capability and rereads approved and current
+policy, the canonical mailbox, the approved work transition, and the material
+ticket observation during every write attempt. It combines policy using the
+Project Policy Contract and fails closed on incompatible identity, eligibility,
+authority, capability, or evidence drift.
 
 ## Commands
 
@@ -130,9 +131,11 @@ recording the candidate.
   transferable candidate when one exists.
 - `takeover` requires the exact `replaced_fence`, fresh claim and run
   identifiers, a fresh continuation token, a stable `takeover_message_id`, a
-  reason, and timestamp. It records the rationale, resolves the current blocker
-  when present, starts an empty checkpoint ledger, and copies the prior
-  candidate exactly.
+  reason, and timestamp. It records the rationale, starts an empty checkpoint
+  ledger, and copies the prior candidate exactly. Blocked takeover preserves the
+  unresolved blocker and remains blocked. Delivered takeover clears only the
+  delivery pointer, retains the delivery as the current historical attempt, and
+  returns the transferred candidate to active work.
 
 Never invent a token after losing it, reuse a released claim or run identity,
 discard a candidate during takeover, combine release and reacquisition into one
