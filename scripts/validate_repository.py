@@ -82,8 +82,8 @@ def validate_skill(errors: list[str]) -> None:
         errors.append("Atelier skill frontmatter must include a description")
     if "[TODO:" in text:
         errors.append("Atelier skill contains a TODO placeholder")
-    if "The `work` and `audit` modes are not implemented yet" not in text:
-        errors.append("skill must state that work and audit modes are unavailable")
+    if "Delegated implementation and audit are not implemented yet" not in text:
+        errors.append("skill must state that delegated work and audit are unavailable")
 
 
 def validate_reset_boundary(errors: list[str]) -> None:
