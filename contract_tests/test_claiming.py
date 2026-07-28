@@ -629,6 +629,54 @@ class ClaimingContract(unittest.TestCase):
                 ended_at=OBSERVED_AT + timedelta(minutes=5),
             )
 
+    def test_blocked_release_keeps_decision_historical_without_resolving_it(self) -> None:
+        claimed = self.claim()
+        blocker_id = new_identifier("msg")
+        blocked = self.coordinator.block(
+            self.work_id,
+            self.fence(claimed),
+            message_id=blocker_id,
+            receipt_id=new_identifier("rcp"),
+            subject="A planner decision is required",
+            detail="Release must retain this unanswered decision as history.",
+            created_at=OBSERVED_AT + timedelta(minutes=3),
+        )
+        release_receipt_id = new_identifier("rcp")
+        released = self.coordinator.release(
+            self.work_id,
+            self.fence(blocked),
+            receipt_id=release_receipt_id,
+            reason="Relinquish the blocked attempt without inventing a resolution.",
+            ended_at=OBSERVED_AT + timedelta(minutes=4),
+        )
+        self.assertEqual(released.status, "approved")
+        reclaimed = self.claim(token="post-blocked-release-token")
+        checkout = self.mailbox_clone("blocked-release-read")
+        work, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="work",
+        )
+        blocker, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/messages/{blocker_id}.md",
+            frontmatter=True,
+            label="historical blocker",
+        )
+        release_receipt, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/receipts/{release_receipt_id}.md",
+            frontmatter=True,
+            label="release receipt",
+        )
+        snapshot = reconstruct_mailbox(checkout)
+        self.assertEqual(reclaimed.status, "active")
+        self.assertEqual(work["status"], "active")
+        self.assertIsNone(work["blocking_message_id"])
+        self.assertEqual(work["attempt_receipt_id"], release_receipt_id)
+        self.assertEqual(blocker["blocks"], "worker")
+        self.assertIsNone(blocker["resolves"])
+        self.assertEqual(release_receipt["outcome"], "released")
+        self.assertEqual(snapshot["views"]["active"], [self.work_id])
+
     def test_delivered_takeover_returns_active_with_historical_delivery(self) -> None:
         published, candidate_head = self.publish_candidate_with_descendant(
             with_pull_request=True

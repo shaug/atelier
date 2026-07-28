@@ -128,7 +128,9 @@ recording the candidate.
   mutation ownership.
 - `release` adds a stable `receipt_id`, reason, timestamp, and optional evidence.
   It relinquishes mutation ownership, clears the claim, and preserves an exact
-  transferable candidate when one exists.
+  transferable candidate when one exists. A blocked release retains the unanswered
+  decision message as historical audit evidence without treating it as a current
+  blocker or falsely resolving it.
 - `takeover` requires the exact `replaced_fence`, fresh claim and run
   identifiers, a fresh continuation token, a stable `takeover_message_id`, a
   reason, and timestamp. It records the rationale, starts an empty checkpoint

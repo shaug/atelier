@@ -1244,10 +1244,22 @@ def _validate_lifecycle(
                         "decision resolutions require a planner or operator",
                     )
                 )
+    released_cutoffs = [
+        datetime.fromisoformat(receipt["ended_at"].replace("Z", "+00:00"))
+        for receipt in work_receipts.values()
+        if receipt["outcome"] == "released"
+    ]
+    latest_release = max(released_cutoffs, default=None)
     unresolved_worker_blockers = sorted(
         message_id
         for message_id, message in work_messages.items()
-        if message["blocks"] == "worker" and message_id not in resolutions
+        if message["blocks"] == "worker"
+        and message_id not in resolutions
+        and (
+            latest_release is None
+            or datetime.fromisoformat(message["created_at"].replace("Z", "+00:00"))
+            > latest_release
+        )
     )
     expected_worker_blockers = [blocker] if blocker is not None else []
     if unresolved_worker_blockers != expected_worker_blockers:
