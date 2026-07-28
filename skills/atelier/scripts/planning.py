@@ -12,7 +12,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -67,6 +67,7 @@ ID_PATTERN = re.compile(
     r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 GITHUB_ISSUE_URL = re.compile(
     r"^https://github\.com/(?P<owner>[^/]+)/(?P<repository>[^/]+)/issues/(?P<number>[1-9][0-9]*)$"
 )
@@ -161,9 +162,14 @@ class PlanPreview:
     schema: str
     work_id: str
     revision: int
+    rendered_assignment: str
+    rendered_initiative: str | None
     work_digest: str
     initiative_digest: str | None
     ticket_observation_digest: str
+    ticket_repository: str
+    ticket_number: int
+    ticket_url: str
     policy_repository: str
     policy_commit: str
     policy_path: str
@@ -566,7 +572,9 @@ def _build_preview(
         envelope=envelope,
     )
     ticket_digest = _ticket_material_digest(observation["issue"], policy.value)
-    work_digest = _digest_bytes(work_path.read_bytes())
+    rendered_assignment = work_path.read_text(encoding="utf-8")
+    work_digest = _digest_bytes(rendered_assignment.encode())
+    rendered_initiative = None
     initiative_digest = None
     initiative_id = work["initiative_id"]
     if initiative_id is not None:
@@ -574,37 +582,30 @@ def _build_preview(
         initiative, _ = _read_document(initiative_path)
         if initiative["id"] != initiative_id:
             raise PlanningError(f"{initiative_id}: initiative document identity mismatch")
-        initiative_digest = _digest_bytes(initiative_path.read_bytes())
-    token_value = {
-        "schema": "atelier.plan-preview/v1",
-        "work_id": work_id,
-        "revision": expected_revision,
-        "work_digest": work_digest,
-        "initiative_digest": initiative_digest,
-        "ticket_observation_digest": ticket_digest,
-        "policy": {
-            "repository": policy.repository,
-            "commit": policy.commit,
-            "path": policy.path,
-        },
-        "authority_ceiling": list(envelope.authority_ceiling),
-        "required_evidence": list(envelope.required_evidence),
-    }
-    return PlanPreview(
+        rendered_initiative = initiative_path.read_text(encoding="utf-8")
+        initiative_digest = _digest_bytes(rendered_initiative.encode())
+    issue = observation["issue"]
+    preview = PlanPreview(
         schema="atelier.plan-preview/v1",
         work_id=work_id,
         revision=expected_revision,
+        rendered_assignment=rendered_assignment,
+        rendered_initiative=rendered_initiative,
         work_digest=work_digest,
         initiative_digest=initiative_digest,
         ticket_observation_digest=ticket_digest,
+        ticket_repository=observation["repository"]["name_with_owner"],
+        ticket_number=issue["number"],
+        ticket_url=issue["url"],
         policy_repository=policy.repository,
         policy_commit=policy.commit,
         policy_path=policy.path,
         authority_ceiling=envelope.authority_ceiling,
         required_evidence=envelope.required_evidence,
-        preview_digest=_digest_json(token_value),
+        preview_digest="",
         mailbox_commit=mailbox_commit,
     )
+    return replace(preview, preview_digest=_digest_json(_preview_token_value(preview)))
 
 
 def _require_project_and_ticket(
@@ -784,10 +785,101 @@ def _require_same_observation(
 
 
 def _require_preview_match(expected: PlanPreview, current: PlanPreview) -> None:
-    if current.preview_digest != expected.preview_digest:
+    _validate_preview(expected)
+    if current != expected:
         raise MailboxTransitionRejected(
             f"{expected.work_id}: previewed work, policy, ticket, or authority changed"
         )
+
+
+def _preview_token_value(preview: PlanPreview) -> dict[str, Any]:
+    return {
+        "schema": preview.schema,
+        "work_id": preview.work_id,
+        "revision": preview.revision,
+        "rendered_assignment": preview.rendered_assignment,
+        "rendered_initiative": preview.rendered_initiative,
+        "work_digest": preview.work_digest,
+        "initiative_digest": preview.initiative_digest,
+        "ticket_observation_digest": preview.ticket_observation_digest,
+        "ticket": {
+            "repository": preview.ticket_repository,
+            "number": preview.ticket_number,
+            "url": preview.ticket_url,
+        },
+        "policy": {
+            "repository": preview.policy_repository,
+            "commit": preview.policy_commit,
+            "path": preview.policy_path,
+        },
+        "authority_ceiling": list(preview.authority_ceiling),
+        "required_evidence": list(preview.required_evidence),
+        "mailbox_commit": preview.mailbox_commit,
+    }
+
+
+def _validate_preview(preview: PlanPreview) -> None:
+    if preview.schema != "atelier.plan-preview/v1":
+        raise PlanningError(f"unsupported preview schema {preview.schema!r}")
+    if not isinstance(preview.work_id, str):
+        raise PlanningError("preview work_id must be a string")
+    _require_identifier(preview.work_id, "wrk")
+    if type(preview.revision) is not int or preview.revision < 1:
+        raise PlanningError("preview revision must be a positive integer")
+    _require_text("preview.rendered_assignment", preview.rendered_assignment)
+    if (preview.rendered_initiative is None) != (preview.initiative_digest is None):
+        raise PlanningError("preview initiative content and digest must both be null or present")
+    if preview.rendered_initiative is not None:
+        _require_text("preview.rendered_initiative", preview.rendered_initiative)
+    for name in (
+        "work_digest",
+        "ticket_observation_digest",
+        "preview_digest",
+    ):
+        value = getattr(preview, name)
+        if not isinstance(value, str) or DIGEST_PATTERN.fullmatch(value) is None:
+            raise PlanningError(f"preview {name} must be a lowercase SHA-256 digest")
+    if (
+        preview.initiative_digest is not None
+        and (
+            not isinstance(preview.initiative_digest, str)
+            or DIGEST_PATTERN.fullmatch(preview.initiative_digest) is None
+        )
+    ):
+        raise PlanningError("preview initiative_digest must be a lowercase SHA-256 digest")
+    for name in ("policy_commit", "mailbox_commit"):
+        value = getattr(preview, name)
+        if not isinstance(value, str) or SHA_PATTERN.fullmatch(value) is None:
+            raise PlanningError(f"preview {name} must be a lowercase Git SHA")
+    _require_text("preview.ticket_repository", preview.ticket_repository)
+    if type(preview.ticket_number) is not int or preview.ticket_number < 1:
+        raise PlanningError("preview ticket_number must be a positive integer")
+    ticket_match = (
+        GITHUB_ISSUE_URL.fullmatch(preview.ticket_url)
+        if isinstance(preview.ticket_url, str)
+        else None
+    )
+    if (
+        ticket_match is None
+        or f"{ticket_match.group('owner')}/{ticket_match.group('repository')}"
+        != preview.ticket_repository
+        or int(ticket_match.group("number")) != preview.ticket_number
+    ):
+        raise PlanningError("preview ticket identity is contradictory")
+    _require_text("preview.policy_repository", preview.policy_repository)
+    _require_text("preview.policy_path", preview.policy_path)
+    _validate_envelope(
+        ApprovalEnvelope(preview.authority_ceiling, preview.required_evidence)
+    )
+    if _digest_bytes(preview.rendered_assignment.encode()) != preview.work_digest:
+        raise PlanningError("preview rendered assignment does not match work_digest")
+    if (
+        preview.rendered_initiative is not None
+        and _digest_bytes(preview.rendered_initiative.encode()) != preview.initiative_digest
+    ):
+        raise PlanningError("preview rendered initiative does not match initiative_digest")
+    if _digest_json(_preview_token_value(preview)) != preview.preview_digest:
+        raise PlanningError("preview digest does not match the complete preview")
 
 
 def _ticket_material_digest(
@@ -1065,13 +1157,35 @@ def _policy_target(value: Mapping[str, Any]) -> PolicyTarget:
 
 
 def _preview(value: Mapping[str, Any]) -> PlanPreview:
-    return PlanPreview(
+    expected_fields = {field.name for field in fields(PlanPreview)}
+    actual_fields = set(value)
+    if actual_fields != expected_fields:
+        missing = sorted(expected_fields - actual_fields)
+        unknown = sorted(actual_fields - expected_fields)
+        raise PlanningError(
+            f"preview fields do not match atelier.plan-preview/v1; "
+            f"missing={missing}, unknown={unknown}"
+        )
+    if not isinstance(value["authority_ceiling"], list) or not all(
+        isinstance(item, str) for item in value["authority_ceiling"]
+    ):
+        raise PlanningError("preview authority_ceiling must be an array of strings")
+    if not isinstance(value["required_evidence"], list) or not all(
+        isinstance(item, str) for item in value["required_evidence"]
+    ):
+        raise PlanningError("preview required_evidence must be an array of strings")
+    preview = PlanPreview(
         schema=value["schema"],
         work_id=value["work_id"],
         revision=value["revision"],
+        rendered_assignment=value["rendered_assignment"],
+        rendered_initiative=value["rendered_initiative"],
         work_digest=value["work_digest"],
         initiative_digest=value["initiative_digest"],
         ticket_observation_digest=value["ticket_observation_digest"],
+        ticket_repository=value["ticket_repository"],
+        ticket_number=value["ticket_number"],
+        ticket_url=value["ticket_url"],
         policy_repository=value["policy_repository"],
         policy_commit=value["policy_commit"],
         policy_path=value["policy_path"],
@@ -1080,6 +1194,8 @@ def _preview(value: Mapping[str, Any]) -> PlanPreview:
         preview_digest=value["preview_digest"],
         mailbox_commit=value["mailbox_commit"],
     )
+    _validate_preview(preview)
+    return preview
 
 
 def _common_request(value: Mapping[str, Any]) -> tuple[Planner, Path, datetime]:

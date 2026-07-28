@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import subprocess
 import tempfile
 import unittest
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,8 @@ from skills.atelier.scripts.planning import (
     Planner,
     PlanningError,
     PolicyTarget,
+    _digest_json,
+    _preview_token_value,
     new_identifier,
 )
 
@@ -44,6 +47,7 @@ EVIDENCE = (
     "independent-review-current",
     "unresolved-feedback-zero",
 )
+PLANNING_SCRIPT = Path(__file__).parents[1] / "skills/atelier/scripts/planning.py"
 
 
 def git(cwd: Path | None, *arguments: str) -> subprocess.CompletedProcess[str]:
@@ -306,6 +310,39 @@ class PlanningContract(unittest.TestCase):
         write_json(self.observation_path, refreshed)
         return approved_at
 
+    def cli_common_request(self, observed_at: datetime) -> dict[str, Any]:
+        observed_at_text = observed_at.astimezone(UTC).isoformat().replace("+00:00", "Z")
+        refreshed = observation()
+        refreshed["observed_at"] = observed_at_text
+        write_json(self.observation_path, refreshed)
+        return {
+            "mailbox": {
+                "remote": str(self.mailbox_remote),
+                "canonical_branch": "main",
+            },
+            "observation": {
+                "path": str(self.observation_path),
+                "not_before": observed_at_text,
+            },
+            "policy": {
+                "checkout": str(self.project_checkout),
+                "remote": "origin",
+                "canonical_ref": "refs/heads/main",
+                "path": ".atelier/policy.yaml",
+            },
+        }
+
+    def run_cli(self, command: str, request: dict[str, Any]) -> subprocess.CompletedProcess[str]:
+        request_path = self.root / f"{command}-{new_identifier('wrk')}.json"
+        write_json(request_path, request)
+        return subprocess.run(
+            ["python3", str(PLANNING_SCRIPT), command, str(request_path)],
+            cwd=Path(__file__).parents[1],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
     def test_create_publishes_one_non_executable_initiative_and_assignment(self) -> None:
         result = self.planner.create_draft(
             self.assignment(),
@@ -408,6 +445,85 @@ class PlanningContract(unittest.TestCase):
             list(EVIDENCE),
         )
         self.assertIsNone(work["claim"])
+
+    def test_preview_cli_displays_and_binds_complete_approval_content(self) -> None:
+        self.create()
+        request = self.cli_common_request(datetime.now(UTC))
+        request.update(
+            {
+                "work_id": self.work_id,
+                "expected_revision": 1,
+                "envelope": {
+                    "authority_ceiling": list(AUTHORITY),
+                    "required_evidence": list(EVIDENCE),
+                },
+            }
+        )
+
+        completed = self.run_cli("preview", request)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        preview = json.loads(completed.stdout)
+        self.assertIn("Produce durable approved intent.", preview["rendered_assignment"])
+        self.assertIn("Coordinate one accountable outcome.", preview["rendered_initiative"])
+        self.assertEqual(preview["ticket_repository"], "example/project-1")
+        self.assertEqual(preview["ticket_number"], 777)
+        self.assertEqual(
+            preview["ticket_url"],
+            "https://github.com/example/project-1/issues/777",
+        )
+        self.assertEqual(
+            preview["work_digest"],
+            f"sha256:{hashlib.sha256(preview['rendered_assignment'].encode()).hexdigest()}",
+        )
+        self.assertEqual(
+            preview["initiative_digest"],
+            f"sha256:{hashlib.sha256(preview['rendered_initiative'].encode()).hexdigest()}",
+        )
+
+    def test_approval_cli_rejects_noncanonical_or_contradictory_preview(self) -> None:
+        self.create()
+        preview = self.preview()
+        observed_at = datetime.now(UTC)
+        common = self.cli_common_request(observed_at)
+        approved_at = observed_at.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+        preview_values: list[tuple[str, dict[str, Any], str]] = []
+        unknown = asdict(preview)
+        unknown["future_authority"] = "unsupported"
+        preview_values.append(("unknown", unknown, "preview fields do not match"))
+        unsupported = asdict(preview)
+        unsupported["schema"] = "atelier.plan-preview/v999"
+        preview_values.append(("schema", unsupported, "unsupported preview schema"))
+        malformed = asdict(preview)
+        malformed["preview_digest"] = "not-a-digest"
+        preview_values.append(("digest", malformed, "lowercase SHA-256 digest"))
+        contradictory = replace(preview, policy_commit="0" * 40, preview_digest="")
+        contradictory = replace(
+            contradictory,
+            preview_digest=_digest_json(_preview_token_value(contradictory)),
+        )
+        preview_values.append(
+            (
+                "contradictory",
+                asdict(contradictory),
+                "previewed work, policy, ticket, or authority changed",
+            )
+        )
+
+        for label, preview_value, expected_error in preview_values:
+            with self.subTest(label=label):
+                request = copy.deepcopy(common)
+                request.update(
+                    {
+                        "preview": preview_value,
+                        "approved_by": "operator",
+                        "approved_at": approved_at,
+                    }
+                )
+                completed = self.run_cli("approve", request)
+                self.assertEqual(completed.returncode, 1, completed.stdout)
+                self.assertIn(expected_error, completed.stderr)
 
     def test_promotion_rejects_stale_or_ineligible_ticket_state(self) -> None:
         self.create()

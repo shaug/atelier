@@ -171,8 +171,10 @@ The preview fails closed unless:
 
 Show the operator the complete rendered initiative and assignment, revision,
 ticket identity, policy commit and path, authority ceiling, acceptance evidence,
-and returned `preview_digest`. Do not treat a request to draft, revise, preview,
-or continue as approval.
+and returned `preview_digest`. The preview JSON carries the exact rendered
+documents and canonical GitHub repository, issue number, and URL; those displayed
+values are part of the digest. Do not treat a request to draft, revise, preview, or
+continue as approval.
 
 ## Explicit promotion
 
@@ -191,6 +193,9 @@ Copy the complete preview result into a separate approval request and add:
 Retain the same `mailbox`, use a newly captured `observation`, and repeat the
 same `policy` target. The observation live-read boundary must be at or after the
 operator confirmation timestamp; a preview-time observation cannot be reused.
+The `preview` object is strict: unknown fields, missing fields, unsupported schema
+versions, malformed identities or digests, and internally contradictory content
+are rejected before promotion.
 Run:
 
 ```text
