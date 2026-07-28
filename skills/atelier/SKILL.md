@@ -39,19 +39,22 @@ observation is missing or mismatched. Never scan for a substitute skill, use a
 copied workflow, treat cached prose as native state, or cross into a provider
 mutation.
 
-## Reset scaffold
+## Available modes
 
-This release is the post-CLI reset scaffold. Production `plan`, `work`, and
-`audit` behavior is not implemented yet. Do not emulate missing Atelier behavior
-with ad hoc orchestration, hidden local state, copied Agent Scripts workflows,
-or tracker mutations.
+Production `plan` behavior is implemented only for one GitHub-backed assignment.
+Before planning, read `references/planning.md` and follow its draft, revision,
+preview, explicit operator approval, and promotion boundary. Use
+`scripts/planning.py`; do not emulate a second persistence or approval path.
 
-When invoked before the required mode is implemented:
+The `work` and `audit` modes are not implemented yet. Do not emulate missing
+Atelier behavior with ad hoc orchestration, hidden local state, copied Agent
+Scripts workflows, or tracker mutations.
 
-1. Identify the requested mode: `plan`, `work`, or `audit`.
+When either unavailable mode is requested:
+
+1. Identify the requested mode: `work` or `audit`.
 1. Report that the mode is unavailable in the reset scaffold.
 1. Link the owning issue:
-   - `plan`: shaug/atelier#777
    - `work`: shaug/atelier#778 and shaug/atelier#779
    - `audit`: shaug/atelier#780
 1. Make no mailbox, repository, ticket, pull-request, or acceptance mutation.
@@ -63,9 +66,9 @@ production mode available.
 ## Mailbox boundary
 
 The strict v1 mailbox schema and fresh-clone reconstruction helper are
-implemented. Verified fast-forward canonical writes are also implemented, but
-every production mode remains unavailable. Before interpreting mailbox
-documents, read `references/mailbox-validation.md` and use its read-only helper.
+implemented. Verified fast-forward canonical writes and the bounded plan-mode
+transitions are also implemented. Before interpreting mailbox documents, read
+`references/mailbox-validation.md` and use its read-only helper.
 Before persisting a transition, read `references/git-mailbox-writes.md` and use
 its isolated compare-and-swap writer.
 
