@@ -821,6 +821,44 @@ class PlanningContract(unittest.TestCase):
         second = self.preview()
         self.assertEqual(first.preview_digest, second.preview_digest)
 
+    def test_boolean_revision_identity_is_rejected_without_mailbox_write(self) -> None:
+        self.create()
+        before = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+
+        with self.assertRaisesRegex(PlanningError, "positive integer"):
+            self.planner.revise_draft(
+                self.assignment(intent="A malformed revision must not write."),
+                expected_revision=True,
+                observation_path=self.observation_path,
+                observation_not_before=OBSERVED_AT,
+                now=OBSERVED_AT + timedelta(seconds=30),
+            )
+        with self.assertRaisesRegex(PlanningError, "positive integer"):
+            self.planner.preview_approval(
+                self.work_id,
+                expected_revision=True,
+                envelope=self.envelope(),
+                policy_target=self.policy_target(),
+                observation_path=self.observation_path,
+                observation_not_before=OBSERVED_AT,
+                now=OBSERVED_AT + timedelta(seconds=30),
+            )
+
+        after = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+        self.assertEqual(after, before)
+
     def test_ids_are_uuidv7_and_invalid_or_incomplete_drafts_fail_closed(self) -> None:
         self.assertRegex(
             new_identifier("wrk"),

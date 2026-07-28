@@ -316,8 +316,7 @@ class Planner:
     ) -> PlanningResult:
         """Replace one exact draft revision and increment its revision once."""
 
-        if expected_revision < 1:
-            raise PlanningError("expected revision must be at least one")
+        _require_expected_revision(expected_revision)
         _validate_assignment_input(assignment)
         _validate_initiative_input(initiative, assignment.initiative_id)
         if initiative is None:
@@ -414,6 +413,7 @@ class Planner:
         """Read live state and return the exact proposal an operator may approve."""
 
         _require_identifier(work_id, "wrk")
+        _require_expected_revision(expected_revision)
         _validate_envelope(envelope)
         with tempfile.TemporaryDirectory(prefix="atelier-plan-preview-") as temporary:
             checkout, _ = self._read_mailbox(Path(temporary))
@@ -1042,6 +1042,11 @@ def _require_identifier(value: str, prefix: str) -> None:
     match = ID_PATTERN.fullmatch(value)
     if match is None or match.group("prefix") != prefix:
         raise PlanningError(f"{value!r} is not a valid {prefix} identifier")
+
+
+def _require_expected_revision(value: Any) -> None:
+    if type(value) is not int or value < 1:
+        raise PlanningError("expected revision must be a positive integer")
 
 
 def _require_text(label: str, value: str) -> None:
