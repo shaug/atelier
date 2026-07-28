@@ -283,6 +283,14 @@ class PlanningContract(unittest.TestCase):
         git(None, "clone", str(self.mailbox_remote), str(checkout))
         return checkout
 
+    def initiative_digest(self) -> str:
+        checkout = self.mailbox_clone()
+        content = (
+            checkout
+            / f"initiatives/{self.initiative_id}/initiative.md"
+        ).read_bytes()
+        return f"sha256:{hashlib.sha256(content).hexdigest()}"
+
     def create(self) -> None:
         self.planner.create_draft(
             self.assignment(),
@@ -378,6 +386,7 @@ class PlanningContract(unittest.TestCase):
             self.assignment(intent="Revise the durable intent."),
             expected_revision=1,
             initiative=self.initiative(outcome="Revise the cross-project explanation."),
+            expected_initiative_digest=self.initiative_digest(),
             observation_path=self.observation_path,
             observation_not_before=OBSERVED_AT,
             now=OBSERVED_AT + timedelta(seconds=30),
@@ -525,6 +534,35 @@ class PlanningContract(unittest.TestCase):
                 self.assertEqual(completed.returncode, 1, completed.stdout)
                 self.assertIn(expected_error, completed.stderr)
 
+    def test_approval_tolerates_unrelated_mailbox_advance(self) -> None:
+        self.create()
+        preview = self.preview()
+        unrelated = replace(
+            self.assignment(),
+            id=new_identifier("wrk"),
+            initiative_id=None,
+            intent="An unrelated draft must not invalidate the preview.",
+        )
+        self.planner.create_draft(
+            unrelated,
+            observation_path=self.observation_path,
+            observation_not_before=OBSERVED_AT,
+            now=OBSERVED_AT + timedelta(seconds=30),
+        )
+        approved_at = self.refresh_observation_after_approval()
+
+        result = self.planner.approve(
+            preview,
+            approved_by="operator",
+            approved_at=approved_at,
+            policy_target=self.policy_target(),
+            observation_path=self.observation_path,
+            observation_not_before=approved_at,
+            now=approved_at + timedelta(seconds=30),
+        )
+
+        self.assertEqual(result.status, "approved")
+
     def test_promotion_rejects_stale_or_ineligible_ticket_state(self) -> None:
         self.create()
         preview = self.preview()
@@ -584,6 +622,7 @@ class PlanningContract(unittest.TestCase):
             self.assignment(intent="A later unapproved revision."),
             expected_revision=1,
             initiative=self.initiative(),
+            expected_initiative_digest=self.initiative_digest(),
             observation_path=self.observation_path,
             observation_not_before=approved_at,
             now=approved_at + timedelta(seconds=30),
@@ -676,6 +715,7 @@ class PlanningContract(unittest.TestCase):
             replace(second, intent="Revise the shared planning context."),
             expected_revision=1,
             initiative=self.initiative(outcome="A different, unapproved outcome."),
+            expected_initiative_digest=self.initiative_digest(),
             observation_path=self.observation_path,
             observation_not_before=OBSERVED_AT,
             now=OBSERVED_AT + timedelta(seconds=30),
@@ -695,6 +735,60 @@ class PlanningContract(unittest.TestCase):
                 observation_not_before=approved_at,
                 now=approved_at + timedelta(seconds=30),
             )
+
+    def test_shared_initiative_revision_rejects_stale_digest(self) -> None:
+        self.create()
+        second = replace(self.assignment(), id=new_identifier("wrk"))
+        self.planner.create_draft(
+            second,
+            observation_path=self.observation_path,
+            observation_not_before=OBSERVED_AT,
+            now=OBSERVED_AT + timedelta(seconds=30),
+        )
+        stale_digest = self.initiative_digest()
+        with self.assertRaisesRegex(
+            PlanningError,
+            "requires its expected lowercase SHA-256 digest",
+        ):
+            self.planner.revise_draft(
+                self.assignment(intent="An unfenced initiative revision."),
+                expected_revision=1,
+                initiative=self.initiative(outcome="An unfenced shared outcome."),
+                observation_path=self.observation_path,
+                observation_not_before=OBSERVED_AT,
+                now=OBSERVED_AT + timedelta(seconds=30),
+            )
+        self.planner.revise_draft(
+            replace(second, intent="Publish the newer shared context."),
+            expected_revision=1,
+            initiative=self.initiative(outcome="The newer shared outcome."),
+            expected_initiative_digest=stale_digest,
+            observation_path=self.observation_path,
+            observation_not_before=OBSERVED_AT,
+            now=OBSERVED_AT + timedelta(seconds=30),
+        )
+
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "expected initiative digest",
+        ):
+            self.planner.revise_draft(
+                self.assignment(intent="A stale assignment revision."),
+                expected_revision=1,
+                initiative=self.initiative(outcome="The stale shared outcome."),
+                expected_initiative_digest=stale_digest,
+                observation_path=self.observation_path,
+                observation_not_before=OBSERVED_AT,
+                now=OBSERVED_AT + timedelta(seconds=30),
+            )
+
+        checkout = self.mailbox_clone()
+        initiative = (
+            checkout
+            / f"initiatives/{self.initiative_id}/initiative.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("The newer shared outcome.", initiative)
+        self.assertNotIn("The stale shared outcome.", initiative)
 
     def test_preview_rejects_policy_from_another_mailbox_realm(self) -> None:
         self.create()

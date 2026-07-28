@@ -176,7 +176,6 @@ class PlanPreview:
     authority_ceiling: tuple[str, ...]
     required_evidence: tuple[str, ...]
     preview_digest: str
-    mailbox_commit: str
 
 
 @dataclass(frozen=True)
@@ -312,6 +311,7 @@ class Planner:
         observation_path: Path,
         observation_not_before: datetime,
         initiative: InitiativeDraft | None = None,
+        expected_initiative_digest: str | None = None,
         now: datetime | None = None,
     ) -> PlanningResult:
         """Replace one exact draft revision and increment its revision once."""
@@ -320,6 +320,18 @@ class Planner:
             raise PlanningError("expected revision must be at least one")
         _validate_assignment_input(assignment)
         _validate_initiative_input(initiative, assignment.initiative_id)
+        if initiative is None:
+            if expected_initiative_digest is not None:
+                raise PlanningError(
+                    "expected_initiative_digest is allowed only when revising an initiative"
+                )
+        elif (
+            not isinstance(expected_initiative_digest, str)
+            or DIGEST_PATTERN.fullmatch(expected_initiative_digest) is None
+        ):
+            raise PlanningError(
+                "revising an initiative requires its expected lowercase SHA-256 digest"
+            )
         observation = _validated_observation(
             observation_path,
             not_before=observation_not_before,
@@ -344,17 +356,22 @@ class Planner:
                     f"{assignment.id}: expected revision {expected_revision}, "
                     f"found {current['revision']}"
                 )
-            if initiative is not None and not (
-                context.checkout / _initiative_path(initiative.id)
-            ).is_file():
-                raise MailboxTransitionRejected(
-                    f"{initiative.id}: revised initiative does not exist"
+            if initiative is not None:
+                _require_initiative_digest(
+                    context.checkout,
+                    initiative.id,
+                    expected_initiative_digest,
                 )
 
         def plan(context: TransitionContext) -> TransitionPlan:
             changes: list[FileChange] = []
             if initiative is not None:
                 initiative_path = _initiative_path(initiative.id)
+                _require_initiative_digest(
+                    context.checkout,
+                    initiative.id,
+                    expected_initiative_digest,
+                )
                 initiative_content = _render_initiative(initiative)
                 if (context.checkout / initiative_path).read_text(
                     encoding="utf-8"
@@ -399,10 +416,9 @@ class Planner:
         _require_identifier(work_id, "wrk")
         _validate_envelope(envelope)
         with tempfile.TemporaryDirectory(prefix="atelier-plan-preview-") as temporary:
-            checkout, commit = self._read_mailbox(Path(temporary))
+            checkout, _ = self._read_mailbox(Path(temporary))
             return _build_preview(
                 checkout,
-                mailbox_commit=commit,
                 remote=self.remote,
                 branch=self.branch,
                 work_id=work_id,
@@ -444,10 +460,9 @@ class Planner:
         approved_at_text = _timestamp(approved_at)
 
         def current_preview(context: TransitionContext) -> PlanPreview:
-            return _build_preview(
-                context.checkout,
-                mailbox_commit=context.base_revision,
-                remote=self.remote,
+                return _build_preview(
+                    context.checkout,
+                    remote=self.remote,
                 branch=self.branch,
                 work_id=preview.work_id,
                 expected_revision=preview.revision,
@@ -533,7 +548,6 @@ class Planner:
 def _build_preview(
     checkout: Path,
     *,
-    mailbox_commit: str,
     remote: str,
     branch: str,
     work_id: str,
@@ -603,7 +617,6 @@ def _build_preview(
         authority_ceiling=envelope.authority_ceiling,
         required_evidence=envelope.required_evidence,
         preview_digest="",
-        mailbox_commit=mailbox_commit,
     )
     return replace(preview, preview_digest=_digest_json(_preview_token_value(preview)))
 
@@ -784,6 +797,22 @@ def _require_same_observation(
         raise MailboxTransitionRejected("GitHub observation changed during the transition")
 
 
+def _require_initiative_digest(
+    checkout: Path,
+    initiative_id: str,
+    expected_digest: str | None,
+) -> None:
+    path = checkout / _initiative_path(initiative_id)
+    if not path.is_file():
+        raise MailboxTransitionRejected(f"{initiative_id}: revised initiative does not exist")
+    current_digest = _digest_bytes(path.read_bytes())
+    if current_digest != expected_digest:
+        raise MailboxTransitionRejected(
+            f"{initiative_id}: expected initiative digest {expected_digest}, "
+            f"found {current_digest}"
+        )
+
+
 def _require_preview_match(expected: PlanPreview, current: PlanPreview) -> None:
     _validate_preview(expected)
     if current != expected:
@@ -814,7 +843,6 @@ def _preview_token_value(preview: PlanPreview) -> dict[str, Any]:
         },
         "authority_ceiling": list(preview.authority_ceiling),
         "required_evidence": list(preview.required_evidence),
-        "mailbox_commit": preview.mailbox_commit,
     }
 
 
@@ -847,10 +875,11 @@ def _validate_preview(preview: PlanPreview) -> None:
         )
     ):
         raise PlanningError("preview initiative_digest must be a lowercase SHA-256 digest")
-    for name in ("policy_commit", "mailbox_commit"):
-        value = getattr(preview, name)
-        if not isinstance(value, str) or SHA_PATTERN.fullmatch(value) is None:
-            raise PlanningError(f"preview {name} must be a lowercase Git SHA")
+    if (
+        not isinstance(preview.policy_commit, str)
+        or SHA_PATTERN.fullmatch(preview.policy_commit) is None
+    ):
+        raise PlanningError("preview policy_commit must be a lowercase Git SHA")
     _require_text("preview.ticket_repository", preview.ticket_repository)
     if type(preview.ticket_number) is not int or preview.ticket_number < 1:
         raise PlanningError("preview ticket_number must be a positive integer")
@@ -1192,7 +1221,6 @@ def _preview(value: Mapping[str, Any]) -> PlanPreview:
         authority_ceiling=tuple(value["authority_ceiling"]),
         required_evidence=tuple(value["required_evidence"]),
         preview_digest=value["preview_digest"],
-        mailbox_commit=value["mailbox_commit"],
     )
     _validate_preview(preview)
     return preview
@@ -1242,6 +1270,7 @@ def main() -> int:
                 _assignment(request["assignment"]),
                 expected_revision=request["expected_revision"],
                 initiative=_initiative(request.get("initiative")),
+                expected_initiative_digest=request.get("expected_initiative_digest"),
                 observation_path=observation_path,
                 observation_not_before=not_before,
             )

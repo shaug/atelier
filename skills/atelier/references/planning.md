@@ -96,8 +96,11 @@ The transition writes one `draft` work document with `approval: null` and
 the initiative and work document are published in the same verified mailbox
 commit.
 
-`revise` uses the same shape plus `expected_revision`. It requires the work to
-remain `draft`, requires the exact expected revision, and increments it once:
+`revise` uses the same shape plus `expected_revision`. When it also replaces the
+referenced initiative, include `expected_initiative_digest` with the
+`sha256:<hex>` digest of the exact current initiative document. The transition
+requires the work to remain `draft`, requires both expected identities to remain
+current, and increments the work revision once:
 
 ```text
 python3 scripts/planning.py revise /host/path/revise.json
