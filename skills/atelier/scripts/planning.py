@@ -162,6 +162,7 @@ class PlanPreview:
     work_id: str
     revision: int
     work_digest: str
+    initiative_digest: str | None
     ticket_observation_digest: str
     policy_repository: str
     policy_commit: str
@@ -566,11 +567,20 @@ def _build_preview(
     )
     ticket_digest = _ticket_material_digest(observation["issue"], policy.value)
     work_digest = _digest_bytes(work_path.read_bytes())
+    initiative_digest = None
+    initiative_id = work["initiative_id"]
+    if initiative_id is not None:
+        initiative_path = checkout / _initiative_path(initiative_id)
+        initiative, _ = _read_document(initiative_path)
+        if initiative["id"] != initiative_id:
+            raise PlanningError(f"{initiative_id}: initiative document identity mismatch")
+        initiative_digest = _digest_bytes(initiative_path.read_bytes())
     token_value = {
         "schema": "atelier.plan-preview/v1",
         "work_id": work_id,
         "revision": expected_revision,
         "work_digest": work_digest,
+        "initiative_digest": initiative_digest,
         "ticket_observation_digest": ticket_digest,
         "policy": {
             "repository": policy.repository,
@@ -585,6 +595,7 @@ def _build_preview(
         work_id=work_id,
         revision=expected_revision,
         work_digest=work_digest,
+        initiative_digest=initiative_digest,
         ticket_observation_digest=ticket_digest,
         policy_repository=policy.repository,
         policy_commit=policy.commit,
@@ -1059,6 +1070,7 @@ def _preview(value: Mapping[str, Any]) -> PlanPreview:
         work_id=value["work_id"],
         revision=value["revision"],
         work_digest=value["work_digest"],
+        initiative_digest=value["initiative_digest"],
         ticket_observation_digest=value["ticket_observation_digest"],
         policy_repository=value["policy_repository"],
         policy_commit=value["policy_commit"],

@@ -4,8 +4,8 @@ Issue #777 implements only planning for one GitHub-backed assignment:
 
 - create one non-executable draft assignment and an optional initiative;
 - revise one exact draft revision;
-- preview the exact assignment, live ticket observation, current project policy,
-  authority ceiling, and acceptance evidence;
+- preview the exact assignment and referenced initiative, live ticket
+  observation, current project policy, authority ceiling, and acceptance evidence;
 - wait for explicit operator approval; and
 - promote only that previewed revision to `approved`.
 
@@ -197,9 +197,10 @@ Run:
 python3 scripts/planning.py approve /host/path/approve.json
 ```
 
-Approval rereads the canonical mailbox, current policy ref, and fresh GitHub
-observation. Any material ticket, policy, draft, revision, repository,
-authority, evidence, or preview drift rejects the transition. An
+Approval rereads the canonical mailbox, referenced initiative, current policy
+ref, and fresh GitHub observation. Any material ticket, policy, initiative,
+draft, revision, repository, authority, evidence, or preview drift rejects the
+transition. An
 attribution-only ticket-title change does not invalidate a policy material-field
 digest. A successful transition records:
 

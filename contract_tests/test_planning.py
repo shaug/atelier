@@ -7,6 +7,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -544,6 +545,40 @@ class PlanningContract(unittest.TestCase):
                 "main",
             ).stdout.strip(),
         )
+
+    def test_promotion_rejects_shared_initiative_drift_after_preview(self) -> None:
+        self.create()
+        preview = self.preview()
+        second = replace(self.assignment(), id=new_identifier("wrk"))
+        self.planner.create_draft(
+            second,
+            observation_path=self.observation_path,
+            observation_not_before=OBSERVED_AT,
+            now=OBSERVED_AT + timedelta(seconds=30),
+        )
+        self.planner.revise_draft(
+            replace(second, intent="Revise the shared planning context."),
+            expected_revision=1,
+            initiative=self.initiative(outcome="A different, unapproved outcome."),
+            observation_path=self.observation_path,
+            observation_not_before=OBSERVED_AT,
+            now=OBSERVED_AT + timedelta(seconds=30),
+        )
+        approved_at = self.refresh_observation_after_approval()
+
+        with self.assertRaisesRegex(
+            (PlanningError, MailboxTransitionRejected),
+            "previewed work, policy, ticket, or authority changed",
+        ):
+            self.planner.approve(
+                preview,
+                approved_by="operator",
+                approved_at=approved_at,
+                policy_target=self.policy_target(),
+                observation_path=self.observation_path,
+                observation_not_before=approved_at,
+                now=approved_at + timedelta(seconds=30),
+            )
 
     def test_preview_rejects_policy_from_another_mailbox_realm(self) -> None:
         self.create()
