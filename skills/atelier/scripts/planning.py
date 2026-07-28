@@ -822,28 +822,9 @@ def _require_preview_match(expected: PlanPreview, current: PlanPreview) -> None:
 
 
 def _preview_token_value(preview: PlanPreview) -> dict[str, Any]:
-    return {
-        "schema": preview.schema,
-        "work_id": preview.work_id,
-        "revision": preview.revision,
-        "rendered_assignment": preview.rendered_assignment,
-        "rendered_initiative": preview.rendered_initiative,
-        "work_digest": preview.work_digest,
-        "initiative_digest": preview.initiative_digest,
-        "ticket_observation_digest": preview.ticket_observation_digest,
-        "ticket": {
-            "repository": preview.ticket_repository,
-            "number": preview.ticket_number,
-            "url": preview.ticket_url,
-        },
-        "policy": {
-            "repository": preview.policy_repository,
-            "commit": preview.policy_commit,
-            "path": preview.policy_path,
-        },
-        "authority_ceiling": list(preview.authority_ceiling),
-        "required_evidence": list(preview.required_evidence),
-    }
+    value = asdict(preview)
+    del value["preview_digest"]
+    return value
 
 
 def _validate_preview(preview: PlanPreview) -> None:
@@ -1203,25 +1184,10 @@ def _preview(value: Mapping[str, Any]) -> PlanPreview:
         isinstance(item, str) for item in value["required_evidence"]
     ):
         raise PlanningError("preview required_evidence must be an array of strings")
-    preview = PlanPreview(
-        schema=value["schema"],
-        work_id=value["work_id"],
-        revision=value["revision"],
-        rendered_assignment=value["rendered_assignment"],
-        rendered_initiative=value["rendered_initiative"],
-        work_digest=value["work_digest"],
-        initiative_digest=value["initiative_digest"],
-        ticket_observation_digest=value["ticket_observation_digest"],
-        ticket_repository=value["ticket_repository"],
-        ticket_number=value["ticket_number"],
-        ticket_url=value["ticket_url"],
-        policy_repository=value["policy_repository"],
-        policy_commit=value["policy_commit"],
-        policy_path=value["policy_path"],
-        authority_ceiling=tuple(value["authority_ceiling"]),
-        required_evidence=tuple(value["required_evidence"]),
-        preview_digest=value["preview_digest"],
-    )
+    normalized = dict(value)
+    normalized["authority_ceiling"] = tuple(value["authority_ceiling"])
+    normalized["required_evidence"] = tuple(value["required_evidence"])
+    preview = PlanPreview(**normalized)
     _validate_preview(preview)
     return preview
 
