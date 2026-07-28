@@ -25,6 +25,7 @@ from skills.atelier.scripts.claiming import (
     ClaimFence,
     ClaimingError,
     HostTarget,
+    _candidate_remote_reachable,
     new_identifier,
 )
 from skills.atelier.scripts.git_mailbox import MailboxTransitionRejected
@@ -293,6 +294,51 @@ class ClaimingContract(unittest.TestCase):
             "published_at": "2026-07-28T04:02:00Z",
         }
 
+    def publish_candidate_with_descendant(self):
+        candidate_head = git(self.project_checkout, "rev-parse", "HEAD").stdout.strip()
+        candidate_ref = "refs/heads/scott/example-work"
+        git(self.project_checkout, "push", "origin", f"{candidate_head}:{candidate_ref}")
+        candidate = self.candidate()
+        candidate.update(remote_ref=candidate_ref, head_revision=candidate_head)
+        self.coordinator = ClaimCoordinator(
+            str(self.mailbox_remote),
+            "main",
+            candidate_verifier=lambda value: _candidate_remote_reachable(
+                {**value, "remote_url": str(self.project_remote)}
+            ),
+            capability_verifier=lambda target: True,
+        )
+        claimed = self.claim()
+        push = self.checkpoint(
+            claimed,
+            action="repository.candidate.push",
+            token="token-1",
+            candidate_head=candidate_head,
+        )
+        published = self.checkpoint(
+            push,
+            action="repository.candidate.push",
+            token="token-2",
+            candidate_head=candidate_head,
+            phase="candidate_published",
+            candidate=candidate,
+        )
+        candidate_marker = self.project_checkout / "candidate.txt"
+        candidate_marker.write_text("descendant\n", encoding="utf-8")
+        git(self.project_checkout, "add", str(candidate_marker))
+        git(
+            self.project_checkout,
+            "-c",
+            "user.name=Atelier Test",
+            "-c",
+            "user.email=atelier-test@invalid",
+            "commit",
+            "-m",
+            "advance candidate",
+        )
+        git(self.project_checkout, "push", "origin", f"HEAD:{candidate_ref}")
+        return published, candidate_head
+
     def mailbox_clone(self, name: str) -> Path:
         checkout = self.root / name
         git(None, "clone", str(self.mailbox_remote), str(checkout))
@@ -428,26 +474,13 @@ class ClaimingContract(unittest.TestCase):
                 candidate_head=HEAD,
             )
 
-    def test_block_takeover_and_release_preserve_recoverable_candidate(self) -> None:
-        claimed = self.claim()
-        push = self.checkpoint(
-            claimed,
-            action="repository.candidate.push",
-            token="token-1",
-            candidate_head=HEAD,
-        )
-        published = self.checkpoint(
-            push,
-            action="repository.candidate.push",
-            token="token-2",
-            candidate_head=HEAD,
-            phase="candidate_published",
-            candidate=self.candidate(),
-        )
+    def test_blocked_takeover_preserves_unresolved_blocker_and_candidate(self) -> None:
+        published, _candidate_head = self.publish_candidate_with_descendant()
+        blocker_id = new_identifier("msg")
         blocked = self.coordinator.block(
             self.work_id,
             self.fence(published),
-            message_id=new_identifier("msg"),
+            message_id=blocker_id,
             receipt_id=new_identifier("rcp"),
             subject="A planner decision is required",
             detail="The exact candidate is preserved while the worker waits.",
@@ -455,13 +488,14 @@ class ClaimingContract(unittest.TestCase):
         )
         self.assertEqual(blocked.status, "blocked")
 
+        takeover_message_id = new_identifier("msg")
         takeover = self.coordinator.takeover(
             self.work_id,
             self.fence(blocked),
             claim_id=new_identifier("clm"),
             worker_run_id=new_identifier("run"),
             continuation_token="takeover-token-0",
-            takeover_message_id=new_identifier("msg"),
+            takeover_message_id=takeover_message_id,
             reason="The prior worker cannot continue; preserve its exact candidate.",
             taken_over_at=OBSERVED_AT + timedelta(minutes=4),
             approved_commit=self.approved_commit,
@@ -471,7 +505,21 @@ class ClaimingContract(unittest.TestCase):
             observation_not_before=self.live_at,
             now=OBSERVED_AT + timedelta(minutes=4),
         )
-        self.assertEqual(takeover.status, "active")
+        self.assertEqual(takeover.status, "blocked")
+        takeover_checkout = self.mailbox_clone("takeover-read")
+        takeover_work, _ = _read_yaml(
+            takeover_checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="work",
+        )
+        takeover_message, _ = _read_yaml(
+            takeover_checkout / f"work/{self.work_id}/messages/{takeover_message_id}.md",
+            frontmatter=True,
+            label="takeover message",
+        )
+        self.assertEqual(takeover_work["blocking_message_id"], blocker_id)
+        self.assertEqual(takeover_message["in_reply_to"], blocker_id)
+        self.assertIsNone(takeover_message["resolves"])
         with self.assertRaisesRegex(MailboxTransitionRejected, "stale or foreign"):
             self.coordinator.release(
                 self.work_id,
@@ -481,9 +529,11 @@ class ClaimingContract(unittest.TestCase):
                 ended_at=OBSERVED_AT + timedelta(minutes=5),
             )
 
+    def test_release_and_reclaim_accept_reachable_candidate_ancestor(self) -> None:
+        published, candidate_head = self.publish_candidate_with_descendant()
         released = self.coordinator.release(
             self.work_id,
-            self.fence(takeover),
+            self.fence(published),
             receipt_id=new_identifier("rcp"),
             reason="Return the exact transferable candidate to ready work.",
             ended_at=OBSERVED_AT + timedelta(minutes=5),
@@ -497,7 +547,7 @@ class ClaimingContract(unittest.TestCase):
             label="work",
         )
         self.assertEqual(reclaimed.status, "active")
-        self.assertEqual(work["claim"]["candidate"]["head_revision"], HEAD)
+        self.assertEqual(work["claim"]["candidate"]["head_revision"], candidate_head)
 
     def test_missing_capability_and_wrong_approval_commit_fail_before_mailbox_write(self) -> None:
         before = git(

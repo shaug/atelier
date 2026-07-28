@@ -536,6 +536,7 @@ class ClaimCoordinator:
                 },
                 "candidate": copy.deepcopy(prior_claim["candidate"]),
             }
+            current_status = state.work["status"]
             current_blocker = state.work["blocking_message_id"]
             takeover_message = {
                 "schema": "atelier.message/v1",
@@ -546,7 +547,7 @@ class ClaimCoordinator:
                 "worker_run_id": None,
                 "audience": "worker",
                 "in_reply_to": current_blocker,
-                "resolves": current_blocker,
+                "resolves": None,
                 "blocks": None,
                 "created_at": _timestamp(taken_over_at),
                 "subject": "Claim taken over",
@@ -556,14 +557,15 @@ class ClaimCoordinator:
                 state=state,
                 claim=new_claim,
                 takeover_message=takeover_message,
+                status=current_status,
             )
 
         def plan(context: TransitionContext) -> TransitionPlan:
             state: _ExecutionState = planned["state"]
             work = copy.deepcopy(state.work)
-            work["status"] = "active"
+            work["status"] = planned["status"]
             work["claim"] = copy.deepcopy(planned["claim"])
-            work["blocking_message_id"] = None
+            work["blocking_message_id"] = state.work["blocking_message_id"]
             work["delivery_receipt_id"] = None
             work["acceptance"] = None
             changes = [
@@ -579,7 +581,7 @@ class ClaimCoordinator:
             )
 
         result = self.writer.publish("takeover", revalidate=revalidate, plan=plan)
-        return _claim_result(result, work_id, "active", planned["claim"])
+        return _claim_result(result, work_id, planned["status"], planned["claim"])
 
     def _execution_state(
         self,
@@ -902,11 +904,30 @@ def _candidate_remote_reachable(candidate: Mapping[str, Any]) -> bool:
         or SHA_PATTERN.fullmatch(head) is None
     ):
         return False
-    result = run_git(None, ("ls-remote", "--exit-code", remote_url, remote_ref))
-    if result.returncode != 0:
-        return False
-    rows = [line.split() for line in result.stdout.splitlines() if line.strip()]
-    return rows == [[head, remote_ref]]
+    with tempfile.TemporaryDirectory(prefix="atelier-candidate-reachability-") as temporary:
+        repository = Path(temporary) / "candidate.git"
+        initialized = run_git(None, ("init", "--bare", str(repository)))
+        if initialized.returncode != 0:
+            return False
+        fetched = run_git(
+            repository,
+            (
+                "fetch",
+                "--no-tags",
+                remote_url,
+                f"{remote_ref}:refs/atelier/candidate",
+            ),
+        )
+        if fetched.returncode != 0:
+            return False
+        exists = run_git(repository, ("cat-file", "-e", f"{head}^{{commit}}"))
+        if exists.returncode != 0:
+            return False
+        reachable = run_git(
+            repository,
+            ("merge-base", "--is-ancestor", head, "refs/atelier/candidate"),
+        )
+        return reachable.returncode == 0
 
 
 def _capability_compatible(target: HostTarget) -> bool:

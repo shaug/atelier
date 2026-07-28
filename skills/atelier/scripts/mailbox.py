@@ -1072,6 +1072,27 @@ def _validate_lifecycle(
     delivery = work["delivery_receipt_id"]
     acceptance = work["acceptance"]
     status = work["status"]
+    blocker_message = work_messages.get(blocker) if blocker is not None else None
+    blocked_handoff = (
+        status == "blocked"
+        and claim is not None
+        and blocker_message is not None
+        and attempt_receipt is not None
+        and attempt_receipt["outcome"] == "blocked"
+        and attempt_receipt["mutation_ownership"] == "retained"
+        and attempt_receipt["claim_id"] != claim["id"]
+        and attempt_receipt["worker_run_id"] != claim["worker_run_id"]
+        and attempt_receipt["candidate"] == claim["candidate"]
+        and blocker_message["author_role"] == "worker"
+        and blocker_message["worker_run_id"] == attempt_receipt["worker_run_id"]
+        and any(
+            message["kind"] == "notification"
+            and message["author_role"] == "planner"
+            and message["in_reply_to"] == blocker
+            and message["resolves"] is None
+            for message in work_messages.values()
+        )
+    )
     diagnostics: list[Diagnostic] = []
 
     valid = {
@@ -1249,16 +1270,20 @@ def _validate_lifecycle(
             diagnostics.append(
                 Diagnostic(path, "blocking-message", "current blocker is missing or resolved")
             )
-        if message is not None and (
-            claim is None
-            or message["author_role"] != "worker"
-            or message["worker_run_id"] != claim["worker_run_id"]
+        if message is not None and not (
+            claim is not None
+            and message["author_role"] == "worker"
+            and (
+                message["worker_run_id"] == claim["worker_run_id"]
+                or blocked_handoff
+            )
         ):
             diagnostics.append(
                 Diagnostic(
                     path,
                     "blocker-actor",
-                    "current blocker must be authored by the claiming worker",
+                    "current blocker must belong to the current claim or "
+                    "a preserved takeover handoff",
                 )
             )
 
@@ -1302,12 +1327,19 @@ def _validate_lifecycle(
                     "blocked work requires a blocked attempt receipt with retained ownership",
                 )
             )
-        if claim is not None and status in {"blocked", "delivered"} and (
-            attempt_receipt is None
-            or attempt_receipt["claim_id"] != claim["id"]
-            or attempt_receipt["worker_run_id"] != claim["worker_run_id"]
-            or attempt_receipt["approved_commit"] != claim["approved_commit"]
-            or attempt_receipt["policy_commit"] != claim["policy_commit"]
+        attempt_matches_claim = (
+            claim is not None
+            and attempt_receipt is not None
+            and attempt_receipt["claim_id"] == claim["id"]
+            and attempt_receipt["worker_run_id"] == claim["worker_run_id"]
+            and attempt_receipt["approved_commit"] == claim["approved_commit"]
+            and attempt_receipt["policy_commit"] == claim["policy_commit"]
+        )
+        if (
+            claim is not None
+            and status in {"blocked", "delivered"}
+            and not attempt_matches_claim
+            and not blocked_handoff
         ):
             diagnostics.append(
                 Diagnostic(path, "attempt-identity", "attempt receipt contradicts the claim")
