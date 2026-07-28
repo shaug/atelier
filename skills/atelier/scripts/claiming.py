@@ -30,7 +30,11 @@ from skills.atelier.scripts.git_mailbox import (
 )
 from skills.atelier.scripts.host_boundary import HostBoundaryError, check_host
 from skills.atelier.scripts.identifiers import new_identifier
-from skills.atelier.scripts.mailbox import MailboxValidationError, validate_project_policy
+from skills.atelier.scripts.mailbox import (
+    MailboxValidationError,
+    _github_remote_url,
+    validate_project_policy,
+)
 from skills.atelier.scripts.planning import (
     PolicyTarget,
     _CurrentPolicy,
@@ -155,6 +159,7 @@ class _ExecutionState:
 
 CandidateVerifier = Callable[[Mapping[str, Any]], bool]
 CapabilityVerifier = Callable[[HostTarget], bool]
+PolicyRemoteVerifier = Callable[[PolicyTarget, str], bool]
 
 
 class ClaimCoordinator:
@@ -169,6 +174,7 @@ class ClaimCoordinator:
         writer: GitMailboxWriter | None = None,
         candidate_verifier: CandidateVerifier | None = None,
         capability_verifier: CapabilityVerifier | None = None,
+        policy_remote_verifier: PolicyRemoteVerifier | None = None,
     ):
         if not remote or remote.startswith("-"):
             raise ClaimingError("mailbox remote must be nonempty and must not begin with '-'")
@@ -177,6 +183,7 @@ class ClaimCoordinator:
         self.writer = writer or GitMailboxWriter(remote, branch, max_attempts=max_attempts)
         self.candidate_verifier = candidate_verifier or _candidate_remote_reachable
         self.capability_verifier = capability_verifier or _capability_compatible
+        self.policy_remote_verifier = policy_remote_verifier or _policy_remote_matches_repository
 
     def claim(
         self,
@@ -601,6 +608,10 @@ class ClaimCoordinator:
             raise MailboxTransitionRejected(f"{work_id}: work has no current approval")
         self._require_approved_commit(context, work_id, work, body, approved_commit)
         project = _read_project(context.checkout, work["project_id"])
+        if not self.policy_remote_verifier(policy_target, project["repository"]):
+            raise MailboxTransitionRejected(
+                "policy remote is foreign or unverifiable for the managed project"
+            )
         observation = _validated_observation(
             observation_path,
             not_before=observation_not_before,
@@ -896,6 +907,20 @@ def _read_policy_at_commit(target: PolicyTarget, commit: str) -> dict[str, Any]:
         policy_path.write_text(content, encoding="utf-8")
         return validate_project_policy(policy_path)
 
+
+def _policy_remote_matches_repository(target: PolicyTarget, repository: str) -> bool:
+    configured = run_git(
+        target.checkout,
+        ("remote", "get-url", "--all", target.remote),
+    )
+    if configured.returncode == 0:
+        urls = [line.strip() for line in configured.stdout.splitlines() if line.strip()]
+        if len(urls) != 1:
+            return False
+        remote_url = urls[0]
+    else:
+        remote_url = target.remote
+    return _github_remote_url(remote_url, repository=repository)
 
 def _candidate_remote_reachable(candidate: Mapping[str, Any]) -> bool:
     remote_url = candidate.get("remote_url")

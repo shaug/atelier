@@ -23,10 +23,11 @@ Before `claim`, `checkpoint`, or `takeover`:
 5. Supply the exact installed Agent Scripts skill root, stable name, connector
    identity, and complete read-only operation set required by the host descriptor.
 
-The script rechecks the pinned host capability and rereads approved and current
-policy, the canonical mailbox, the approved work transition, and the material
-ticket observation during every write attempt. It combines policy using the
-Project Policy Contract and fails closed on incompatible identity, eligibility,
+The script binds the policy remote's canonical GitHub URL to the managed project
+repository identity, rechecks the pinned host capability, and rereads approved and
+current policy, the canonical mailbox, the approved work transition, and the
+material ticket observation during every write attempt. It combines policy using
+the Project Policy Contract and fails closed on incompatible identity, eligibility,
 authority, capability, or evidence drift.
 
 ## Commands
@@ -130,7 +131,8 @@ recording the candidate.
   It relinquishes mutation ownership, clears the claim, and preserves an exact
   transferable candidate when one exists. A blocked release retains the unanswered
   decision message as historical audit evidence without treating it as a current
-  blocker or falsely resolving it.
+  blocker or falsely resolving it. Historical blockers are derived from released
+  execution identities and explicit takeover handoffs, never global wall-clock order.
 - `takeover` requires the exact `replaced_fence`, fresh claim and run
   identifiers, a fresh continuation token, a stable `takeover_message_id`, a
   reason, and timestamp. It records the rationale, starts an empty checkpoint

@@ -28,6 +28,7 @@ from skills.atelier.scripts.claiming import (
     HostTarget,
     _attempt_receipt,
     _candidate_remote_reachable,
+    _policy_remote_matches_repository,
     _render_document,
     new_identifier,
 )
@@ -133,6 +134,7 @@ class ClaimingContract(unittest.TestCase):
             "main",
             candidate_verifier=lambda candidate: candidate["head_revision"] == HEAD,
             capability_verifier=lambda target: True,
+            policy_remote_verifier=self.policy_remote_matches,
         )
 
     def tearDown(self) -> None:
@@ -177,6 +179,13 @@ class ClaimingContract(unittest.TestCase):
             canonical_ref="refs/heads/main",
             path=".atelier/policy.yaml",
         )
+
+
+    def policy_remote_matches(self, target: PolicyTarget, repository: str) -> bool:
+        configured = run_git(target.checkout, ("remote", "get-url", target.remote))
+        if configured.returncode != 0 or repository != self.repository:
+            return False
+        return Path(configured.stdout.strip()).resolve() == self.project_remote.resolve()
 
     def host_target(self) -> HostTarget:
         return HostTarget(
@@ -319,6 +328,7 @@ class ClaimingContract(unittest.TestCase):
                 {**value, "remote_url": str(self.project_remote)}
             ),
             capability_verifier=lambda target: True,
+            policy_remote_verifier=self.policy_remote_matches,
         )
         claimed = self.claim()
         push = self.checkpoint(
@@ -459,6 +469,7 @@ class ClaimingContract(unittest.TestCase):
                 "main",
                 candidate_verifier=lambda candidate: True,
                 capability_verifier=lambda target: True,
+                policy_remote_verifier=self.policy_remote_matches,
             )
             try:
                 result = self.claim(
@@ -548,6 +559,52 @@ class ClaimingContract(unittest.TestCase):
             ["pre_external_mutation", "candidate_published"],
         )
 
+
+    def test_default_policy_remote_verifier_binds_github_repository_identity(self) -> None:
+        git(
+            self.project_checkout,
+            "remote",
+            "set-url",
+            "origin",
+            "git@github.com:example/project-1.git",
+        )
+        target = self.policy_target()
+        self.assertTrue(_policy_remote_matches_repository(target, self.repository))
+        self.assertFalse(
+            _policy_remote_matches_repository(target, "github:example/a-foreign-project")
+        )
+        git(self.project_checkout, "remote", "set-url", "origin", str(self.project_remote))
+
+    def test_foreign_policy_mirror_cannot_hide_canonical_tightening(self) -> None:
+        stale_remote = self.root / "stale-project.git"
+        stale_checkout = self.root / "stale-project"
+        git(None, "clone", "--bare", str(self.project_remote), str(stale_remote))
+        git(None, "clone", str(stale_remote), str(stale_checkout))
+
+        self.write_policy(
+            authority=tuple(
+                action for action in AUTHORITY if action != "repository.candidate.create"
+            )
+        )
+        git(self.project_checkout, "add", "-A")
+        git(
+            self.project_checkout,
+            "-c",
+            "user.name=Atelier Test",
+            "-c",
+            "user.email=atelier-test@invalid",
+            "commit",
+            "-m",
+            "tighten canonical project policy",
+        )
+        git(self.project_checkout, "push", "origin", "HEAD:main")
+
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "policy remote is foreign or unverifiable",
+        ):
+            self.claim(policy_target=self.policy_target(stale_checkout))
+
     def test_policy_tightening_denies_removed_action_without_widening_claim_authority(self) -> None:
         claimed = self.claim()
         self.write_policy(
@@ -629,6 +686,30 @@ class ClaimingContract(unittest.TestCase):
                 ended_at=OBSERVED_AT + timedelta(minutes=5),
             )
 
+        released = self.coordinator.release(
+            self.work_id,
+            self.fence(takeover),
+            receipt_id=new_identifier("rcp"),
+            reason="Relinquish the replacement claim while retaining the inherited decision.",
+            ended_at=OBSERVED_AT + timedelta(minutes=5),
+        )
+        self.assertEqual(released.status, "approved")
+        released_checkout = self.mailbox_clone("takeover-release-read")
+        released_work, _ = _read_yaml(
+            released_checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="released takeover",
+        )
+        historical_blocker, _ = _read_yaml(
+            released_checkout / f"work/{self.work_id}/messages/{blocker_id}.md",
+            frontmatter=True,
+            label="inherited historical blocker",
+        )
+        reconstruct_mailbox(released_checkout)
+        self.assertEqual(released_work["status"], "approved")
+        self.assertIsNone(released_work["blocking_message_id"])
+        self.assertIsNone(historical_blocker["resolves"])
+
     def test_blocked_release_keeps_decision_historical_without_resolving_it(self) -> None:
         claimed = self.claim()
         blocker_id = new_identifier("msg")
@@ -647,7 +728,7 @@ class ClaimingContract(unittest.TestCase):
             self.fence(blocked),
             receipt_id=release_receipt_id,
             reason="Relinquish the blocked attempt without inventing a resolution.",
-            ended_at=OBSERVED_AT + timedelta(minutes=4),
+            ended_at=OBSERVED_AT + timedelta(minutes=30),
         )
         self.assertEqual(released.status, "approved")
         reclaimed = self.claim(token="post-blocked-release-token")
@@ -676,6 +757,27 @@ class ClaimingContract(unittest.TestCase):
         self.assertIsNone(blocker["resolves"])
         self.assertEqual(release_receipt["outcome"], "released")
         self.assertEqual(snapshot["views"]["active"], [self.work_id])
+
+        current_blocker_id = new_identifier("msg")
+        reblocked = self.coordinator.block(
+            self.work_id,
+            self.fence(reclaimed),
+            message_id=current_blocker_id,
+            receipt_id=new_identifier("rcp"),
+            subject="The replacement worker now needs a different decision",
+            detail="A later attempt remains current regardless of attribution timestamps.",
+            created_at=OBSERVED_AT + timedelta(minutes=5),
+        )
+        self.assertEqual(reblocked.status, "blocked")
+        reblocked_checkout = self.mailbox_clone("reblocked-after-release-read")
+        reblocked_work, _ = _read_yaml(
+            reblocked_checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="reblocked work",
+        )
+        reblocked_snapshot = reconstruct_mailbox(reblocked_checkout)
+        self.assertEqual(reblocked_work["blocking_message_id"], current_blocker_id)
+        self.assertEqual(reblocked_snapshot["views"]["blocked"], [self.work_id])
 
     def test_delivered_takeover_returns_active_with_historical_delivery(self) -> None:
         published, candidate_head = self.publish_candidate_with_descendant(
@@ -743,6 +845,7 @@ class ClaimingContract(unittest.TestCase):
             str(self.mailbox_remote),
             "main",
             capability_verifier=lambda target: False,
+            policy_remote_verifier=self.policy_remote_matches,
         )
         with self.assertRaisesRegex(ClaimingError, "capability is unavailable"):
             self.checkpoint(
@@ -806,6 +909,7 @@ class ClaimingContract(unittest.TestCase):
             "main",
             writer=GitMailboxWriter(str(self.mailbox_remote), "main", runner=runner),
             capability_verifier=capability_verifier,
+            policy_remote_verifier=self.policy_remote_matches,
         )
         with self.assertRaisesRegex(ClaimingError, "capability is unavailable"):
             self.checkpoint(
@@ -839,6 +943,7 @@ class ClaimingContract(unittest.TestCase):
             str(self.mailbox_remote),
             "main",
             capability_verifier=lambda target: False,
+            policy_remote_verifier=self.policy_remote_matches,
         )
         with self.assertRaisesRegex(ClaimingError, "capability is unavailable"):
             unavailable.claim(
