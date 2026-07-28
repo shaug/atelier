@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from contract_tests import test_mailbox as fixtures
-from skills.atelier.scripts.git_mailbox import MailboxTransitionRejected
+from skills.atelier.scripts.git_mailbox import MailboxTransitionRejected, TransitionContext
 from skills.atelier.scripts.mailbox import _read_yaml, reconstruct_mailbox
 from skills.atelier.scripts.planning import (
     ApprovalEnvelope,
@@ -188,12 +188,17 @@ class PlanningContract(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def write_policy(self, *, repository: str | None = None) -> None:
+    def write_policy(
+        self,
+        *,
+        repository: str | None = None,
+        realm_id: str = "personal",
+    ) -> None:
         value = {
             "schema": "atelier.project-policy/v1",
             "mailbox": {
                 "remote": str(self.mailbox_remote),
-                "realm_id": "personal",
+                "realm_id": realm_id,
                 "canonical_branch": "main",
                 "project_id": self.project_id,
             },
@@ -479,6 +484,88 @@ class PlanningContract(unittest.TestCase):
                 observation_not_before=approved_at,
                 now=approved_at + timedelta(seconds=30),
             )
+
+    def test_plan_time_reread_rejects_drift_after_revalidation(self) -> None:
+        self.create()
+        preview = self.preview()
+        checkout = self.mailbox_clone()
+        base_revision = git(checkout, "rev-parse", "HEAD").stdout.strip()
+        before = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+
+        def mutate_observation() -> None:
+            changed = observation()
+            changed["issue"]["body"] = "Material body drift after revalidation."
+            write_json(self.observation_path, changed)
+
+        class InterleavingWriter:
+            def publish(self, operation, *, revalidate, plan):
+                context = TransitionContext(
+                    checkout=checkout,
+                    base_revision=base_revision,
+                    snapshot=reconstruct_mailbox(checkout),
+                    attempt=1,
+                )
+                revalidate(context)
+                mutate_observation()
+                plan(context)
+                raise AssertionError(f"{operation}: drift was not rejected")
+
+        planner = Planner(
+            str(self.mailbox_remote),
+            "main",
+            writer=InterleavingWriter(),
+        )
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "previewed work, policy, ticket, or authority changed",
+        ):
+            planner.approve(
+                preview,
+                approved_by="operator",
+                approved_at=OBSERVED_AT,
+                policy_target=self.policy_target(),
+                observation_path=self.observation_path,
+                observation_not_before=OBSERVED_AT,
+                now=OBSERVED_AT + timedelta(seconds=30),
+            )
+        self.assertEqual(
+            before,
+            git(
+                None,
+                "--git-dir",
+                str(self.mailbox_remote),
+                "rev-parse",
+                "main",
+            ).stdout.strip(),
+        )
+
+    def test_preview_rejects_policy_from_another_mailbox_realm(self) -> None:
+        self.create()
+        self.write_policy(realm_id="other")
+        git(self.project_checkout, "add", "-A")
+        git(
+            self.project_checkout,
+            "-c",
+            "user.name=Atelier Test",
+            "-c",
+            "user.email=atelier-test@invalid",
+            "commit",
+            "-m",
+            "change policy realm",
+        )
+        git(self.project_checkout, "push", "origin", "HEAD:main")
+
+        with self.assertRaisesRegex(
+            PlanningError,
+            "realm does not match the canonical mailbox",
+        ):
+            self.preview()
 
     def test_preview_digest_ignores_attribution_only_title_drift(self) -> None:
         self.create()

@@ -36,6 +36,7 @@ from skills.atelier.scripts.host_boundary import HostBoundaryError, validate_obs
 from skills.atelier.scripts.mailbox import (
     MailboxValidationError,
     _read_yaml,
+    reconstruct_mailbox,
     validate_project_policy,
 )
 
@@ -452,13 +453,11 @@ class Planner:
 
         def revalidate(context: TransitionContext) -> None:
             candidate = current_preview(context)
-            if candidate.preview_digest != preview.preview_digest:
-                raise MailboxTransitionRejected(
-                    f"{preview.work_id}: previewed work, policy, ticket, or authority changed"
-                )
+            _require_preview_match(preview, candidate)
 
         def plan(context: TransitionContext) -> TransitionPlan:
             candidate = current_preview(context)
+            _require_preview_match(preview, candidate)
             work, body = _read_document(context.checkout / _work_path(preview.work_id))
             work["status"] = "approved"
             work["approval"] = {
@@ -538,6 +537,7 @@ def _build_preview(
     observation_not_before: datetime,
     now: datetime | None,
 ) -> PlanPreview:
+    mailbox = reconstruct_mailbox(checkout)
     work_path = checkout / _work_path(work_id)
     work, _ = _read_document(work_path)
     if work["status"] != "draft":
@@ -561,6 +561,7 @@ def _build_preview(
         observation=observation,
         mailbox_remote=remote,
         mailbox_branch=branch,
+        mailbox_realm=mailbox["realm_id"],
         envelope=envelope,
     )
     ticket_digest = _ticket_material_digest(observation["issue"], policy.value)
@@ -660,6 +661,7 @@ def _require_policy_matches(
     observation: Mapping[str, Any],
     mailbox_remote: str,
     mailbox_branch: str,
+    mailbox_realm: str,
     envelope: ApprovalEnvelope,
 ) -> None:
     value = policy.value
@@ -679,6 +681,8 @@ def _require_policy_matches(
         raise PlanningError("project policy mailbox remote does not match this planner")
     if value["mailbox"]["canonical_branch"] != mailbox_branch:
         raise PlanningError("project policy mailbox branch does not match this planner")
+    if value["mailbox"]["realm_id"] != mailbox_realm:
+        raise PlanningError("project policy realm does not match the canonical mailbox")
     if value["mailbox"]["project_id"] != work["project_id"]:
         raise PlanningError("project policy project identity does not match the assignment")
     if value["ticket"]["provider"] != "github":
@@ -766,6 +770,13 @@ def _require_same_observation(
 ) -> None:
     if _digest_json(expected) != _digest_json(current):
         raise MailboxTransitionRejected("GitHub observation changed during the transition")
+
+
+def _require_preview_match(expected: PlanPreview, current: PlanPreview) -> None:
+    if current.preview_digest != expected.preview_digest:
+        raise MailboxTransitionRejected(
+            f"{expected.work_id}: previewed work, policy, ticket, or authority changed"
+        )
 
 
 def _ticket_material_digest(
