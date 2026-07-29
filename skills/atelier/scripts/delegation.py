@@ -85,8 +85,9 @@ class DelegationCoordinator:
         dependency = self._dependency(host_target)
         if not checkpoint_command or any(not item for item in checkpoint_command):
             raise DelegationError("checkpoint command must contain nonempty arguments")
+        planned: dict[str, Any] = {}
 
-        def inspect(context: TransitionContext) -> dict[str, Any]:
+        def revalidate(context: TransitionContext) -> None:
             state = self.claims._execution_state(
                 context,
                 work_id,
@@ -99,6 +100,10 @@ class DelegationCoordinator:
             if state.work["status"] != "active":
                 raise MailboxTransitionRejected(f"{work_id}: delegation requires active work")
             claim = _require_fence(state.work, fence)
+            if claim["invocation_digest"] is not None:
+                raise MailboxTransitionRejected(
+                    f"{work_id}: delegated invocation is already sealed"
+                )
             sections = _sections(state.body)
             policy = state.effective_policy
             base_ref = policy["repository"]["canonical_ref"]
@@ -158,7 +163,7 @@ class DelegationCoordinator:
                         "url": None,
                         "source": "atelier.approval.acceptance.required_evidence",
                     }
-                    for evidence in state.work["approval"]["acceptance"]["required_evidence"]
+                    for evidence in policy["acceptance"]["evidence"]
                 ],
                 "starting_deployment": None,
                 "checkpoint": {
@@ -168,9 +173,22 @@ class DelegationCoordinator:
                 },
             }
             _require_valid(dependency, "invocation", invocation)
-            return invocation
+            updated_claim = copy.deepcopy(claim)
+            updated_claim["invocation_digest"] = _canonical_digest(invocation)
+            planned.clear()
+            planned.update(state=state, claim=updated_claim, invocation=invocation)
 
-        return self.claims.writer.observe("prepare delegation", inspect)
+        def plan(context: TransitionContext) -> TransitionPlan:
+            state = planned["state"]
+            work = copy.deepcopy(state.work)
+            work["claim"] = planned["claim"]
+            return TransitionPlan(
+                commit_message=f"seal delegated invocation for {work_id}",
+                changes=(FileChange(_work_path(work_id), _render_document(work, state.body)),),
+            )
+
+        self.claims.writer.publish("prepare delegation", revalidate=revalidate, plan=plan)
+        return copy.deepcopy(planned["invocation"])
 
     def checkpoint(
         self,
@@ -214,19 +232,28 @@ class DelegationCoordinator:
             "acknowledged_candidate_sha": None,
             "observed_deployment": None,
         }
-        candidate = (
-            _mailbox_candidate(request.get("candidate"), recorded_at)
-            if request["phase"] == "candidate_published"
-            else None
-        )
         try:
+            if current_claim["invocation_digest"] != _canonical_digest(invocation):
+                raise MailboxTransitionRejected(
+                    "delegated invocation does not match its sealed digest"
+                )
+            if request["sequence"] != current_claim["checkpoint"]["sequence"] + 1:
+                raise MailboxTransitionRejected("checkpoint sequence does not advance exactly once")
+            if prior_token != current_claim["checkpoint"]["continuation_token"]:
+                raise MailboxTransitionRejected("checkpoint continuation token is stale")
+            _require_checkpoint_candidate(invocation, request.get("candidate"))
+            candidate = (
+                _mailbox_candidate(request.get("candidate"), recorded_at)
+                if request["phase"] == "candidate_published"
+                else None
+            )
             result = self.claims.authorize(
                 work_id,
                 CheckpointRequest(
                     fence=ClaimFence(
                         claim_id=current_claim["id"],
                         worker_run_id=invocation["invocation_id"],
-                        sequence=current_claim["checkpoint"]["sequence"],
+                        sequence=request["sequence"] - 1,
                         continuation_token=prior_token,
                     ),
                     phase=request["phase"],
@@ -313,6 +340,8 @@ class DelegationCoordinator:
             fence.continuation_token,
         ):
             raise DelegationError("delegated terminal result claim fence is stale")
+        if current_claim["invocation_digest"] != _canonical_digest(invocation):
+            raise DelegationError("delegated invocation does not match its sealed digest")
         consumed = list(
             dict.fromkeys(
                 entry["action"]
@@ -356,8 +385,13 @@ class DelegationCoordinator:
             if state.work["status"] != "active":
                 raise MailboxTransitionRejected(f"{work_id}: terminal result requires active work")
             claim = copy.deepcopy(_require_fence(state.work, fence))
+            if claim["invocation_digest"] != _canonical_digest(invocation):
+                raise MailboxTransitionRejected(
+                    "delegated invocation does not match its sealed digest"
+                )
             if result["ticket"]["observation"] != state.ticket_digest:
                 raise MailboxTransitionRejected("terminal ticket observation is not current")
+            _require_tracker_transition(result, state.observation)
             evidence = _attempt_evidence(result)
             outcome = "delivered" if terminal == "ready_pr" else "blocked"
             body = (
@@ -500,6 +534,30 @@ def _digest(value: str) -> str:
     return f"sha256:{hashlib.sha256(value.encode('utf-8')).hexdigest()}"
 
 
+def _canonical_digest(value: Mapping[str, Any]) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return _digest(encoded)
+
+
+def _require_checkpoint_candidate(
+    invocation: Mapping[str, Any],
+    candidate: Mapping[str, Any] | None,
+) -> None:
+    if candidate is None:
+        return
+    repository = invocation["repository"]
+    if (
+        candidate["repository"] != repository["identity"]
+        or candidate["remote_url"] != repository["remote_url"]
+        or candidate["base_sha"] != repository["base_sha"]
+    ):
+        raise MailboxTransitionRejected("checkpoint candidate is foreign to the sealed invocation")
+    if candidate["remote_ref"] == repository["base_ref"]:
+        raise MailboxTransitionRejected(
+            "checkpoint candidate cannot publish to the canonical base ref"
+        )
+
+
 def _mailbox_candidate(
     value: Mapping[str, Any] | None, recorded_at: datetime
 ) -> dict[str, Any] | None:
@@ -520,6 +578,11 @@ def _mailbox_candidate(
 
 
 def _attempt_evidence(result: Mapping[str, Any]) -> AttemptEvidence:
+    verdicts = {
+        "passed": "clean",
+        "failed": "changes_required",
+        "unavailable": "blocked",
+    }
     return AttemptEvidence(
         validation=tuple(
             {
@@ -532,8 +595,8 @@ def _attempt_evidence(result: Mapping[str, Any]) -> AttemptEvidence:
         ),
         reviews=tuple(
             {
-                "mechanism": item["name"],
-                "verdict": "clean" if item["outcome"] == "passed" else item["outcome"],
+                "mechanism": "review-code-change",
+                "verdict": verdicts[item["outcome"]],
                 "candidate_revision": item["candidate_sha"],
                 "comparison_base_revision": result["repository"]["base_sha"],
                 "observed_at": item["observed_at"],
@@ -647,8 +710,41 @@ def _require_blocked_result(result: Mapping[str, Any], claim: Mapping[str, Any])
         if current is not None:
             raise MailboxTransitionRejected("blocked result omitted an acknowledged candidate")
         return
-    if current is None or candidate["head_sha"] != current["head_revision"]:
+    if current is None or (
+        candidate["repository"],
+        candidate["remote_url"],
+        candidate["remote_ref"],
+        candidate["base_sha"],
+        candidate["head_sha"],
+    ) != (
+        current["repository"],
+        current["remote_url"],
+        current["remote_ref"],
+        current["base_revision"],
+        current["head_revision"],
+    ):
         raise MailboxTransitionRejected("blocked result candidate does not match the claim")
+
+
+def _require_tracker_transition(result: Mapping[str, Any], observation: Mapping[str, Any]) -> None:
+    transition = result["tracker_transition"]
+    issue = observation["issue"]
+    expected = (
+        result["ticket"]["provider"],
+        str(issue["number"]),
+        "none",
+        issue["state"].lower(),
+    )
+    actual = (
+        transition["provider"],
+        str(transition["ticket_id"]),
+        transition["mode"],
+        transition["state"].lower(),
+    )
+    if actual != expected or expected[3] != "open":
+        raise MailboxTransitionRejected(
+            "delegated result tracker transition does not match the current open ticket"
+        )
 
 
 def _read_json(path: Path) -> dict[str, Any]:

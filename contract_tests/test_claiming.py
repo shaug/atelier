@@ -38,6 +38,8 @@ from skills.atelier.scripts.delegation import (
     REQUEST_SCHEMA,
     RESULT_SCHEMA,
     DelegationCoordinator,
+    DelegationError,
+    _require_tracker_transition,
 )
 from skills.atelier.scripts.git_mailbox import (
     FileChange,
@@ -55,6 +57,7 @@ from skills.atelier.scripts.planning import (
     PolicyTarget,
 )
 
+APPROVED_EVIDENCE = EVIDENCE[:-1]
 DIGEST = "sha256:" + "d" * 64
 HEAD = "b" * 40
 CLAIMING_SCRIPT = Path(__file__).parents[1] / "skills/atelier/scripts/claiming.py"
@@ -174,7 +177,7 @@ class ClaimingContract(unittest.TestCase):
         preview = planner.preview_approval(
             self.work_id,
             expected_revision=1,
-            envelope=ApprovalEnvelope(AUTHORITY, EVIDENCE),
+            envelope=ApprovalEnvelope(AUTHORITY, APPROVED_EVIDENCE),
             policy_target=self.policy_target(),
             observation_path=self.observation_path,
             observation_not_before=OBSERVED_AT,
@@ -203,7 +206,12 @@ class ClaimingContract(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def write_policy(self, *, authority: tuple[str, ...] = AUTHORITY) -> None:
+    def write_policy(
+        self,
+        *,
+        authority: tuple[str, ...] = AUTHORITY,
+        evidence: tuple[str, ...] = APPROVED_EVIDENCE,
+    ) -> None:
         fixtures.write_yaml(
             self.policy_path,
             {
@@ -231,7 +239,7 @@ class ClaimingContract(unittest.TestCase):
                 },
                 "authority": {"allow": list(authority)},
                 "validation": {"required_commands": ["just test", "just lint"]},
-                "acceptance": {"actor": "operator", "evidence": list(EVIDENCE)},
+                "acceptance": {"actor": "operator", "evidence": list(evidence)},
             },
         )
 
@@ -404,18 +412,16 @@ class ClaimingContract(unittest.TestCase):
             now=self.live_at + timedelta(seconds=30),
         )
 
-    def delegated_checkpoint(
+    def delegated_request(
         self,
-        delegation: DelegationCoordinator,
         invocation: dict[str, Any],
         prior,
         *,
         action: str,
-        token: str,
         phase: str = "pre_external_mutation",
         candidate: dict[str, Any] | None = None,
-    ):
-        request = {
+    ) -> dict[str, Any]:
+        return {
             "schema": REQUEST_SCHEMA,
             "capability": CAPABILITY,
             "invocation_id": invocation["invocation_id"],
@@ -428,6 +434,25 @@ class ClaimingContract(unittest.TestCase):
             "deployment": None,
             "proposed_effect": f"{action} candidate",
         }
+
+    def delegated_checkpoint(
+        self,
+        delegation: DelegationCoordinator,
+        invocation: dict[str, Any],
+        prior,
+        *,
+        action: str,
+        token: str,
+        phase: str = "pre_external_mutation",
+        candidate: dict[str, Any] | None = None,
+    ):
+        request = self.delegated_request(
+            invocation,
+            prior,
+            action=action,
+            phase=phase,
+            candidate=candidate,
+        )
         response = delegation.checkpoint(
             self.work_id,
             invocation,
@@ -457,6 +482,44 @@ class ClaimingContract(unittest.TestCase):
             recovered=False,
         )
 
+    def assert_checkpoint_denied_without_mutation(
+        self,
+        delegation: DelegationCoordinator,
+        invocation: dict[str, Any],
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        before = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+        response = delegation.checkpoint(
+            self.work_id,
+            invocation,
+            request,
+            approved_commit=self.approved_commit,
+            policy_target=self.policy_target(),
+            host_target=self.delegation_host_target(),
+            observation_path=self.observation_path,
+            observation_not_before=self.live_at,
+            recorded_at=self.live_at + timedelta(minutes=2),
+            next_continuation_token="must-not-be-used",
+            now=self.live_at + timedelta(minutes=2),
+        )
+        after = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+        self.assertEqual(response["decision"], "deny")
+        self.assertEqual(response["continuation_token"], request["continuation_token"])
+        self.assertEqual(after, before)
+        return response
+
     def acceptance_records(self, invocation: dict[str, Any], candidate_head: str):
         return [
             {
@@ -473,6 +536,69 @@ class ClaimingContract(unittest.TestCase):
             }
             for item in invocation["acceptance_requirements"]
         ]
+
+    def blocked_result(
+        self,
+        invocation: dict[str, Any],
+        checkpointed,
+        *,
+        tracker_mode: str = "none",
+        tracker_state: str = "open",
+        reviews: list[dict[str, Any]] | None = None,
+        candidate: dict[str, Any] | None = None,
+        authority_used: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "schema": RESULT_SCHEMA,
+            "capability": CAPABILITY,
+            "invocation_id": invocation["invocation_id"],
+            "terminal_state": "blocked",
+            "ticket": invocation["ticket"],
+            "repository": {
+                "identity": invocation["repository"]["identity"],
+                "base_ref": invocation["repository"]["base_ref"],
+                "base_sha": invocation["repository"]["base_sha"],
+            },
+            "tracker_transition": {
+                "provider": invocation["ticket"]["provider"],
+                "ticket_id": invocation["ticket"]["id"],
+                "mode": tracker_mode,
+                "state": tracker_state,
+                "observed_at": fixtures.TIMESTAMP,
+            },
+            "implementation_state": "published" if candidate else "local",
+            "candidate": candidate,
+            "handoff": {
+                "transferable": candidate is not None,
+                "reason": None if candidate else "No published candidate exists.",
+            },
+            "checkpoint": {
+                "last_sequence": checkpointed.sequence,
+                "continuation_token": checkpointed.continuation_token,
+            },
+            "validation": [],
+            "reviews": reviews or [],
+            "feedback": None,
+            "authority_used": authority_used or ["repository.candidate.create"],
+            "acceptance_evidence": [
+                {
+                    "criterion": item["criterion"],
+                    "required": item["required"],
+                    "evidence_category": item["evidence_category"],
+                    "stage": item["stage"],
+                    "candidate_sha": candidate["head_sha"] if candidate else None,
+                    "deployed_sha": None,
+                    "environment": item["environment"],
+                    "url": item["url"],
+                    "source": None,
+                    "status": "missing",
+                }
+                for item in invocation["acceptance_requirements"]
+            ],
+            "unresolved_obligations": ["Resolve the implementation blocker."],
+            "blocking_reason": "The delegated worker could not publish a candidate.",
+            "next_action": "Planner decides whether to retry or revise the work.",
+        }
 
     def publish_candidate_with_descendant(self, *, with_pull_request: bool = False):
         candidate_head = git(self.project_checkout, "rev-parse", "HEAD").stdout.strip()
@@ -1205,6 +1331,50 @@ class ClaimingContract(unittest.TestCase):
         after = git(None, "--git-dir", str(self.mailbox_remote), "rev-parse", "main").stdout.strip()
         self.assertEqual(after, before)
 
+    def test_delegation_uses_current_policy_acceptance_after_approval_tightens(self) -> None:
+        self.write_policy(evidence=EVIDENCE)
+        git(self.project_checkout, "add", ".atelier/policy.yaml")
+        git(
+            self.project_checkout,
+            "-c",
+            "user.name=Atelier Test",
+            "-c",
+            "user.email=atelier-test@invalid",
+            "commit",
+            "-m",
+            "tighten acceptance evidence",
+        )
+        git(self.project_checkout, "push", "origin", "HEAD:main")
+
+        claimed = self.claim()
+        invocation = self.delegated_invocation(claimed)
+
+        self.assertEqual(
+            [item["criterion"] for item in invocation["acceptance_requirements"]],
+            list(EVIDENCE),
+        )
+
+    def test_delegation_rejects_tracker_mutation_for_ready_and_blocked_results(self) -> None:
+        current = observation()
+        for terminal in ("ready_pr", "blocked"):
+            for transition in (
+                {"provider": "github", "ticket_id": "777", "mode": "manual", "state": "open"},
+                {
+                    "provider": "github",
+                    "ticket_id": "777",
+                    "mode": "automatic",
+                    "state": "closed",
+                },
+            ):
+                with self.subTest(terminal=terminal, transition=transition):
+                    result = {
+                        "terminal_state": terminal,
+                        "ticket": {"provider": "github"},
+                        "tracker_transition": transition,
+                    }
+                    with self.assertRaisesRegex(MailboxTransitionRejected, "tracker transition"):
+                        _require_tracker_transition(result, current)
+
     def test_delegation_prepares_v2_invocation_and_records_blocked_receipt(self) -> None:
         claimed = self.claim()
         delegation = self.delegation()
@@ -1309,10 +1479,20 @@ class ClaimingContract(unittest.TestCase):
         self.assertEqual(receipt["unresolved_obligations"], result["unresolved_obligations"])
         reconstruct_mailbox(checkout)
 
-    def test_delegation_denies_stale_checkpoint_without_mailbox_mutation(self) -> None:
+    def test_delegation_rejects_blocked_tracker_mutation_before_receipt(self) -> None:
         claimed = self.claim()
         delegation = self.delegation()
         invocation = self.delegated_invocation(claimed)
+        checkpointed = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            claimed,
+            action="repository.candidate.create",
+            token="token-1",
+        )
+        result = self.blocked_result(
+            invocation, checkpointed, tracker_mode="manual", tracker_state="closed"
+        )
         before = git(
             None,
             "--git-dir",
@@ -1320,32 +1500,22 @@ class ClaimingContract(unittest.TestCase):
             "rev-parse",
             "main",
         ).stdout.strip()
-        request = {
-            "schema": REQUEST_SCHEMA,
-            "capability": CAPABILITY,
-            "invocation_id": invocation["invocation_id"],
-            "continuation_token": "stale-token",
-            "sequence": 1,
-            "phase": "pre_external_mutation",
-            "action": "repository.candidate.create",
-            "ticket_observation": invocation["ticket"]["observation"],
-            "candidate": None,
-            "deployment": None,
-            "proposed_effect": "create candidate",
-        }
-        response = delegation.checkpoint(
-            self.work_id,
-            invocation,
-            request,
-            approved_commit=self.approved_commit,
-            policy_target=self.policy_target(),
-            host_target=self.delegation_host_target(),
-            observation_path=self.observation_path,
-            observation_not_before=self.live_at,
-            recorded_at=self.live_at + timedelta(minutes=2),
-            next_continuation_token="must-not-be-used",
-            now=self.live_at + timedelta(minutes=2),
-        )
+
+        with self.assertRaisesRegex(MailboxTransitionRejected, "tracker transition"):
+            delegation.finalize(
+                self.work_id,
+                invocation,
+                result,
+                self.fence(checkpointed),
+                approved_commit=self.approved_commit,
+                policy_target=self.policy_target(),
+                host_target=self.delegation_host_target(),
+                observation_path=self.observation_path,
+                observation_not_before=self.live_at,
+                ended_at=self.live_at + timedelta(minutes=3),
+                now=self.live_at + timedelta(minutes=3),
+            )
+
         after = git(
             None,
             "--git-dir",
@@ -1353,9 +1523,189 @@ class ClaimingContract(unittest.TestCase):
             "rev-parse",
             "main",
         ).stdout.strip()
-        self.assertEqual(response["decision"], "deny")
-        self.assertEqual(response["continuation_token"], "stale-token")
         self.assertEqual(after, before)
+
+    def test_delegation_rejects_altered_invocation_at_finalization(self) -> None:
+        claimed = self.claim()
+        delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        checkpointed = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            claimed,
+            action="repository.candidate.create",
+            token="token-1",
+        )
+        result = self.blocked_result(invocation, checkpointed)
+        altered = {**invocation, "validation": ["just test"]}
+        before = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+
+        with self.assertRaisesRegex(DelegationError, "sealed digest"):
+            delegation.finalize(
+                self.work_id,
+                altered,
+                result,
+                self.fence(checkpointed),
+                approved_commit=self.approved_commit,
+                policy_target=self.policy_target(),
+                host_target=self.delegation_host_target(),
+                observation_path=self.observation_path,
+                observation_not_before=self.live_at,
+                ended_at=self.live_at + timedelta(minutes=3),
+                now=self.live_at + timedelta(minutes=3),
+            )
+
+        after = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+        self.assertEqual(after, before)
+
+    def test_delegation_normalizes_failed_and_unavailable_blocked_reviews(self) -> None:
+        claimed = self.claim()
+        delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        candidate = {
+            "repository": invocation["repository"]["identity"],
+            "remote_url": invocation["repository"]["remote_url"],
+            "remote_ref": "refs/heads/scott/blocked-candidate",
+            "base_sha": invocation["repository"]["base_sha"],
+            "head_sha": HEAD,
+        }
+        created = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            claimed,
+            action="repository.candidate.push",
+            token="token-1",
+            candidate=candidate,
+        )
+        published = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            created,
+            action="repository.candidate.push",
+            token="token-2",
+            phase="candidate_published",
+            candidate=candidate,
+        )
+        reviews = [
+            {
+                "name": "correctness",
+                "outcome": "failed",
+                "candidate_sha": HEAD,
+                "observed_at": fixtures.TIMESTAMP,
+            },
+            {
+                "name": "simplicity",
+                "outcome": "unavailable",
+                "candidate_sha": HEAD,
+                "observed_at": fixtures.TIMESTAMP,
+            },
+        ]
+        terminal_candidate = {
+            **candidate,
+            "publication": {"kind": "ordinary", "pull_requests": []},
+        }
+        result = self.blocked_result(
+            invocation,
+            published,
+            reviews=reviews,
+            candidate=terminal_candidate,
+            authority_used=["repository.candidate.push"],
+        )
+        delegation.finalize(
+            self.work_id,
+            invocation,
+            result,
+            self.fence(published),
+            approved_commit=self.approved_commit,
+            policy_target=self.policy_target(),
+            host_target=self.delegation_host_target(),
+            observation_path=self.observation_path,
+            observation_not_before=self.live_at,
+            ended_at=self.live_at + timedelta(minutes=3),
+            now=self.live_at + timedelta(minutes=3),
+        )
+
+        checkout = self.mailbox_clone("delegated-review-read")
+        work, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="work",
+        )
+        receipt, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/receipts/{work['attempt_receipt_id']}.md",
+            frontmatter=True,
+            label="receipt",
+        )
+        self.assertEqual(
+            [review["verdict"] for review in receipt["reviews"]],
+            ["changes_required", "blocked"],
+        )
+        self.assertEqual(
+            {review["mechanism"] for review in receipt["reviews"]},
+            {"review-code-change"},
+        )
+        reconstruct_mailbox(checkout)
+
+    def test_delegation_denies_stale_checkpoint_without_mailbox_mutation(self) -> None:
+        claimed = self.claim()
+        delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        request = self.delegated_request(invocation, claimed, action="repository.candidate.create")
+        request["continuation_token"] = "stale-token"
+
+        self.assert_checkpoint_denied_without_mutation(delegation, invocation, request)
+
+    def test_delegation_denies_wrong_sequence_with_current_token_without_mutation(self) -> None:
+        claimed = self.claim()
+        delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        request = self.delegated_request(invocation, claimed, action="repository.candidate.create")
+        request["sequence"] += 1
+
+        self.assert_checkpoint_denied_without_mutation(delegation, invocation, request)
+
+    def test_delegation_denies_altered_invocation_without_mutation(self) -> None:
+        claimed = self.claim()
+        delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        altered = {**invocation, "validation": ["just test"]}
+        request = self.delegated_request(altered, claimed, action="repository.candidate.create")
+
+        response = self.assert_checkpoint_denied_without_mutation(delegation, altered, request)
+        self.assertIn("sealed digest", response["reason"])
+
+    def test_delegation_denies_foreign_checkpoint_candidate_without_mutation(self) -> None:
+        claimed = self.claim()
+        delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        candidate = {
+            "repository": invocation["repository"]["identity"],
+            "remote_url": "https://github.com/foreign/project.git",
+            "remote_ref": "refs/heads/scott/foreign-candidate",
+            "base_sha": invocation["repository"]["base_sha"],
+            "head_sha": HEAD,
+        }
+        request = self.delegated_request(
+            invocation,
+            claimed,
+            action="repository.candidate.push",
+            candidate=candidate,
+        )
+
+        response = self.assert_checkpoint_denied_without_mutation(delegation, invocation, request)
+        self.assertIn("foreign", response["reason"])
 
     def test_delegation_delivers_one_exact_ready_pull_request(self) -> None:
         claimed = self.claim()

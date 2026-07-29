@@ -256,6 +256,7 @@ class ClaimCoordinator:
                     "approved_commit": approved_commit,
                     "policy_commit": state.current_policy.commit,
                     "ticket_observation_digest": state.ticket_digest,
+                    "invocation_digest": None,
                     "claimed_at": _timestamp(claimed_at),
                     "host": "codex",
                     "checkpoint": {
@@ -544,6 +545,7 @@ class ClaimCoordinator:
                 "approved_commit": approved_commit,
                 "policy_commit": state.current_policy.commit,
                 "ticket_observation_digest": state.ticket_digest,
+                "invocation_digest": None,
                 "claimed_at": _timestamp(taken_over_at),
                 "host": "codex",
                 "checkpoint": {

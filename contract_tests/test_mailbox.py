@@ -204,6 +204,7 @@ def claim(repository: str, number: int, *, with_candidate: bool) -> dict[str, An
         "approved_commit": SHA_A,
         "policy_commit": SHA_A,
         "ticket_observation_digest": DIGEST,
+        "invocation_digest": None,
         "claimed_at": TIMESTAMP,
         "host": "codex",
         "checkpoint": {

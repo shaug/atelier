@@ -416,6 +416,7 @@ claim:
   approved_commit: 0123456789abcdef0123456789abcdef01234567
   policy_commit: 0123456789abcdef0123456789abcdef01234567
   ticket_observation_digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  invocation_digest: null
   claimed_at: 2026-07-25T12:05:00Z
   host: codex
   checkpoint:
@@ -424,6 +425,11 @@ claim:
     authorizations: []
   candidate: null
 ```
+
+Delegation preparation changes `invocation_digest` exactly once from `null` to
+the SHA-256 digest of the complete canonical delegated invocation. The digest is
+immutable thereafter and every checkpoint and terminal result must reproduce
+the sealed invocation before Atelier may consume authority or record a receipt.
 
 Every entry in `checkpoint.authorizations` has this complete shape:
 
@@ -439,7 +445,7 @@ recorded_at: 2026-07-25T12:06:00Z
 ```
 
 `phase` is `pre_external_mutation` or `candidate_published`; `action` uses the
-Agent Scripts v1 vocabulary. SHA fields are exact candidate revisions or `null`
+Agent Scripts v2 vocabulary. SHA fields are exact candidate revisions or `null`
 when the action has no candidate. All other fields are required. Entries are in
 strictly increasing sequence order and are append-only. When transferable
 implementation state first exists, the worker updates the claim only after

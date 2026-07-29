@@ -228,6 +228,7 @@
         "approved_commit",
         "policy_commit",
         "ticket_observation_digest",
+        "invocation_digest",
         "claimed_at",
         "host",
         "checkpoint",
@@ -252,6 +253,16 @@
         },
         "ticket_observation_digest": {
           "$ref": "#/$defs/digest"
+        },
+        "invocation_digest": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "claimed_at": {
           "$ref": "#/$defs/timestamp"

@@ -12,9 +12,10 @@ durable receipt.
    v2 bundle.
 2. Read `claiming.md` and obtain the current claim fence and approval commit.
 3. Capture a complete GitHub observation after a new read boundary.
-4. Use `scripts/delegation.py` with `operation: prepare`. The prepared
-   invocation must be passed unchanged to one fresh host worker together with
-   an exact checkpoint command.
+4. Use `scripts/delegation.py` with `operation: prepare`. Preparation atomically
+   seals the canonical invocation digest into the current claim. Pass that exact
+   invocation unchanged to one fresh host worker together with an exact checkpoint
+   command.
 
 Never copy `implement-ticket`, launch a substitute workflow, or persist
 host-local task state in the mailbox. Starting the fresh worker is a host
@@ -41,9 +42,10 @@ actions, or acknowledge deployment. Atelier v0 accepts only `ready_pr`,
 
 ## Terminal result
 
-Invoke `scripts/delegation.py` with `operation: finalize`, the unchanged
-invocation, the exact current fence, the worker result, and another fresh
-complete observation.
+Invoke `scripts/delegation.py` with `operation: finalize`, the unchanged sealed
+invocation, the exact current fence, the worker result, and another fresh complete
+observation. Atelier requires the result to report no tracker mutation and to
+match the still-open current native ticket before recording a receipt.
 
 - `ready_pr` requires one ordinary open, non-draft, mergeable pull request whose
   base, head, remote candidate, checks, validation, independent review,

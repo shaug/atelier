@@ -619,6 +619,17 @@ class GitMailboxWriter:
                 )
             prior_checkpoint = prior_claim["checkpoint"]
             current_checkpoint = current_claim["checkpoint"]
+            if current_claim["invocation_digest"] != prior_claim["invocation_digest"]:
+                if not (
+                    prior_claim["invocation_digest"] is None
+                    and isinstance(current_claim["invocation_digest"], str)
+                    and document["status"] == "active"
+                    and current_checkpoint == prior_checkpoint
+                    and current_claim["candidate"] == prior_claim["candidate"]
+                ):
+                    raise MailboxTransitionRejected(
+                        f"{path}: delegated invocation binding is immutable"
+                    )
             prior_ledger = prior_checkpoint["authorizations"]
             current_ledger = current_checkpoint["authorizations"]
             sequence_delta = current_checkpoint["sequence"] - prior_checkpoint["sequence"]
