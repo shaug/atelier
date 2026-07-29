@@ -8,11 +8,15 @@ import copy
 import hashlib
 import importlib.util
 import json
+import os
+import secrets
 import re
+import subprocess
 import sys
+import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -41,7 +45,7 @@ from skills.atelier.scripts.git_mailbox import (
     TransitionPlan,
     WriteResult,
 )
-from skills.atelier.scripts.host_boundary import check_host
+from skills.atelier.scripts.host_boundary import HostBoundaryError, check_host, validate_observation
 from skills.atelier.scripts.identifiers import new_identifier
 from skills.atelier.scripts.planning import PolicyTarget, _render_document
 
@@ -77,14 +81,28 @@ class DelegationCoordinator:
         host_target: HostTarget,
         observation_path: Path,
         observation_not_before: datetime,
-        checkpoint_command: Sequence[str],
+        checkpoint_invocation_path: Path,
+        observation_command: Sequence[str],
         now: datetime | None = None,
     ) -> dict[str, Any]:
         """Build one exact invocation from fresh approved mailbox and provider state."""
 
         dependency = self._dependency(host_target)
-        if not checkpoint_command or any(not item for item in checkpoint_command):
-            raise DelegationError("checkpoint command must contain nonempty arguments")
+        if (
+            not observation_command
+            or any(not isinstance(item, str) or not item for item in observation_command)
+        ):
+            raise DelegationError("observation command must contain nonempty string arguments")
+        checkpoint_command = _checkpoint_command(
+            invocation_path=checkpoint_invocation_path,
+            mailbox_remote=self.claims.writer.remote,
+            mailbox_branch=self.claims.writer.branch,
+            work_id=work_id,
+            approved_commit=approved_commit,
+            policy_target=policy_target,
+            host_target=host_target,
+            observation_command=observation_command,
+        )
         planned: dict[str, Any] = {}
 
         def revalidate(context: TransitionContext) -> None:
@@ -173,6 +191,8 @@ class DelegationCoordinator:
                 },
             }
             _require_valid(dependency, "invocation", invocation)
+            _write_json_atomic(checkpoint_invocation_path, invocation)
+            _probe_checkpoint_command(checkpoint_command)
             updated_claim = copy.deepcopy(claim)
             updated_claim["invocation_digest"] = _canonical_digest(invocation)
             planned.clear()
@@ -278,6 +298,9 @@ class DelegationCoordinator:
                 observation_path=observation_path,
                 observation_not_before=observation_not_before,
                 now=now,
+                state_revalidator=lambda state: _require_current_invocation_contract(
+                    invocation, state
+                ),
             )
         except (DelegationError, MailboxTransitionRejected) as error:
             response["reason"] = str(error)
@@ -382,6 +405,7 @@ class DelegationCoordinator:
                 observation_not_before=observation_not_before,
                 now=now,
             )
+            _require_current_invocation_contract(invocation, state)
             if state.work["status"] != "active":
                 raise MailboxTransitionRejected(f"{work_id}: terminal result requires active work")
             claim = copy.deepcopy(_require_fence(state.work, fence))
@@ -404,7 +428,10 @@ class DelegationCoordinator:
                 _require_ready_pr(result, state.observation, claim)
                 claim["candidate"] = _delivered_candidate(result, claim["candidate"])
             else:
-                _require_blocked_result(result, claim)
+                blocked_candidate = _blocked_candidate(result, claim, ended_at)
+                if blocked_candidate is not None:
+                    self.claims._verify_candidate(blocked_candidate)
+                    claim["candidate"] = blocked_candidate
             message = None
             if outcome == "blocked":
                 message = {
@@ -699,7 +726,9 @@ def _delivered_candidate(
     return value
 
 
-def _require_blocked_result(result: Mapping[str, Any], claim: Mapping[str, Any]) -> None:
+def _blocked_candidate(
+    result: Mapping[str, Any], claim: Mapping[str, Any], recorded_at: datetime
+) -> dict[str, Any] | None:
     if not result["blocking_reason"] or not result["unresolved_obligations"]:
         raise MailboxTransitionRejected(
             "blocked results require a reason and unresolved obligations"
@@ -709,21 +738,34 @@ def _require_blocked_result(result: Mapping[str, Any], claim: Mapping[str, Any])
     if candidate is None:
         if current is not None:
             raise MailboxTransitionRejected("blocked result omitted an acknowledged candidate")
-        return
-    if current is None or (
+        return None
+    candidate_identity = (
         candidate["repository"],
         candidate["remote_url"],
         candidate["remote_ref"],
         candidate["base_sha"],
         candidate["head_sha"],
-    ) != (
+    )
+    if current is not None and candidate_identity == (
         current["repository"],
         current["remote_url"],
         current["remote_ref"],
         current["base_revision"],
         current["head_revision"],
     ):
-        raise MailboxTransitionRejected("blocked result candidate does not match the claim")
+        return copy.deepcopy(current)
+    ledger = claim["checkpoint"]["authorizations"]
+    if (
+        result["implementation_state"] != "published"
+        or not ledger
+        or ledger[-1]["phase"] != "pre_external_mutation"
+        or ledger[-1]["action"] != "repository.candidate.push"
+        or ledger[-1]["candidate_head"] != candidate["head_sha"]
+    ):
+        raise MailboxTransitionRejected(
+            "blocked published candidate lacks its exact push authorization"
+        )
+    return _mailbox_candidate(candidate, recorded_at)
 
 
 def _require_tracker_transition(result: Mapping[str, Any], observation: Mapping[str, Any]) -> None:
@@ -744,6 +786,32 @@ def _require_tracker_transition(result: Mapping[str, Any], observation: Mapping[
     if actual != expected or expected[3] != "open":
         raise MailboxTransitionRejected(
             "delegated result tracker transition does not match the current open ticket"
+        )
+
+
+def _require_current_invocation_contract(
+    invocation: Mapping[str, Any], state: Any
+) -> None:
+    policy = state.effective_policy
+    current_acceptance = list(policy["acceptance"]["evidence"])
+    invocation_acceptance = [
+        item["criterion"] for item in invocation["acceptance_requirements"]
+    ]
+    if invocation["repository"]["identity"] != state.project["repository"]:
+        raise MailboxTransitionRejected(
+            "delegated invocation repository does not match the current project"
+        )
+    if invocation["repository"]["base_sha"] != state.current_policy.commit:
+        raise MailboxTransitionRejected(
+            "delegated invocation base is stale against the current repository"
+        )
+    if list(invocation["validation"]) != list(policy["validation"]["required_commands"]):
+        raise MailboxTransitionRejected(
+            "delegated invocation validation does not match current policy"
+        )
+    if invocation_acceptance != current_acceptance:
+        raise MailboxTransitionRejected(
+            "delegated invocation acceptance does not match current policy"
         )
 
 
@@ -789,6 +857,198 @@ def _fence(value: Mapping[str, Any]) -> ClaimFence:
     )
 
 
+def _policy_target_value(target: PolicyTarget) -> dict[str, Any]:
+    return {
+        "checkout": str(target.checkout.resolve()),
+        "remote": target.remote,
+        "canonical_ref": target.canonical_ref,
+        "path": target.path,
+    }
+
+
+def _host_target_value(target: HostTarget) -> dict[str, Any]:
+    return {
+        "descriptor_path": str(target.descriptor_path.resolve()),
+        "skill_name": target.skill_name,
+        "skill_root": str(target.skill_root.resolve()),
+        "connector": target.connector,
+        "operations": list(target.operations),
+    }
+
+
+def _compact_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _checkpoint_command(
+    *,
+    invocation_path: Path,
+    mailbox_remote: str,
+    mailbox_branch: str,
+    work_id: str,
+    approved_commit: str,
+    policy_target: PolicyTarget,
+    host_target: HostTarget,
+    observation_command: Sequence[str],
+) -> list[str]:
+    return [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "checkpoint-stdio",
+        "--invocation",
+        str(invocation_path.resolve()),
+        "--mailbox-remote",
+        mailbox_remote,
+        "--mailbox-branch",
+        mailbox_branch,
+        "--work-id",
+        work_id,
+        "--approved-commit",
+        approved_commit,
+        "--policy-target",
+        _compact_json(_policy_target_value(policy_target)),
+        "--host-target",
+        _compact_json(_host_target_value(host_target)),
+        "--observation-command",
+        _compact_json(list(observation_command)),
+    ]
+
+
+def _write_json_atomic(path: Path, value: Mapping[str, Any]) -> None:
+    target = path.resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=target.parent,
+        prefix=f".{target.name}.",
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(value, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _probe_checkpoint_command(command: Sequence[str]) -> None:
+    completed = subprocess.run(
+        [*command, "--probe"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or f"exit status {completed.returncode}"
+        raise DelegationError(f"checkpoint command probe failed: {detail}")
+    try:
+        response = json.loads(completed.stdout)
+    except json.JSONDecodeError as error:
+        raise DelegationError("checkpoint command probe returned malformed JSON") from error
+    if response != {"status": "ready"}:
+        raise DelegationError("checkpoint command probe did not report ready")
+
+
+def _checkpoint_stdio_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Service one delegated checkpoint request")
+    parser.add_argument("--invocation", required=True, type=Path)
+    parser.add_argument("--mailbox-remote", required=True)
+    parser.add_argument("--mailbox-branch", required=True)
+    parser.add_argument("--work-id", required=True)
+    parser.add_argument("--approved-commit", required=True)
+    parser.add_argument("--policy-target", required=True)
+    parser.add_argument("--host-target", required=True)
+    parser.add_argument("--observation-command", required=True)
+    parser.add_argument("--probe", action="store_true")
+    return parser
+
+
+def _json_object_argument(value: str, label: str) -> dict[str, Any]:
+    parsed = json.loads(value)
+    if not isinstance(parsed, dict):
+        raise DelegationError(f"{label} must be a JSON object")
+    return parsed
+
+
+def _json_command_argument(value: str) -> list[str]:
+    parsed = json.loads(value)
+    if (
+        not isinstance(parsed, list)
+        or not parsed
+        or any(not isinstance(item, str) or not item for item in parsed)
+    ):
+        raise DelegationError("observation command must be a nonempty JSON string array")
+    return parsed
+
+
+def _checkpoint_stdio(arguments: Sequence[str]) -> dict[str, Any]:
+    args = _checkpoint_stdio_parser().parse_args(arguments)
+    policy_target = _policy_target(_json_object_argument(args.policy_target, "policy target"))
+    host_target = _host_target(_json_object_argument(args.host_target, "host target"))
+    observation_command = _json_command_argument(args.observation_command)
+    invocation = _read_json(args.invocation)
+    expected_command = _checkpoint_command(
+        invocation_path=args.invocation,
+        mailbox_remote=args.mailbox_remote,
+        mailbox_branch=args.mailbox_branch,
+        work_id=args.work_id,
+        approved_commit=args.approved_commit,
+        policy_target=policy_target,
+        host_target=host_target,
+        observation_command=observation_command,
+    )
+    if invocation.get("checkpoint", {}).get("command") != expected_command:
+        raise DelegationError("checkpoint adapter arguments do not match the sealed invocation")
+
+    read_boundary = datetime.now(UTC)
+    completed = subprocess.run(
+        observation_command,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or f"exit status {completed.returncode}"
+        raise DelegationError(f"native observation command failed: {detail}")
+    try:
+        observation = json.loads(completed.stdout)
+    except json.JSONDecodeError as error:
+        raise DelegationError("native observation command returned malformed JSON") from error
+    if not isinstance(observation, dict):
+        raise DelegationError("native observation command must return one JSON object")
+    observed_at = datetime.now(UTC)
+    with tempfile.TemporaryDirectory(prefix="atelier-checkpoint-observation-") as temporary:
+        observation_path = Path(temporary) / "observation.json"
+        _write_json_atomic(observation_path, observation)
+        validate_observation(
+            observation_path,
+            not_before=read_boundary,
+            now=observed_at,
+        )
+        if args.probe:
+            return {"status": "ready"}
+        request = json.load(sys.stdin)
+        if not isinstance(request, dict):
+            raise DelegationError("checkpoint request must be one JSON object")
+        claims = ClaimCoordinator(args.mailbox_remote, args.mailbox_branch)
+        response = DelegationCoordinator(claims).checkpoint(
+            args.work_id,
+            invocation,
+            request,
+            approved_commit=args.approved_commit,
+            policy_target=policy_target,
+            host_target=host_target,
+            observation_path=observation_path,
+            observation_not_before=read_boundary,
+            recorded_at=observed_at,
+            next_continuation_token=secrets.token_urlsafe(32),
+            now=observed_at,
+        )
+    return response
+
+
 def execute_request(value: Mapping[str, Any]) -> dict[str, Any]:
     """Execute one explicit host-owned delegation operation from a JSON request."""
 
@@ -807,7 +1067,8 @@ def execute_request(value: Mapping[str, Any]) -> dict[str, Any]:
         return delegation.prepare(
             value["work_id"],
             _fence(value["fence"]),
-            checkpoint_command=value["checkpoint_command"],
+            checkpoint_invocation_path=Path(value["checkpoint_invocation_path"]),
+            observation_command=value["observation_command"],
             **common,
         )
     if operation == "checkpoint":
@@ -842,11 +1103,23 @@ def _parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     try:
-        result = execute_request(_read_json(_parser().parse_args().request))
-    except (DelegationError, MailboxTransitionRejected, KeyError, TypeError, ValueError) as error:
+        if len(sys.argv) > 1 and sys.argv[1] == "checkpoint-stdio":
+            result = _checkpoint_stdio(sys.argv[2:])
+            print(json.dumps(result, sort_keys=True))
+        else:
+            result = execute_request(_read_json(_parser().parse_args().request))
+            print(json.dumps(result, indent=2, sort_keys=True))
+    except (
+        DelegationError,
+        HostBoundaryError,
+        MailboxTransitionRejected,
+        KeyError,
+        OSError,
+        TypeError,
+        ValueError,
+    ) as error:
         print(f"ERROR delegation: {error}", file=sys.stderr)
         return 1
-    print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
 

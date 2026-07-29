@@ -295,6 +295,7 @@ class ClaimCoordinator:
         observation_path: Path,
         observation_not_before: datetime,
         now: datetime | None = None,
+        state_revalidator: Callable[[_ExecutionState], None] | None = None,
     ) -> ClaimResult:
         """Allow one exact external action or acknowledge one exact published candidate."""
         _require_identifier(work_id, "wrk")
@@ -312,6 +313,8 @@ class ClaimCoordinator:
                 observation_not_before=observation_not_before,
                 now=now,
             )
+            if state_revalidator is not None:
+                state_revalidator(state)
             if state.work["status"] != "active":
                 raise MailboxTransitionRejected(f"{work_id}: checkpoints require active work")
             claim = _require_fence(state.work, request.fence)

@@ -470,9 +470,10 @@ reachable from `remote_ref` on the verified declared remote. A local-only SHA,
 an unverified push, or a mutable branch name without the exact remote ref and
 head is not a candidate.
 
-After every candidate push, the worker verifies remote reachability, publishes
-the new exact head in the claim, and verifies that mailbox transition before
-relying on that candidate for review, delivery, or another external mutation.
+After every candidate push, the worker normally verifies remote reachability,
+publishes the new exact head in the claim, and verifies that mailbox transition
+before relying on that candidate for review, delivery, or another external
+mutation.
 
 Claims do not expire automatically.
 
@@ -489,11 +490,19 @@ cannot be replayed, and the ledger is never truncated or rewritten.
 
 `candidate_published` uses the same compare-and-swap transition while also
 recording the exact remotely reachable candidate. An unavailable or ambiguous
-mailbox outcome does not acknowledge the candidate. Before accepting any
-terminal result, Atelier requires its sequence and continuation token to equal
-the current claim-ledger tail. It also requires the terminal `authority_used`
-set to equal the allowed `pre_external_mutation` actions in that ledger; either
-under-reporting or an unrecorded action blocks the result.
+mailbox outcome does not acknowledge the candidate for further mutation. If the
+push succeeded but that acknowledgement transition failed, a terminal blocked
+result may recover the exact candidate only when its identity matches the sealed
+invocation, the ledger tail is its exact pre-mutation push authorization, remote
+reachability is reverified, and the blocked receipt binds the candidate in the
+same atomic mailbox transition. That receipt becomes the verified transferable
+handoff for a later claim.
+
+Before accepting any terminal result, Atelier requires its sequence and
+continuation token to equal the current claim-ledger tail. It also requires the
+terminal `authority_used` set to equal the allowed `pre_external_mutation`
+actions in that ledger; either under-reporting or an unrecorded action blocks the
+result.
 
 A worker releases a claim explicitly when it stops without delivering the work.
 An operator or planner may perform an explicit takeover when the prior worker

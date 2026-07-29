@@ -920,6 +920,18 @@ def _validate_claim(
         and attempt_receipt["handoff"] == "transferable"
         and attempt_receipt["claim_id"] != claim["id"]
     )
+    recovered_current_candidate = (
+        attempt_receipt is not None
+        and attempt_receipt["outcome"] == "blocked"
+        and attempt_receipt["handoff"] == "transferable"
+        and attempt_receipt["claim_id"] == claim["id"]
+        and attempt_receipt["candidate"] == claim["candidate"]
+        and bool(ledger)
+        and ledger[-1]["phase"] == "pre_external_mutation"
+        and ledger[-1]["action"] == "repository.candidate.push"
+        and claim["candidate"] is not None
+        and ledger[-1]["candidate_head"] == claim["candidate"]["head_revision"]
+    )
     latest_acknowledged_head = (
         attempt_receipt["candidate"]["head_revision"]
         if transferable_handoff and attempt_receipt["candidate"] is not None
@@ -1010,12 +1022,13 @@ def _validate_claim(
     inherited_candidate = (
         candidate is not None
         and not publication_entries
-        and transferable_handoff
+        and (transferable_handoff or recovered_current_candidate)
         and attempt_receipt["candidate"] == candidate
     )
     current_unacknowledged = (
         candidate is not None
         and not inherited_candidate
+        and not recovered_current_candidate
         and (
             not publication_entries
             or publication_entries[-1]["candidate_head"] != candidate["head_revision"]

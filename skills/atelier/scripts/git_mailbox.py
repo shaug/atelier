@@ -654,6 +654,15 @@ class GitMailboxWriter:
                     f"{path}: checkpoint sequence and continuation token must advance together"
                 )
             if current_claim["candidate"] != prior_claim["candidate"]:
+                if self._blocked_receipt_recovers_candidate(
+                    checkout,
+                    path,
+                    document,
+                    prior_claim,
+                    current_claim,
+                    changes,
+                ):
+                    continue
                 if self._delivery_binds_pull_request(
                     checkout,
                     path,
@@ -677,6 +686,55 @@ class GitMailboxWriter:
                     raise MailboxTransitionRejected(
                         f"{path}: candidate publication checkpoint does not match candidate"
                     )
+
+    def _blocked_receipt_recovers_candidate(
+        self,
+        checkout: Path,
+        path: str,
+        document: Mapping[str, Any],
+        prior_claim: Mapping[str, Any],
+        current_claim: Mapping[str, Any],
+        changes: tuple[FileChange, ...],
+    ) -> bool:
+        """Allow a blocked receipt to recover one exact previously pushed candidate."""
+
+        candidate = current_claim["candidate"]
+        if (
+            candidate is None
+            or candidate == prior_claim["candidate"]
+            or current_claim["checkpoint"] != prior_claim["checkpoint"]
+            or document["status"] != "blocked"
+            or document["delivery_receipt_id"] is not None
+        ):
+            return False
+        ledger = current_claim["checkpoint"]["authorizations"]
+        if (
+            not ledger
+            or ledger[-1]["phase"] != "pre_external_mutation"
+            or ledger[-1]["action"] != "repository.candidate.push"
+            or ledger[-1]["candidate_head"] != candidate["head_revision"]
+        ):
+            return False
+        receipt_id = document["attempt_receipt_id"]
+        if not isinstance(receipt_id, str):
+            return False
+        receipt_path = f"work/{PurePosixPath(path).parts[1]}/receipts/{receipt_id}.md"
+        if not any(
+            change.path == receipt_path and change.content is not None for change in changes
+        ):
+            return False
+        receipt, _ = _read_yaml(
+            checkout / receipt_path,
+            frontmatter=True,
+            label=receipt_path,
+        )
+        return bool(
+            receipt["outcome"] == "blocked"
+            and receipt["claim_id"] == current_claim["id"]
+            and receipt["worker_run_id"] == current_claim["worker_run_id"]
+            and receipt["candidate"] == candidate
+            and receipt["mutation_ownership"] == "retained"
+        )
 
     def _delivery_binds_pull_request(
         self,
