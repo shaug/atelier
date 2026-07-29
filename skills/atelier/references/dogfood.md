@@ -65,6 +65,9 @@ asking to continue does not grant worker authority.
    A `ready_pr` receipt must name one open, non-draft, mergeable ordinary pull
    request and its exact remote ref and head. A blocked result must preserve its
    exact acknowledged candidate, if one exists, and its remaining obligation.
+   Finalize `requires_epic` as the production blocked, planner-action receipt;
+   preserve any transferable candidate and return the assignment to planning.
+   Do not invoke `implement-epic` from this runbook.
 
 Atelier validates the invocation, checkpoint fence, candidate acknowledgement,
 and terminal result. It does not implement the ticket workflow, merge the pull
