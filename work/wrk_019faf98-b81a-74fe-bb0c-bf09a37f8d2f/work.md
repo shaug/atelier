@@ -49,9 +49,18 @@ claim:
   claimed_at: '2026-07-29T20:58:53Z'
   host: codex
   checkpoint:
-    sequence: 0
-    continuation_token: a7f756ba2cd875a863068f9d2b3961fe2739dec88c8c36c624b4f0fd5fe6508a
-    authorizations: []
+    sequence: 1
+    continuation_token: jvHp_1YjOq4LIu5LKTjk2oJbRlJWAmD-Esa54JMHucE
+    authorizations:
+    - sequence: 1
+      invocation_id: run_019fafac-4fe5-796f-aa10-130f87141949
+      phase: pre_external_mutation
+      action: repository.candidate.create
+      proposed_effect_digest: sha256:1d892e85098f457ab53c7fd840a4434010069b99e841413744581594998108f2
+      candidate_head: null
+      candidate_remote_ref: null
+      acknowledged_candidate_head: null
+      recorded_at: '2026-07-29T21:11:58.567240Z'
   candidate: null
 blocking_message_id: null
 attempt_receipt_id: null
