@@ -4,7 +4,7 @@ id: wrk_019faf98-b81a-74fe-bb0c-bf09a37f8d2f
 title: Document the production dogfood lifecycle
 project_id: prj_019faf81-a727-7f87-b3bf-ee92b37450eb
 initiative_id: ini_019faf98-b7e3-7f60-818b-d34bc08bf3a4
-status: active
+status: blocked
 revision: 2
 dependencies: []
 replaces: []
@@ -71,8 +71,8 @@ claim:
     pull_request: null
     workspace_id: null
     published_at: '2026-07-29T22:21:56Z'
-blocking_message_id: null
-attempt_receipt_id: rcp_019faffe-33d4-7a72-b1fc-187e8c45f687
+blocking_message_id: msg_019fb015-389c-71cc-8bd6-24856a1aadaf
+attempt_receipt_id: rcp_019fb015-389c-772c-8e96-6f66e68c1ef6
 delivery_receipt_id: null
 acceptance: null
 ---
