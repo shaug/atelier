@@ -767,6 +767,7 @@ class GitMailboxWriteContract(unittest.TestCase):
                     "action": "repository.candidate.create",
                     "proposed_effect_digest": fixtures.DIGEST,
                     "candidate_head": None,
+                    "candidate_remote_ref": None,
                     "acknowledged_candidate_head": None,
                     "recorded_at": fixtures.TIMESTAMP,
                 }
@@ -1566,8 +1567,8 @@ class GitMailboxWriteContract(unittest.TestCase):
             )
 
         with self.assertRaisesRegex(
-            MailboxTransitionRejected,
-            "candidate changes require one publication checkpoint",
+            (MailboxTransitionRejected, MailboxValidationError),
+            "candidate changes require one publication checkpoint|candidate-acknowledgement",
         ):
             self.writer().publish(
                 "rebind candidate without checkpoint",

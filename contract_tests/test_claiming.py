@@ -415,11 +415,14 @@ print(json.dumps(value, sort_keys=True))
         action: str,
         token: str,
         candidate_head: str | None = None,
+        candidate_remote_ref: str | None = None,
         phase: str = "pre_external_mutation",
         candidate: dict[str, Any] | None = None,
         coordinator: ClaimCoordinator | None = None,
         host_target: HostTarget | None = None,
     ):
+        if candidate_head is not None and candidate_remote_ref is None:
+            candidate_remote_ref = (candidate or self.candidate())["remote_ref"]
         return (coordinator or self.coordinator).authorize(
             self.work_id,
             CheckpointRequest(
@@ -428,6 +431,7 @@ print(json.dumps(value, sort_keys=True))
                 action=action,
                 proposed_effect_digest=DIGEST,
                 candidate_head=candidate_head,
+                candidate_remote_ref=candidate_remote_ref,
                 acknowledged_candidate_head=(
                     candidate_head if phase == "candidate_published" else None
                 ),
@@ -657,6 +661,101 @@ print(json.dumps(value, sort_keys=True))
             "blocking_reason": "The delegated worker could not publish a candidate.",
             "next_action": "Planner decides whether to retry or revise the work.",
         }
+
+    def assert_blocked_ref_substitution_rejected(self, *, with_prior_candidate: bool) -> None:
+        self.coordinator = ClaimCoordinator(
+            str(self.mailbox_remote),
+            "main",
+            candidate_verifier=lambda candidate: True,
+            capability_verifier=lambda target: True,
+            policy_remote_verifier=self.policy_remote_matches,
+        )
+        claimed = self.claim()
+        delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        prior = claimed
+        if with_prior_candidate:
+            acknowledged = {
+                "repository": invocation["repository"]["identity"],
+                "remote_url": invocation["repository"]["remote_url"],
+                "remote_ref": "refs/heads/scott/acknowledged-candidate",
+                "base_sha": invocation["repository"]["base_sha"],
+                "head_sha": HEAD,
+            }
+            pushed = self.delegated_checkpoint(
+                delegation,
+                invocation,
+                prior,
+                action="repository.candidate.push",
+                token="token-1",
+                candidate=acknowledged,
+            )
+            prior = self.delegated_checkpoint(
+                delegation,
+                invocation,
+                pushed,
+                action="repository.candidate.push",
+                token="token-2",
+                phase="candidate_published",
+                candidate=acknowledged,
+            )
+        authorized = {
+            "repository": invocation["repository"]["identity"],
+            "remote_url": invocation["repository"]["remote_url"],
+            "remote_ref": "refs/heads/scott/authorized-push",
+            "base_sha": invocation["repository"]["base_sha"],
+            "head_sha": "c" * 40 if with_prior_candidate else HEAD,
+        }
+        pushed = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            prior,
+            action="repository.candidate.push",
+            token="token-3" if with_prior_candidate else "token-1",
+            candidate=authorized,
+        )
+        substituted = {
+            **authorized,
+            "remote_ref": "refs/heads/scott/substituted-same-head",
+            "publication": {"kind": "ordinary", "pull_requests": []},
+        }
+        result = self.blocked_result(
+            invocation,
+            pushed,
+            candidate=substituted,
+            authority_used=["repository.candidate.push"],
+        )
+        before = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+
+        with self.assertRaisesRegex(MailboxTransitionRejected, "exact push authorization"):
+            delegation.finalize(
+                self.work_id,
+                invocation,
+                result,
+                self.fence(pushed),
+                approved_commit=self.approved_commit,
+                policy_target=self.policy_target(),
+                host_target=self.delegation_host_target(),
+                observation_path=self.observation_path,
+                observation_not_before=self.live_at,
+                ended_at=self.live_at + timedelta(minutes=3),
+                now=self.live_at + timedelta(minutes=3),
+            )
+
+        after = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+        self.assertEqual(after, before)
 
     def publish_candidate_with_descendant(self, *, with_pull_request: bool = False):
         candidate_head = git(self.project_checkout, "rev-parse", "HEAD").stdout.strip()
@@ -1885,6 +1984,12 @@ print(json.dumps(value, sort_keys=True))
             "main",
         ).stdout.strip()
         self.assertEqual(after, before)
+
+    def test_blocked_result_rejects_same_head_on_unauthorized_ref_without_prior(self) -> None:
+        self.assert_blocked_ref_substitution_rejected(with_prior_candidate=False)
+
+    def test_blocked_result_rejects_same_head_on_unauthorized_ref_after_prior(self) -> None:
+        self.assert_blocked_ref_substitution_rejected(with_prior_candidate=True)
 
     def test_blocked_result_recovers_unacknowledged_pushed_candidate(self) -> None:
         claimed = self.claim()

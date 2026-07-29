@@ -108,6 +108,7 @@
         "action",
         "proposed_effect_digest",
         "candidate_head",
+        "candidate_remote_ref",
         "acknowledged_candidate_head",
         "recorded_at"
       ],
@@ -133,6 +134,16 @@
         },
         "candidate_head": {
           "$ref": "#/$defs/nullable_sha"
+        },
+        "candidate_remote_ref": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/branch_ref"
+            }
+          ]
         },
         "acknowledged_candidate_head": {
           "$ref": "#/$defs/nullable_sha"

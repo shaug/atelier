@@ -282,6 +282,9 @@ class DelegationCoordinator:
                     candidate_head=request["candidate"]["head_sha"]
                     if request["candidate"]
                     else None,
+                    candidate_remote_ref=request["candidate"]["remote_ref"]
+                    if request["candidate"]
+                    else None,
                     acknowledged_candidate_head=(
                         request["candidate"]["head_sha"]
                         if request["phase"] == "candidate_published" and request["candidate"]
@@ -761,6 +764,7 @@ def _blocked_candidate(
         or ledger[-1]["phase"] != "pre_external_mutation"
         or ledger[-1]["action"] != "repository.candidate.push"
         or ledger[-1]["candidate_head"] != candidate["head_sha"]
+        or ledger[-1]["candidate_remote_ref"] != candidate["remote_ref"]
     ):
         raise MailboxTransitionRejected(
             "blocked published candidate lacks its exact push authorization"

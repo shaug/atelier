@@ -482,8 +482,8 @@ pre-mutation request must name the current claim, sequence, and continuation
 token. Atelier fetches and reevaluates current claim, revision, policy, ticket,
 candidate, and authority. On allowance, one atomic commit increments `sequence`,
 rotates `continuation_token`, and appends an authorization entry containing the
-invocation ID, phase, action, proposed-effect digest, exact candidate head,
-acknowledged candidate head, and recorded time. Atelier pushes and reads that
+invocation ID, phase, action, proposed-effect digest, exact candidate head and
+remote ref, acknowledged candidate head, and recorded time. Atelier pushes and
 exact checkpoint back before returning `allow`. Denial echoes the prior token
 and does not advance the checkpoint or ledger. A consumed sequence or token
 cannot be replayed, and the ledger is never truncated or rewritten.
@@ -493,8 +493,8 @@ recording the exact remotely reachable candidate. An unavailable or ambiguous
 mailbox outcome does not acknowledge the candidate for further mutation. If the
 push succeeded but that acknowledgement transition failed, a terminal blocked
 result may recover the exact candidate only when its identity matches the sealed
-invocation, the ledger tail is its exact pre-mutation push authorization, remote
-reachability is reverified, and the blocked receipt binds the candidate in the
+invocation, the ledger tail names its exact pre-mutation push head and remote ref,
+remote reachability is reverified, and the blocked receipt binds the candidate in the
 same atomic mailbox transition. That receipt becomes the verified transferable
 handoff for a later claim.
 

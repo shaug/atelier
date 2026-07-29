@@ -33,6 +33,7 @@ from skills.atelier.scripts.identifiers import new_identifier
 from skills.atelier.scripts.mailbox import (
     MailboxValidationError,
     _github_remote_url,
+    _valid_branch_ref,
     validate_project_policy,
 )
 from skills.atelier.scripts.planning import (
@@ -111,6 +112,7 @@ class CheckpointRequest:
     action: str
     proposed_effect_digest: str
     candidate_head: str | None
+    candidate_remote_ref: str | None
     acknowledged_candidate_head: str | None
     next_continuation_token: str
     recorded_at: datetime
@@ -780,9 +782,11 @@ class ClaimCoordinator:
             if (
                 request.action != "repository.candidate.push"
                 or request.candidate_head is None
+                or request.candidate_remote_ref is None
                 or request.acknowledged_candidate_head != request.candidate_head
                 or candidate is None
                 or candidate.get("head_revision") != request.candidate_head
+                or candidate.get("remote_ref") != request.candidate_remote_ref
             ):
                 raise MailboxTransitionRejected(
                     "candidate publication must acknowledge one exact repository candidate push"
@@ -796,6 +800,7 @@ class ClaimCoordinator:
                 prior["phase"] != "pre_external_mutation"
                 or prior["action"] != "repository.candidate.push"
                 or prior["candidate_head"] != request.candidate_head
+                or prior["candidate_remote_ref"] != request.candidate_remote_ref
                 or prior["proposed_effect_digest"] != request.proposed_effect_digest
             ):
                 raise MailboxTransitionRejected(
@@ -808,17 +813,25 @@ class ClaimCoordinator:
                 raise MailboxTransitionRejected(
                     "pre-mutation checkpoint cannot acknowledge a candidate"
                 )
-            if request.action in CANDIDATE_REQUIRED_ACTIONS and request.candidate_head is None:
+            if request.action in CANDIDATE_REQUIRED_ACTIONS and (
+                request.candidate_head is None or request.candidate_remote_ref is None
+            ):
                 raise MailboxTransitionRejected(
-                    f"action {request.action!r} requires an exact candidate head"
+                    f"action {request.action!r} requires an exact candidate head and remote ref"
                 )
             current_head = (
                 claim["candidate"]["head_revision"] if claim["candidate"] is not None else None
             )
+            current_ref = (
+                claim["candidate"]["remote_ref"] if claim["candidate"] is not None else None
+            )
             if (
                 request.action in CANDIDATE_REQUIRED_ACTIONS
                 and request.action != "repository.candidate.push"
-                and request.candidate_head != current_head
+                and (
+                    request.candidate_head != current_head
+                    or request.candidate_remote_ref != current_ref
+                )
             ):
                 raise MailboxTransitionRejected(
                     f"action {request.action!r} does not name the acknowledged candidate"
@@ -834,6 +847,7 @@ class ClaimCoordinator:
                 "action": request.action,
                 "proposed_effect_digest": request.proposed_effect_digest,
                 "candidate_head": request.candidate_head,
+                "candidate_remote_ref": request.candidate_remote_ref,
                 "acknowledged_candidate_head": request.acknowledged_candidate_head,
                 "recorded_at": _timestamp(request.recorded_at),
             }
@@ -1065,6 +1079,12 @@ def _validate_checkpoint_request(request: CheckpointRequest) -> None:
     ):
         if value is not None:
             _require_sha(value, label)
+    if (request.candidate_head is None) != (request.candidate_remote_ref is None):
+        raise ClaimingError("candidate_head and candidate_remote_ref must be present together")
+    if request.candidate_remote_ref is not None and not _valid_branch_ref(
+        request.candidate_remote_ref
+    ):
+        raise ClaimingError("candidate_remote_ref must be a valid full Git branch ref")
     _require_token(request.next_continuation_token, "next_continuation_token")
     if request.next_continuation_token == request.fence.continuation_token:
         raise ClaimingError("next continuation token must rotate")
@@ -1346,6 +1366,7 @@ def main() -> int:
                     action=checkpoint["action"],
                     proposed_effect_digest=checkpoint["proposed_effect_digest"],
                     candidate_head=checkpoint["candidate_head"],
+                    candidate_remote_ref=checkpoint["candidate_remote_ref"],
                     acknowledged_candidate_head=checkpoint["acknowledged_candidate_head"],
                     next_continuation_token=checkpoint["next_continuation_token"],
                     recorded_at=_parse_timestamp(checkpoint["recorded_at"]),

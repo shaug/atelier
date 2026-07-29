@@ -57,8 +57,9 @@ match the still-open current native ticket before recording a receipt.
 - `blocked` preserves any acknowledged candidate. If the exact push succeeded but
   its `candidate_published` acknowledgement failed, the blocked result may recover
   that remotely reachable candidate only when it matches the sealed invocation and
-  the ledger's final push authorization. Atelier binds the candidate and immutable
-  blocked receipt atomically, records one unresolved planner decision, and retains
+  the ledger's final authorized push head and remote ref. Atelier binds the candidate
+  and immutable blocked receipt atomically, records one unresolved planner decision,
+  and retains
   mutation ownership.
 - `requires_epic` is recorded as a blocked attempt for planner action. Atelier
   does not invoke `implement-epic` from delegated work.

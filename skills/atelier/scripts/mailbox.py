@@ -931,9 +931,15 @@ def _validate_claim(
         and ledger[-1]["action"] == "repository.candidate.push"
         and claim["candidate"] is not None
         and ledger[-1]["candidate_head"] == claim["candidate"]["head_revision"]
+        and ledger[-1]["candidate_remote_ref"] == claim["candidate"]["remote_ref"]
     )
     latest_acknowledged_head = (
         attempt_receipt["candidate"]["head_revision"]
+        if transferable_handoff and attempt_receipt["candidate"] is not None
+        else None
+    )
+    latest_acknowledged_ref = (
+        attempt_receipt["candidate"]["remote_ref"]
         if transferable_handoff and attempt_receipt["candidate"] is not None
         else None
     )
@@ -942,6 +948,7 @@ def _validate_claim(
         action = entry["action"]
         phase = entry["phase"]
         candidate_head = entry["candidate_head"]
+        candidate_remote_ref = entry["candidate_remote_ref"]
         acknowledged_head = entry["acknowledged_candidate_head"]
         if action not in authority_ceiling:
             diagnostics.append(
@@ -957,6 +964,7 @@ def _validate_claim(
                 and previous_entry["phase"] == "pre_external_mutation"
                 and previous_entry["action"] == "repository.candidate.push"
                 and previous_entry["candidate_head"] == candidate_head
+                and previous_entry["candidate_remote_ref"] == candidate_remote_ref
             )
             if not paired_push:
                 diagnostics.append(
@@ -970,6 +978,7 @@ def _validate_claim(
             if (
                 action != "repository.candidate.push"
                 or candidate_head is None
+                or candidate_remote_ref is None
                 or acknowledged_head != candidate_head
             ):
                 diagnostics.append(
@@ -981,6 +990,7 @@ def _validate_claim(
                 )
             elif paired_push:
                 latest_acknowledged_head = candidate_head
+                latest_acknowledged_ref = candidate_remote_ref
         else:
             if acknowledged_head is not None:
                 diagnostics.append(
@@ -990,18 +1000,23 @@ def _validate_claim(
                         "pre_external_mutation must not acknowledge a candidate",
                     )
                 )
-            if action in CANDIDATE_REQUIRED_ACTIONS and candidate_head is None:
+            if action in CANDIDATE_REQUIRED_ACTIONS and (
+                candidate_head is None or candidate_remote_ref is None
+            ):
                 diagnostics.append(
                     Diagnostic(
                         path,
                         "checkpoint-candidate",
-                        f"authorization action {action!r} requires an exact candidate head",
+                        f"authorization action {action!r} requires an exact candidate head and remote ref",
                     )
                 )
             elif (
                 action in CANDIDATE_REQUIRED_ACTIONS
                 and action != "repository.candidate.push"
-                and candidate_head != latest_acknowledged_head
+                and (
+                    candidate_head != latest_acknowledged_head
+                    or candidate_remote_ref != latest_acknowledged_ref
+                )
             ):
                 diagnostics.append(
                     Diagnostic(
@@ -1016,6 +1031,7 @@ def _validate_claim(
     publication_entries = [entry for entry in ledger if entry["phase"] == "candidate_published"]
     internally_invalid = any(
         entry["candidate_head"] is None
+        or entry["candidate_remote_ref"] is None
         or entry["acknowledged_candidate_head"] != entry["candidate_head"]
         for entry in publication_entries
     )
@@ -1032,6 +1048,7 @@ def _validate_claim(
         and (
             not publication_entries
             or publication_entries[-1]["candidate_head"] != candidate["head_revision"]
+            or publication_entries[-1]["candidate_remote_ref"] != candidate["remote_ref"]
         )
     )
     discarded_handoff = transferable_handoff and (

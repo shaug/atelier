@@ -678,9 +678,11 @@ class GitMailboxWriter:
                     )
                 publication = current_ledger[-1]
                 candidate_head = current_claim["candidate"]["head_revision"]
+                candidate_remote_ref = current_claim["candidate"]["remote_ref"]
                 if (
                     publication["phase"] != "candidate_published"
                     or publication["candidate_head"] != candidate_head
+                    or publication["candidate_remote_ref"] != candidate_remote_ref
                     or publication["acknowledged_candidate_head"] != candidate_head
                 ):
                     raise MailboxTransitionRejected(
@@ -713,6 +715,7 @@ class GitMailboxWriter:
             or ledger[-1]["phase"] != "pre_external_mutation"
             or ledger[-1]["action"] != "repository.candidate.push"
             or ledger[-1]["candidate_head"] != candidate["head_revision"]
+            or ledger[-1]["candidate_remote_ref"] != candidate["remote_ref"]
         ):
             return False
         receipt_id = document["attempt_receipt_id"]
