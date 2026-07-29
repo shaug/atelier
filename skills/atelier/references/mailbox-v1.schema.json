@@ -12,7 +12,8 @@
         "accepted_at",
         "policy_commit",
         "candidate_revision",
-        "evidence"
+        "evidence",
+        "audit_evidence"
       ],
       "properties": {
         "receipt_id": {
@@ -32,6 +33,9 @@
         },
         "evidence": {
           "$ref": "#/$defs/evidence_results"
+        },
+        "audit_evidence": {
+          "$ref": "#/$defs/audit_evidence"
         }
       }
     },
@@ -929,6 +933,148 @@
     "repository_identity": {
       "type": "string",
       "pattern": "^github:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "audit_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "review",
+        "feedback_dispositions"
+      ],
+      "properties": {
+        "schema": {
+          "const": "atelier.audit-evidence/v1"
+        },
+        "review": {
+          "$ref": "#/$defs/audit_review"
+        },
+        "feedback_dispositions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/feedback_disposition"
+          }
+        }
+      }
+    },
+    "audit_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mechanism",
+        "verdict",
+        "candidate_revision",
+        "comparison_base_revision",
+        "observed_at",
+        "findings"
+      ],
+      "properties": {
+        "mechanism": {
+          "const": "review-code-change"
+        },
+        "verdict": {
+          "enum": [
+            "clean",
+            "changes_required",
+            "blocked"
+          ]
+        },
+        "candidate_revision": {
+          "$ref": "#/$defs/sha"
+        },
+        "comparison_base_revision": {
+          "$ref": "#/$defs/sha"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/review_finding"
+          }
+        }
+      }
+    },
+    "feedback_disposition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "id",
+        "body_digest",
+        "disposition",
+        "rationale",
+        "follow_up"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "review",
+            "pull-request-comment"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/nonempty_string"
+        },
+        "body_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "disposition": {
+          "enum": [
+            "resolved",
+            "deferred",
+            "not-actionable",
+            "unresolved"
+          ]
+        },
+        "rationale": {
+          "$ref": "#/$defs/nonempty_string"
+        },
+        "follow_up": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "review_finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "summary",
+        "disposition",
+        "rationale",
+        "follow_up"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonempty_string"
+        },
+        "summary": {
+          "$ref": "#/$defs/nonempty_string"
+        },
+        "disposition": {
+          "enum": [
+            "fixed",
+            "deferred",
+            "not-actionable",
+            "unresolved"
+          ]
+        },
+        "rationale": {
+          "$ref": "#/$defs/nonempty_string"
+        },
+        "follow_up": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
     },
     "review_observation": {
       "type": "object",

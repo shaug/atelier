@@ -73,6 +73,7 @@ REQUIRED_HOST_OPERATIONS = (
     "github.pull-request.comments.read",
     "github.pull-request.reviews.read",
     "github.pull-request.checks.read",
+    "github.repository.required-checks.read",
     "github.pull-request.threads.read",
 )
 

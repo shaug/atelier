@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import unittest
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from contract_tests import test_claiming
-from skills.atelier.scripts.audit import AuditCoordinator
+from skills.atelier.scripts.audit import AuditCoordinator, AuditError
 from skills.atelier.scripts.git_mailbox import MailboxTransitionRejected
 from skills.atelier.scripts.mailbox import _read_yaml, reconstruct_mailbox
 
@@ -20,18 +21,53 @@ class AuditContract(unittest.TestCase):
         self.observation_not_before = self.fixture.live_at + timedelta(minutes=3)
         self.now = self.fixture.live_at + timedelta(minutes=4)
         self.read_count = 0
+        self.audit_evidence = self.evidence()
 
-    def report(self):
+    def evidence(
+        self,
+        *,
+        findings: list[dict] | None = None,
+        feedback_dispositions: list[dict] | None = None,
+    ) -> dict:
+        live = self.live_observation()
+        return {
+            "schema": "atelier.audit-evidence/v1",
+            "review": {
+                "mechanism": "review-code-change",
+                "verdict": "clean",
+                "candidate_revision": live["pull_request"]["head"]["sha"],
+                "comparison_base_revision": live["pull_request"]["base"]["sha"],
+                "observed_at": live["observed_at"],
+                "findings": findings or [],
+            },
+            "feedback_dispositions": feedback_dispositions or [],
+        }
+
+    def report(self, *, evidence: dict | None = None):
         return self.audit.audit(
             self.fixture.work_id,
             policy_target=self.fixture.policy_target(),
             host_target=self.fixture.delegation_host_target(),
             observation_path=self.fixture.observation_path,
             observation_not_before=self.observation_not_before,
+            audit_evidence=evidence or self.audit_evidence,
             now=self.now,
         )
 
-    def accept(self, report, *, confirmed: bool = True):
+    def accept(
+        self,
+        report,
+        *,
+        confirmed: bool = True,
+        evidence: dict | None = None,
+        refresh_observation: bool = True,
+    ):
+        boundary = datetime.fromisoformat(report.observed_at.replace("Z", "+00:00"))
+        boundary += timedelta(seconds=1)
+        if refresh_observation:
+            live = self.live_observation()
+            live["observed_at"] = boundary.isoformat().replace("+00:00", "Z")
+            self.write_observation(live)
         return self.audit.accept(
             self.fixture.work_id,
             report.fence,
@@ -40,7 +76,8 @@ class AuditContract(unittest.TestCase):
             policy_target=self.fixture.policy_target(),
             host_target=self.fixture.delegation_host_target(),
             observation_path=self.fixture.observation_path,
-            observation_not_before=self.observation_not_before,
+            observation_not_before=boundary,
+            audit_evidence=evidence or self.audit_evidence,
             now=self.now,
         )
 
@@ -80,7 +117,7 @@ class AuditContract(unittest.TestCase):
             {item.name: item.verdict for item in report.evidence if item.required},
             {
                 name: "satisfied"
-                for name in test_claiming.APPROVED_EVIDENCE
+                for name in test_claiming.EVIDENCE
             },
         )
 
@@ -97,9 +134,10 @@ class AuditContract(unittest.TestCase):
             work["acceptance"]["evidence"],
             {
                 name: "satisfied"
-                for name in test_claiming.APPROVED_EVIDENCE
+                for name in test_claiming.EVIDENCE
             },
         )
+        self.assertEqual(work["acceptance"]["audit_evidence"], report.audit_evidence)
         self.assertEqual(work["delivery_receipt_id"], report.receipt_id)
 
         accepted = self.report()
@@ -138,6 +176,7 @@ class AuditContract(unittest.TestCase):
             host_target=self.fixture.delegation_host_target(),
             observation_path=unknown_path,
             observation_not_before=self.observation_not_before,
+            audit_evidence=self.audit_evidence,
             now=self.now,
         )
         self.assertEqual(unknown.overall_verdict, "authority-unreconstructable")
@@ -248,15 +287,39 @@ class AuditContract(unittest.TestCase):
             }
         ]
         self.write_observation(live)
+        evidence = self.evidence(
+            findings=[
+                {
+                    "id": "finding-1",
+                    "summary": "A nonblocking improvement was deliberately deferred.",
+                    "disposition": "deferred",
+                    "rationale": "It is outside this ticket's acceptance boundary.",
+                    "follow_up": "#999",
+                }
+            ],
+            feedback_dispositions=[
+                {
+                    "kind": "pull-request-comment",
+                    "id": "comment-1",
+                    "body_digest": "sha256:"
+                    + hashlib.sha256(
+                        b"P3 deferred to a focused follow-up."
+                    ).hexdigest(),
+                    "disposition": "deferred",
+                    "rationale": "Tracked by a focused follow-up.",
+                    "follow_up": "#999",
+                }
+            ],
+        )
 
-        report = self.report()
+        report = self.report(evidence=evidence)
         dispositions = {
             (item.kind, item.identifier): (item.disposition, item.body)
             for item in report.feedback
         }
         self.assertEqual(
             dispositions[("pull-request-comment", "comment-1")],
-            ("recorded", "P3 deferred to a focused follow-up."),
+            ("deferred", "P3 deferred to a focused follow-up."),
         )
         self.assertEqual(
             dispositions[("review-thread", "thread-1")],
@@ -270,7 +333,141 @@ class AuditContract(unittest.TestCase):
             ),
             "satisfied",
         )
+        self.assertEqual(report.audit_evidence, evidence)
         self.assertTrue(report.acceptance_possible)
+
+        edited = self.live_observation()
+        edited["pull_request_comments"][0]["body"] += " Edited."
+        self.write_observation(edited)
+        stale = self.report(evidence=evidence)
+        stale_verdicts = {item.name: item.verdict for item in stale.evidence}
+        self.assertEqual(stale_verdicts["unresolved-feedback-zero"], "stale")
+        self.assertFalse(stale.acceptance_possible)
+
+    def test_live_base_ref_or_sha_drift_is_stale_and_cannot_be_accepted(self) -> None:
+        original = self.live_observation()
+        for field, value in (("ref", "refs/heads/other"), ("sha", "d" * 40)):
+            with self.subTest(field=field):
+                live = json.loads(json.dumps(original))
+                live["pull_request"]["base"][field] = value
+                self.write_observation(live)
+                report = self.report()
+                verdicts = {item.name: item.verdict for item in report.evidence}
+                self.assertEqual(verdicts["independent-review-current"], "stale")
+                self.assertEqual(verdicts["pull-request-mergeable"], "stale")
+                self.assertFalse(report.acceptance_possible)
+                before = self.mailbox_main()
+                with self.assertRaisesRegex(
+                    MailboxTransitionRejected,
+                    "acceptance is blocked by current audit verdict stale",
+                ):
+                    self.accept(report)
+                self.assertEqual(self.mailbox_main(), before)
+
+    def test_required_check_configuration_is_identity_aware_and_fail_closed(self) -> None:
+        original = self.live_observation()
+        live = json.loads(json.dumps(original))
+        live["required_checks"]["configuration_read"] = False
+        self.write_observation(live)
+        report = self.report()
+        verdicts = {item.name: item.verdict for item in report.evidence}
+        self.assertEqual(verdicts["required-checks-pass"], "unknown")
+
+        live = json.loads(json.dumps(original))
+        live["checks"] = [
+            {
+                "id": "optional-check",
+                "pull_request_number": live["pull_request"]["number"],
+                "kind": "CHECK_RUN",
+                "name": "optional",
+                "status": "COMPLETED",
+                "conclusion": "FAILURE",
+                "candidate_sha": live["pull_request"]["head"]["sha"],
+                "details_url": None,
+            }
+        ]
+        self.write_observation(live)
+        report = self.report()
+        verdicts = {item.name: item.verdict for item in report.evidence}
+        self.assertEqual(verdicts["required-checks-pass"], "satisfied")
+
+        live["required_checks"]["contexts"] = [
+            {"kind": "CHECK_RUN", "name": "required"}
+        ]
+        self.write_observation(live)
+        report = self.report()
+        verdicts = {item.name: item.verdict for item in report.evidence}
+        self.assertEqual(verdicts["required-checks-pass"], "unknown")
+
+        live["checks"].append(
+            {
+                "id": "required-check",
+                "pull_request_number": live["pull_request"]["number"],
+                "kind": "CHECK_RUN",
+                "name": "required",
+                "status": "COMPLETED",
+                "conclusion": "SUCCESS",
+                "candidate_sha": live["pull_request"]["head"]["sha"],
+                "details_url": None,
+            }
+        )
+        self.write_observation(live)
+        report = self.report()
+        verdicts = {item.name: item.verdict for item in report.evidence}
+        self.assertEqual(verdicts["required-checks-pass"], "satisfied")
+
+    def test_undispositioned_live_comment_blocks_acceptance(self) -> None:
+        live = self.live_observation()
+        live["pull_request_comments"] = [
+            {
+                "id": "comment-blocking",
+                "author": "reviewer",
+                "body": "This concern has no recorded disposition.",
+                "created_at": live["observed_at"],
+                "updated_at": live["observed_at"],
+                "url": live["pull_request"]["url"] + "#issuecomment-blocking",
+            }
+        ]
+        self.write_observation(live)
+        report = self.report()
+        verdicts = {item.name: item.verdict for item in report.evidence}
+        self.assertEqual(verdicts["unresolved-feedback-zero"], "unknown")
+        self.assertFalse(report.acceptance_possible)
+        before = self.mailbox_main()
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "acceptance is blocked by current audit verdict unknown",
+        ):
+            self.accept(report)
+        self.assertEqual(self.mailbox_main(), before)
+
+    def test_acceptance_requires_a_second_provider_snapshot(self) -> None:
+        report = self.report()
+        before = self.mailbox_main()
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "current audit does not match the explicitly confirmed acceptance fence",
+        ):
+            self.accept(report, refresh_observation=False)
+        self.assertEqual(self.mailbox_main(), before)
+
+    def test_acceptance_without_test_clock_rejects_future_timestamp(self) -> None:
+        report = self.report()
+        boundary = datetime.fromisoformat(report.observed_at.replace("Z", "+00:00"))
+        boundary += timedelta(seconds=1)
+        with self.assertRaisesRegex(AuditError, "accepted_at cannot be in the future"):
+            self.audit.accept(
+                self.fixture.work_id,
+                report.fence,
+                confirmed=True,
+                accepted_at=datetime.now(UTC) + timedelta(minutes=1),
+                policy_target=self.fixture.policy_target(),
+                host_target=self.fixture.delegation_host_target(),
+                observation_path=self.fixture.observation_path,
+                observation_not_before=boundary,
+                audit_evidence=self.audit_evidence,
+                now=None,
+            )
 
     def test_later_head_drift_changes_audit_without_rewriting_acceptance(self) -> None:
         accepted = self.accept(self.report())

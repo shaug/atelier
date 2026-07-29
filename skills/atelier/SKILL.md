@@ -29,7 +29,7 @@ The preflight must prove:
   the host capability descriptor;
 - the installed and authorized `github@openai-curated` connector;
 - every required read-only issue, relationship, pull-request, comment, review,
-  check, and thread operation; and
+  check, effective required-check configuration, and thread operation; and
 - one complete observation conforming to
   `references/github-observation.schema.json` when live state is requested.
 
@@ -63,14 +63,17 @@ authority ceiling.
 
 Production `audit` behavior is implemented for one delivered or accepted
 assignment. Before audit, read `references/audit.md`, repeat the fail-closed host
-preflight, obtain one fresh complete GitHub observation, and use
-`scripts/audit.py audit`. Preserve every predicate verdict and visible feedback
-disposition in the report; do not infer success from unavailable or stale state.
+preflight, obtain one fresh complete GitHub observation, normalize the exact
+aggregate review and live feedback dispositions as `atelier.audit-evidence/v1`,
+and use `scripts/audit.py audit`. Preserve every predicate verdict, structured
+finding, and visible feedback disposition in the report; do not infer success
+from unavailable, undispositioned, or stale state.
 
 Audit itself is read-only. Only after the operator explicitly confirms the
-report's exact acceptance fence may `scripts/audit.py accept` publish the one
-acceptance commit. Acceptance never implies merge, deployment, native-ticket
-mutation, or issue closure.
+report's exact acceptance fence may a strictly newer complete provider snapshot
+be supplied to `scripts/audit.py accept` for the one acceptance commit. Reusing
+report evidence is rejected. Acceptance never implies merge, deployment,
+native-ticket mutation, or issue closure.
 
 ## Mailbox boundary
 

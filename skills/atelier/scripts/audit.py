@@ -9,7 +9,7 @@ import hashlib
 import json
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -85,6 +85,8 @@ class FeedbackItem:
     disposition: str
     body: str
     url: str | None
+    rationale: str | None = None
+    follow_up: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -93,22 +95,28 @@ class FeedbackItem:
             "disposition": self.disposition,
             "body": self.body,
             "url": self.url,
+            "rationale": self.rationale,
+            "follow_up": self.follow_up,
         }
 
 
 @dataclass(frozen=True)
 class AcceptanceFence:
     report_digest: str
+    semantic_digest: str
     mailbox_revision: str
     receipt_id: str
     candidate_revision: str
+    observed_at: str | None
 
-    def as_dict(self) -> dict[str, str]:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "report_digest": self.report_digest,
+            "semantic_digest": self.semantic_digest,
             "mailbox_revision": self.mailbox_revision,
             "receipt_id": self.receipt_id,
             "candidate_revision": self.candidate_revision,
+            "observed_at": self.observed_at,
         }
 
 
@@ -128,6 +136,7 @@ class AuditReport:
     acceptance_commit: str | None
     evidence: tuple[EvidenceResult, ...]
     feedback: tuple[FeedbackItem, ...]
+    audit_evidence: Mapping[str, Any] | None
     authority_errors: tuple[str, ...]
 
     @property
@@ -172,6 +181,7 @@ class AuditReport:
             "acceptance_commit": self.acceptance_commit,
             "evidence": [item.as_dict() for item in self.evidence],
             "feedback": [item.as_dict() for item in self.feedback],
+            "audit_evidence": copy.deepcopy(self.audit_evidence),
             "authority_errors": list(self.authority_errors),
             "overall_verdict": self.overall_verdict,
             "acceptance_possible": self.acceptance_possible,
@@ -191,12 +201,21 @@ class AuditReport:
         return hashlib.sha256(encoded).hexdigest()
 
     @property
+    def semantic_digest(self) -> str:
+        value = self.as_dict(include_digest=False)
+        value["observed_at"] = None
+        encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+        return hashlib.sha256(encoded).hexdigest()
+
+    @property
     def fence(self) -> AcceptanceFence:
         return AcceptanceFence(
             report_digest=self.digest,
+            semantic_digest=self.semantic_digest,
             mailbox_revision=self.mailbox_revision,
             receipt_id=self.receipt_id,
             candidate_revision=self.candidate_revision,
+            observed_at=self.observed_at,
         )
 
 
@@ -214,6 +233,7 @@ class AuditCoordinator:
         host_target: HostTarget,
         observation_path: Path,
         observation_not_before: datetime,
+        audit_evidence: Mapping[str, Any] | None,
         now: datetime | None = None,
     ) -> AuditReport:
         return self.claims.writer.observe(
@@ -225,6 +245,7 @@ class AuditCoordinator:
                 host_target=host_target,
                 observation_path=observation_path,
                 observation_not_before=observation_not_before,
+                audit_evidence=audit_evidence,
                 now=now,
             ),
         )
@@ -240,6 +261,7 @@ class AuditCoordinator:
         host_target: HostTarget,
         observation_path: Path,
         observation_not_before: datetime,
+        audit_evidence: Mapping[str, Any],
         now: datetime | None = None,
     ) -> WriteResult:
         if not confirmed:
@@ -248,9 +270,16 @@ class AuditCoordinator:
             raise AuditError("accepted_at must include a UTC offset")
         if observation_not_before.utcoffset() is None:
             raise AuditError("observation_not_before must include a UTC offset")
+        if fence.observed_at is None:
+            raise MailboxTransitionRejected("confirmed audit has no live observation")
+        if observation_not_before <= _parse_timestamp(fence.observed_at):
+            raise AuditError("acceptance requires a new read boundary after the confirmed audit")
         if accepted_at < observation_not_before:
             raise AuditError("accepted_at cannot precede the live observation boundary")
-        if now is not None and accepted_at > now:
+        current_time = now or datetime.now(UTC)
+        if current_time.utcoffset() is None:
+            raise AuditError("now must include a UTC offset")
+        if accepted_at > current_time:
             raise AuditError("accepted_at cannot be in the future")
         planned: dict[str, Any] = {}
 
@@ -262,11 +291,33 @@ class AuditCoordinator:
                 host_target=host_target,
                 observation_path=observation_path,
                 observation_not_before=observation_not_before,
+                audit_evidence=audit_evidence,
                 now=now,
             )
-            if report.fence != fence:
+            confirmed_value = report.as_dict(include_digest=False)
+            confirmed_value["observed_at"] = fence.observed_at
+            confirmed_digest = hashlib.sha256(
+                json.dumps(
+                    confirmed_value,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest()
+            if (
+                confirmed_digest != fence.report_digest
+                or report.mailbox_revision != fence.mailbox_revision
+                or report.receipt_id != fence.receipt_id
+                or report.candidate_revision != fence.candidate_revision
+                or report.semantic_digest != fence.semantic_digest
+            ):
                 raise MailboxTransitionRejected(
                     "current audit does not match the explicitly confirmed acceptance fence"
+                )
+            if report.observed_at is None or _parse_timestamp(
+                report.observed_at
+            ) <= _parse_timestamp(fence.observed_at):
+                raise MailboxTransitionRejected(
+                    "acceptance observation is not newer than the confirmed audit"
                 )
             if report.observed_at is not None and accepted_at < _parse_timestamp(
                 report.observed_at
@@ -298,6 +349,7 @@ class AuditCoordinator:
                     for item in report.evidence
                     if item.required
                 },
+                "audit_evidence": copy.deepcopy(report.audit_evidence),
             }
             planned.clear()
             planned.update(work=accepted, body=body)
@@ -329,6 +381,7 @@ class AuditCoordinator:
         host_target: HostTarget,
         observation_path: Path,
         observation_not_before: datetime,
+        audit_evidence: Mapping[str, Any] | None,
         now: datetime | None,
     ) -> AuditReport:
         work, body = _read_work(context.checkout, work_id)
@@ -355,6 +408,7 @@ class AuditCoordinator:
         observation: dict[str, Any] | None = None
         effective_policy: dict[str, Any] | None = None
         current_policy_commit: str | None = None
+        effective_audit_evidence: dict[str, Any] | None = None
 
         try:
             self.claims._verify_capability(host_target)
@@ -403,6 +457,15 @@ class AuditCoordinator:
         except Exception as error:
             authority_errors.append(f"project policy: {error}")
 
+        supplied_audit_evidence = (
+            work["acceptance"]["audit_evidence"]
+            if work["status"] == "accepted" and work["acceptance"] is not None
+            else audit_evidence
+        )
+        try:
+            effective_audit_evidence = _validated_audit_evidence(supplied_audit_evidence)
+        except Exception as error:
+            authority_errors.append(f"audit evidence: {error}")
         acceptance_commit, baseline_ticket_digest = _acceptance_history(
             context,
             work_id,
@@ -429,9 +492,10 @@ class AuditCoordinator:
             receipt,
             observation,
             effective_policy,
+            effective_audit_evidence,
             self.claims,
         )
-        feedback = _feedback_items(receipt, observation)
+        feedback = _feedback_items(receipt, observation, effective_audit_evidence)
         return AuditReport(
             work_id=work_id,
             mailbox_revision=context.base_revision,
@@ -449,12 +513,15 @@ class AuditCoordinator:
                 EvidenceResult(
                     name=name,
                     verdict=verdicts[name][0],
-                    required=name in required_evidence,
+                    required=(
+                        name in required_evidence or name == "unresolved-feedback-zero"
+                    ),
                     detail=verdicts[name][1],
                 )
                 for name in EVIDENCE_NAMES
             ),
             feedback=feedback,
+            audit_evidence=effective_audit_evidence,
             authority_errors=tuple(authority_errors),
         )
 
@@ -545,11 +612,123 @@ def _ticket_verdict(
     return "satisfied", "native ticket identity, eligibility, and material state are current"
 
 
+def _validated_audit_evidence(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise AuditError("a normalized audit-evidence record is required")
+    _require_exact_keys(value, {"schema", "review", "feedback_dispositions"}, "record")
+    if value["schema"] != "atelier.audit-evidence/v1":
+        raise AuditError("unsupported audit-evidence schema")
+    review = value["review"]
+    if not isinstance(review, Mapping):
+        raise AuditError("audit review must be an object")
+    _require_exact_keys(
+        review,
+        {
+            "mechanism",
+            "verdict",
+            "candidate_revision",
+            "comparison_base_revision",
+            "observed_at",
+            "findings",
+        },
+        "review",
+    )
+    if review["mechanism"] != "review-code-change":
+        raise AuditError("audit review must use review-code-change")
+    if review["verdict"] not in {"clean", "changes_required", "blocked"}:
+        raise AuditError("audit review verdict is invalid")
+    for name in ("candidate_revision", "comparison_base_revision"):
+        revision = review[name]
+        if (
+            not isinstance(revision, str)
+            or len(revision) != 40
+            or any(character not in "0123456789abcdef" for character in revision)
+        ):
+            raise AuditError(f"audit review {name} must be a lowercase Git SHA")
+    if not isinstance(review["observed_at"], str):
+        raise AuditError("audit review observed_at must be a timestamp")
+    _parse_timestamp(review["observed_at"])
+    if not isinstance(review["findings"], list):
+        raise AuditError("audit review findings must be a list")
+    finding_ids: set[str] = set()
+    for finding in review["findings"]:
+        _validate_disposition(
+            finding,
+            kind="review finding",
+            required={"id", "summary", "disposition", "rationale", "follow_up"},
+            dispositions={"fixed", "deferred", "not-actionable", "unresolved"},
+        )
+        if finding["id"] in finding_ids:
+            raise AuditError(f"duplicate review finding {finding['id']}")
+        finding_ids.add(finding["id"])
+    dispositions = value["feedback_dispositions"]
+    if not isinstance(dispositions, list):
+        raise AuditError("feedback dispositions must be a list")
+    disposition_ids: set[tuple[str, str]] = set()
+    for disposition in dispositions:
+        _validate_disposition(
+            disposition,
+            kind="feedback disposition",
+            required={
+                "kind",
+                "id",
+                "body_digest",
+                "disposition",
+                "rationale",
+                "follow_up",
+            },
+            dispositions={"resolved", "deferred", "not-actionable", "unresolved"},
+        )
+        if disposition["kind"] not in {"review", "pull-request-comment"}:
+            raise AuditError("feedback disposition kind is invalid")
+        body_digest = disposition["body_digest"]
+        if (
+            not body_digest.startswith("sha256:")
+            or len(body_digest) != 71
+            or any(character not in "0123456789abcdef" for character in body_digest[7:])
+        ):
+            raise AuditError("feedback disposition body_digest is invalid")
+        identity = (disposition["kind"], disposition["id"])
+        if identity in disposition_ids:
+            raise AuditError(f"duplicate feedback disposition {identity[0]} {identity[1]}")
+        disposition_ids.add(identity)
+    return copy.deepcopy(dict(value))
+
+
+def _require_exact_keys(value: Mapping[str, Any], expected: set[str], label: str) -> None:
+    if set(value) != expected:
+        raise AuditError(f"{label} fields do not match the v1 contract")
+
+
+def _validate_disposition(
+    value: Any,
+    *,
+    kind: str,
+    required: set[str],
+    dispositions: set[str],
+) -> None:
+    if not isinstance(value, Mapping):
+        raise AuditError(f"{kind} must be an object")
+    _require_exact_keys(value, required, kind)
+    for name in required - {"follow_up", "disposition"}:
+        if not isinstance(value[name], str) or not value[name].strip():
+            raise AuditError(f"{kind} {name} must be nonempty")
+    if value["disposition"] not in dispositions:
+        raise AuditError(f"{kind} disposition is invalid")
+    if value["follow_up"] is not None and not isinstance(value["follow_up"], str):
+        raise AuditError(f"{kind} follow_up must be text or null")
+
+
+
+def _body_digest(body: str) -> str:
+    return "sha256:" + hashlib.sha256(body.encode()).hexdigest()
+
 def _evaluate_evidence(
     candidate: Mapping[str, Any],
     receipt: Mapping[str, Any],
     observation: Mapping[str, Any] | None,
     policy: Mapping[str, Any] | None,
+    audit_evidence: Mapping[str, Any] | None,
     claims: ClaimCoordinator,
 ) -> dict[str, tuple[str, str]]:
     values: dict[str, tuple[str, str]] = {}
@@ -571,6 +750,7 @@ def _evaluate_evidence(
         )
 
     pull_request = observation["pull_request"] if observation is not None else None
+    live_base_current = False
     if observation is None:
         for name in (
             "pull-request-head-current",
@@ -601,12 +781,19 @@ def _evaluate_evidence(
     else:
         expected_repository = candidate["repository"].removeprefix("github:")
         live_head = pull_request["head"]
+        live_base = pull_request["base"]
         same_pr = pull_request["url"] == candidate["pull_request"]
         same_repository_ref = (
             live_head["repository"] == expected_repository
             and live_head["ref"] == candidate["remote_ref"]
         )
         same_head = live_head["sha"] == candidate["head_revision"]
+        live_base_current = bool(
+            policy is not None
+            and live_base["repository"] == expected_repository
+            and live_base["ref"] == policy["repository"]["canonical_ref"]
+            and live_base["sha"] == candidate["base_revision"]
+        )
         if not same_pr or not same_repository_ref:
             values["pull-request-head-current"] = (
                 "violated",
@@ -633,10 +820,10 @@ def _evaluate_evidence(
                 f"live pull request state is {pull_request['state']}",
             )
         )
-        if not same_head:
+        if not same_head or not live_base_current:
             values["pull-request-mergeable"] = (
                 "stale",
-                "mergeability belongs to a different pull request head",
+                "mergeability belongs to a different pull request head or base",
             )
         elif pull_request["mergeable"] == "MERGEABLE":
             values["pull-request-mergeable"] = (
@@ -655,11 +842,13 @@ def _evaluate_evidence(
             )
         values["required-checks-pass"] = _checks_verdict(
             observation["checks"],
+            observation["required_checks"],
             candidate["head_revision"],
         )
         values["unresolved-feedback-zero"] = _feedback_verdict(
             receipt,
             observation,
+            audit_evidence,
         )
 
     values["required-validation-reported"] = _validation_verdict(
@@ -673,33 +862,53 @@ def _evaluate_evidence(
     )
     values["independent-review-current"] = _review_verdict(
         receipt,
+        audit_evidence,
         candidate["head_revision"],
         candidate["base_revision"],
     )
+    if pull_request is not None and not live_base_current:
+        values["independent-review-current"] = (
+            "stale",
+            "the live pull request base differs from the reviewed delivery base",
+        )
     return values
 
 
 def _checks_verdict(
     checks: Sequence[Mapping[str, Any]],
+    required: Mapping[str, Any],
     candidate_revision: str,
 ) -> tuple[str, str]:
-    if any(check["candidate_sha"] != candidate_revision for check in checks):
+    if not required["configuration_read"]:
+        return "unknown", "effective required-check configuration could not be read"
+    observed_by_identity: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
+    for check in checks:
+        observed_by_identity.setdefault((check["kind"], check["name"]), []).append(check)
+    selected: list[Mapping[str, Any]] = []
+    for context in required["contexts"]:
+        matches = observed_by_identity.get((context["kind"], context["name"]), [])
+        if len(matches) != 1:
+            return "unknown", "a required check context is missing or ambiguous"
+        selected.append(matches[0])
+    if any(check["candidate_sha"] != candidate_revision for check in selected):
         return "stale", "one or more required checks belong to another candidate"
     incomplete = [
         check
-        for check in checks
+        for check in selected
         if check["status"].upper() != "COMPLETED" or check["conclusion"] is None
     ]
     if incomplete:
         return "unknown", "one or more required check results are incomplete"
     failing = [
         check
-        for check in checks
+        for check in selected
         if check["conclusion"].upper() not in {"SUCCESS", "NEUTRAL", "SKIPPED"}
     ]
     if failing:
         return "violated", "one or more required checks completed unsuccessfully"
-    return "satisfied", "all observed required checks passed on the delivered head"
+    if not selected:
+        return "satisfied", "required-check configuration was read and names no contexts"
+    return "satisfied", "every configured required check passed on the delivered head"
 
 
 def _validation_verdict(
@@ -725,6 +934,7 @@ def _validation_verdict(
 
 def _review_verdict(
     receipt: Mapping[str, Any],
+    audit_evidence: Mapping[str, Any] | None,
     candidate_revision: str,
     comparison_base_revision: str,
 ) -> tuple[str, str]:
@@ -733,28 +943,38 @@ def _review_verdict(
         for item in receipt["reviews"]
         if item["mechanism"] == "review-code-change"
     ]
-    if not reviews:
-        return "unknown", "independent review-code-change evidence is missing"
+    if not reviews or audit_evidence is None:
+        return "unknown", "structured independent review evidence is missing"
     dated = [(_parse_timestamp(item["observed_at"]), item) for item in reviews]
     latest_time = max(observed_at for observed_at, _ in dated)
     latest = [item for observed_at, item in dated if observed_at == latest_time]
+    review = audit_evidence["review"]
     if any(
         item["candidate_revision"] != candidate_revision
         or item["comparison_base_revision"] != comparison_base_revision
         for item in latest
+    ) or (
+        review["candidate_revision"] != candidate_revision
+        or review["comparison_base_revision"] != comparison_base_revision
     ):
-        return "stale", "latest independent review belongs to another head or base"
-    verdicts = {item["verdict"] for item in latest}
-    if verdicts == {"clean"}:
-        return "satisfied", "latest independent review is clean on the exact head and base"
-    if "changes_required" in verdicts:
-        return "violated", "latest independent review requires changes"
-    return "unknown", "latest independent review is blocked or contradictory"
+        return "stale", "independent review belongs to another head or base"
+    receipt_verdicts = {item["verdict"] for item in latest}
+    if "changes_required" in receipt_verdicts or review["verdict"] == "changes_required":
+        return "violated", "independent review requires changes"
+    if review["verdict"] == "blocked" or receipt_verdicts != {"clean"}:
+        return "unknown", "independent review is blocked or contradictory"
+    if any(item["disposition"] == "unresolved" for item in review["findings"]):
+        return "violated", "independent review retains an unresolved finding"
+    return (
+        "satisfied",
+        "structured independent review is clean on the exact head and base",
+    )
 
 
 def _feedback_verdict(
     receipt: Mapping[str, Any],
     observation: Mapping[str, Any],
+    audit_evidence: Mapping[str, Any] | None,
 ) -> tuple[str, str]:
     unresolved_threads = [
         item
@@ -768,15 +988,43 @@ def _feedback_verdict(
         return "violated", "the live pull request review decision requires changes"
     if receipt["unresolved_obligations"]:
         return "violated", "the delivered receipt retains unresolved obligations"
+    live_feedback = {
+        (kind, item["id"]): _body_digest(item["body"])
+        for kind, collection in (
+            ("review", observation["reviews"]),
+            ("pull-request-comment", observation["pull_request_comments"]),
+        )
+        for item in collection
+        if item["body"].strip()
+    }
+    dispositions = {
+        (item["kind"], item["id"]): item
+        for item in (
+            audit_evidence["feedback_dispositions"] if audit_evidence is not None else ()
+        )
+    }
+    if set(dispositions) - set(live_feedback):
+        return "stale", "a feedback disposition does not identify current live feedback"
+    if any(
+        item["body_digest"] != live_feedback[identity]
+        for identity, item in dispositions.items()
+    ):
+        return "stale", "a feedback disposition belongs to an earlier body revision"
+    missing = set(live_feedback) - set(dispositions)
+    if missing:
+        return "unknown", "one or more live review or comment bodies lack a disposition"
+    if any(item["disposition"] == "unresolved" for item in dispositions.values()):
+        return "violated", "one or more live review or comment bodies remain unresolved"
     return (
         "satisfied",
-        "no unresolved material receipt obligation, review decision, or live thread remains",
+        "every material obligation, review, comment, and thread has a durable disposition",
     )
 
 
 def _feedback_items(
     receipt: Mapping[str, Any],
     observation: Mapping[str, Any] | None,
+    audit_evidence: Mapping[str, Any] | None,
 ) -> tuple[FeedbackItem, ...]:
     items = [
         FeedbackItem(
@@ -790,26 +1038,35 @@ def _feedback_items(
     ]
     if observation is None:
         return tuple(items)
-    items.extend(
-        FeedbackItem(
-            kind="review",
-            identifier=review["id"],
-            disposition=review["state"],
-            body=review["body"],
-            url=review["url"],
+    dispositions = {
+        (item["kind"], item["id"]): item
+        for item in (
+            audit_evidence["feedback_dispositions"] if audit_evidence is not None else ()
         )
-        for review in observation["reviews"]
-    )
-    items.extend(
-        FeedbackItem(
-            kind="pull-request-comment",
-            identifier=comment["id"],
-            disposition="recorded",
-            body=comment["body"],
-            url=comment["url"],
-        )
-        for comment in observation["pull_request_comments"]
-    )
+    }
+    for kind, collection in (
+        ("review", observation["reviews"]),
+        ("pull-request-comment", observation["pull_request_comments"]),
+    ):
+        for value in collection:
+            disposition = dispositions.get((kind, value["id"]))
+            items.append(
+                FeedbackItem(
+                    kind=kind,
+                    identifier=value["id"],
+                    disposition=(
+                        disposition["disposition"]
+                        if disposition is not None
+                        else "undispositioned"
+                        if value["body"].strip()
+                        else "no-material-body"
+                    ),
+                    body=value["body"],
+                    url=value["url"],
+                    rationale=(disposition["rationale"] if disposition is not None else None),
+                    follow_up=(disposition["follow_up"] if disposition is not None else None),
+                )
+            )
     items.extend(
         FeedbackItem(
             kind="review-thread",
@@ -865,9 +1122,11 @@ def _host_target(value: Mapping[str, Any]) -> HostTarget:
 def _fence(value: Mapping[str, Any]) -> AcceptanceFence:
     return AcceptanceFence(
         report_digest=value["report_digest"],
+        semantic_digest=value["semantic_digest"],
         mailbox_revision=value["mailbox_revision"],
         receipt_id=value["receipt_id"],
         candidate_revision=value["candidate_revision"],
+        observed_at=value["observed_at"],
     )
 
 
@@ -883,6 +1142,7 @@ def _parser() -> argparse.ArgumentParser:
         subparser.add_argument("--host-target", required=True)
         subparser.add_argument("--observation", required=True, type=Path)
         subparser.add_argument("--observation-not-before", required=True)
+        subparser.add_argument("--audit-evidence", required=True, type=Path)
         subparser.add_argument("--now")
     accept = subparsers.choices["accept"]
     accept.add_argument("--fence", required=True)
@@ -905,6 +1165,10 @@ def main(arguments: Sequence[str] | None = None) -> int:
         "observation_path": parsed.observation,
         "observation_not_before": _parse_timestamp(
             parsed.observation_not_before
+        ),
+        "audit_evidence": _json_object(
+            parsed.audit_evidence.read_text(encoding="utf-8"),
+            "audit evidence",
         ),
         "now": _parse_timestamp(parsed.now) if parsed.now else None,
     }

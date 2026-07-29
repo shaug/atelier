@@ -22,6 +22,7 @@ REQUIRED_OPERATIONS = [
     "github.pull-request.comments.read",
     "github.pull-request.reviews.read",
     "github.pull-request.checks.read",
+    "github.repository.required-checks.read",
     "github.pull-request.threads.read",
 ]
 HEAD_SHA = "a" * 40
@@ -155,6 +156,10 @@ def complete_observation() -> dict[str, object]:
                 "details_url": "https://github.com/shaug/atelier/actions/runs/1",
             }
         ],
+        "required_checks": {
+            "configuration_read": True,
+            "contexts": [{"kind": "CHECK_RUN", "name": "test"}],
+        },
         "threads": [
             {
                 "id": "thread-1",
@@ -175,6 +180,7 @@ def complete_observation() -> dict[str, object]:
             "pull_request_comments": True,
             "reviews": True,
             "checks": True,
+            "required_checks": True,
             "threads": True,
         },
     }
