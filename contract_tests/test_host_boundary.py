@@ -150,6 +150,7 @@ def complete_observation() -> dict[str, object]:
                 "pull_request_number": 785,
                 "kind": "CHECK_RUN",
                 "name": "test",
+                "integration_id": 42,
                 "status": "COMPLETED",
                 "conclusion": "SUCCESS",
                 "candidate_sha": HEAD_SHA,
@@ -158,7 +159,7 @@ def complete_observation() -> dict[str, object]:
         ],
         "required_checks": {
             "configuration_read": True,
-            "contexts": [{"kind": "CHECK_RUN", "name": "test"}],
+            "contexts": [{"name": "test", "integration_id": 42}],
         },
         "threads": [
             {

@@ -244,29 +244,35 @@ Each predicate has one authoritative source and exact evaluation.
 ### `pull-request-open`
 
 - **Source:** live GitHub pull-request state.
-- **Satisfied:** the PR is open.
-- **Violated:** the PR is closed or merged.
+- **Satisfied:** the PR is open and not a draft.
+- **Violated:** the PR is closed, merged, or still a draft.
 - **Unknown:** GitHub cannot be read.
 - **Stale:** not applicable.
 
 ### `pull-request-mergeable`
 
-- **Source:** live GitHub mergeability.
-- **Satisfied:** GitHub reports the PR mergeable.
-- **Violated:** GitHub reports a conflict.
-- **Unknown:** mergeability is unavailable or still being calculated.
+- **Source:** live GitHub conflict and merge-state status.
+- **Satisfied:** GitHub reports the exact head mergeable and its current merge state
+  does not block readiness. `UNSTABLE` does not fail this predicate by itself;
+  configured required checks are evaluated separately.
+- **Violated:** GitHub reports a conflict or a policy-blocked merge state.
+- **Unknown:** conflict or merge-state status is unavailable or still being
+  calculated.
 - **Stale:** the PR head or exact comparison base changed after the observation.
 
 ### `required-checks-pass`
 
 - **Source:** live required-check configuration plus check results for the exact PR
-  head. Required identities are the exact check kind and name obtained from
-  effective branch protection and repository rulesets.
+  head. Required identities are the exact context name plus optional GitHub App or
+  ruleset integration identity obtained from effective branch protection and
+  repository rulesets; observed results retain their check/status kind and
+  integration identity.
 - **Satisfied:** the required configuration was read and every named required
-  check completed successfully; an empty configured set is satisfied.
+  check from its configured provider completed successfully; an empty configured
+  set is satisfied.
 - **Violated:** a named required check completed unsuccessfully.
-- **Unknown:** required-check configuration or a named required result cannot be
-  read, is missing, or is ambiguous.
+- **Unknown:** required-check configuration or a named required result from its
+  configured provider cannot be read, is missing, or is ambiguous.
 - **Stale:** a named required result belongs to another PR head.
 
 ### `required-validation-reported`

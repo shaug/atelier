@@ -809,36 +809,59 @@ def _evaluate_evidence(
                 "satisfied",
                 "live pull request repository, ref, and head match the delivery",
             )
-        values["pull-request-open"] = (
-            (
-                "satisfied",
-                "live pull request is open",
-            )
-            if pull_request["state"] == "OPEN"
-            else (
+        if pull_request["state"] != "OPEN":
+            values["pull-request-open"] = (
                 "violated",
                 f"live pull request state is {pull_request['state']}",
             )
-        )
+        elif pull_request["is_draft"]:
+            values["pull-request-open"] = (
+                "violated",
+                "live pull request is a draft rather than ready for review",
+            )
+        else:
+            values["pull-request-open"] = (
+                "satisfied",
+                "live pull request is open and ready for review",
+            )
         if not same_head or not live_base_current:
             values["pull-request-mergeable"] = (
                 "stale",
                 "mergeability belongs to a different pull request head or base",
             )
-        elif pull_request["mergeable"] == "MERGEABLE":
+        elif pull_request["is_draft"]:
             values["pull-request-mergeable"] = (
-                "satisfied",
-                "GitHub reports the exact delivered head mergeable",
+                "violated",
+                "the live pull request is still a draft",
             )
         elif pull_request["mergeable"] == "CONFLICTING":
             values["pull-request-mergeable"] = (
                 "violated",
                 "GitHub reports a merge conflict",
             )
-        else:
+        elif pull_request["mergeable"] != "MERGEABLE":
             values["pull-request-mergeable"] = (
                 "unknown",
                 "GitHub mergeability is unavailable",
+            )
+        elif pull_request["merge_state_status"].upper() == "UNKNOWN":
+            values["pull-request-mergeable"] = (
+                "unknown",
+                "GitHub merge readiness is unavailable",
+            )
+        elif pull_request["merge_state_status"].upper() not in {
+            "CLEAN",
+            "HAS_HOOKS",
+            "UNSTABLE",
+        }:
+            values["pull-request-mergeable"] = (
+                "violated",
+                "GitHub reports the pull request blocked from its current merge state",
+            )
+        else:
+            values["pull-request-mergeable"] = (
+                "satisfied",
+                "GitHub reports the exact delivered head mergeable under current policy",
             )
         values["required-checks-pass"] = _checks_verdict(
             observation["checks"],
@@ -881,14 +904,22 @@ def _checks_verdict(
 ) -> tuple[str, str]:
     if not required["configuration_read"]:
         return "unknown", "effective required-check configuration could not be read"
-    observed_by_identity: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
-    for check in checks:
-        observed_by_identity.setdefault((check["kind"], check["name"]), []).append(check)
     selected: list[Mapping[str, Any]] = []
     for context in required["contexts"]:
-        matches = observed_by_identity.get((context["kind"], context["name"]), [])
+        matches = [
+            check
+            for check in checks
+            if check["name"] == context["name"]
+            and (
+                context["integration_id"] is None
+                or check["integration_id"] == context["integration_id"]
+            )
+        ]
         if len(matches) != 1:
-            return "unknown", "a required check context is missing or ambiguous"
+            return (
+                "unknown",
+                "a required check context or its configured provider is missing or ambiguous",
+            )
         selected.append(matches[0])
     if any(check["candidate_sha"] != candidate_revision for check in selected):
         return "stale", "one or more required checks belong to another candidate"
@@ -984,8 +1015,11 @@ def _feedback_verdict(
     if unresolved_threads:
         return "violated", "one or more live review threads remain unresolved"
     pull_request = observation["pull_request"]
-    if pull_request is not None and pull_request["review_decision"] == "CHANGES_REQUESTED":
-        return "violated", "the live pull request review decision requires changes"
+    if pull_request is not None and pull_request["review_decision"] in {
+        "CHANGES_REQUESTED",
+        "REVIEW_REQUIRED",
+    }:
+        return "violated", "the live pull request review decision is not ready"
     if receipt["unresolved_obligations"]:
         return "violated", "the delivered receipt retains unresolved obligations"
     live_feedback = {

@@ -380,19 +380,21 @@ class AuditContract(unittest.TestCase):
                 "pull_request_number": live["pull_request"]["number"],
                 "kind": "CHECK_RUN",
                 "name": "optional",
+                "integration_id": 7,
                 "status": "COMPLETED",
                 "conclusion": "FAILURE",
                 "candidate_sha": live["pull_request"]["head"]["sha"],
                 "details_url": None,
             }
         ]
+        live["pull_request"]["merge_state_status"] = "UNSTABLE"
         self.write_observation(live)
         report = self.report()
         verdicts = {item.name: item.verdict for item in report.evidence}
         self.assertEqual(verdicts["required-checks-pass"], "satisfied")
 
         live["required_checks"]["contexts"] = [
-            {"kind": "CHECK_RUN", "name": "required"}
+            {"name": "required", "integration_id": 42}
         ]
         self.write_observation(live)
         report = self.report()
@@ -405,6 +407,7 @@ class AuditContract(unittest.TestCase):
                 "pull_request_number": live["pull_request"]["number"],
                 "kind": "CHECK_RUN",
                 "name": "required",
+                "integration_id": 7,
                 "status": "COMPLETED",
                 "conclusion": "SUCCESS",
                 "candidate_sha": live["pull_request"]["head"]["sha"],
@@ -414,7 +417,31 @@ class AuditContract(unittest.TestCase):
         self.write_observation(live)
         report = self.report()
         verdicts = {item.name: item.verdict for item in report.evidence}
+        self.assertEqual(verdicts["required-checks-pass"], "unknown")
+
+        live["checks"][-1]["integration_id"] = 42
+        self.write_observation(live)
+        report = self.report()
+        verdicts = {item.name: item.verdict for item in report.evidence}
         self.assertEqual(verdicts["required-checks-pass"], "satisfied")
+
+    def test_draft_review_and_policy_merge_blocks_prevent_acceptance(self) -> None:
+        original = self.live_observation()
+        cases = (
+            ("is_draft", True, "pull-request-open", "violated"),
+            ("review_decision", "REVIEW_REQUIRED", "unresolved-feedback-zero", "violated"),
+            ("merge_state_status", "BLOCKED", "pull-request-mergeable", "violated"),
+            ("merge_state_status", "UNKNOWN", "pull-request-mergeable", "unknown"),
+        )
+        for field, value, predicate, expected in cases:
+            with self.subTest(field=field, value=value):
+                live = json.loads(json.dumps(original))
+                live["pull_request"][field] = value
+                self.write_observation(live)
+                report = self.report()
+                verdicts = {item.name: item.verdict for item in report.evidence}
+                self.assertEqual(verdicts[predicate], expected)
+                self.assertFalse(report.acceptance_possible)
 
     def test_undispositioned_live_comment_blocks_acceptance(self) -> None:
         live = self.live_observation()
