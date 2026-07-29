@@ -2408,6 +2408,24 @@ print(json.dumps(value, sort_keys=True))
                 ).stdout.strip(),
                 before_rejection,
             )
+        foreign_head = json.loads(json.dumps(live))
+        foreign_head["pull_request"]["head"]["repository"] = "foreign/fork"
+        write_json(self.observation_path, foreign_head)
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "live pull request identity is not the terminal candidate",
+        ):
+            finalize(result)
+        self.assertEqual(
+            git(
+                None,
+                "--git-dir",
+                str(self.mailbox_remote),
+                "rev-parse",
+                "main",
+            ).stdout.strip(),
+            before_rejection,
+        )
         write_json(self.observation_path, live)
 
         foreign_review = json.loads(json.dumps(result))
