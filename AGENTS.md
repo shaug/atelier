@@ -15,9 +15,10 @@ The [Atelier as a Skill], [Git Mailbox Contract], [Project Policy Contract], and
 
 ## Current state
 
-The repository is a reset scaffold. The `/atelier` skill is discoverable but
-production `plan`, `work`, and `audit` modes are not implemented. The open
-native issue graph beginning at #772 defines implementation order.
+The repository is a reset scaffold. The `/atelier` skill implements one
+GitHub-backed planning assignment and one claimed, delegated `ready_pr` work
+path. Production `audit` is not implemented. The open native issue graph
+beginning at #772 defines implementation order.
 
 Do not claim unavailable behavior or emulate it with ad hoc orchestration.
 
@@ -63,9 +64,7 @@ just lint
 just test
 ```
 
-The expected-failure contract test is intentional. It names the missing `HOST`
-capability and must become an ordinary passing test when #774 implements that
-contract.
+All contract tests are expected to pass.
 
 ## Commits and publication
 

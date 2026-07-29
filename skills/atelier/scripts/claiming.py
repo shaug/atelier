@@ -115,6 +115,7 @@ class CheckpointRequest:
     next_continuation_token: str
     recorded_at: datetime
     candidate: Mapping[str, Any] | None = None
+    ticket_observation_digest: str | None = None
 
 
 @dataclass(frozen=True)
@@ -319,6 +320,13 @@ class ClaimCoordinator:
                 raise MailboxTransitionRejected(
                     f"{work_id}: material ticket observation changed during the invocation"
                 )
+            if (
+                request.ticket_observation_digest is not None
+                and request.ticket_observation_digest != state.ticket_digest
+            ):
+                raise MailboxTransitionRejected(
+                    f"{work_id}: checkpoint ticket observation is not current"
+                )
             effective_authority = set(state.effective_policy["authority"]["allow"])
             approved_authority = set(state.work["approval"]["authority_ceiling"])
             if request.action not in effective_authority & approved_authority:
@@ -336,8 +344,7 @@ class ClaimCoordinator:
             work["claim"] = copy.deepcopy(planned["claim"])
             return TransitionPlan(
                 commit_message=(
-                    f"record {request.phase} checkpoint {request.fence.sequence + 1} "
-                    f"for {work_id}"
+                    f"record {request.phase} checkpoint {request.fence.sequence + 1} for {work_id}"
                 ),
                 changes=(FileChange(_work_path(work_id), _render_document(work, state.body)),),
             )
@@ -831,9 +838,7 @@ class ClaimCoordinator:
 
     def _verify_capability(self, target: HostTarget) -> None:
         if not self.capability_verifier(target):
-            raise ClaimingError(
-                "required delegated implement-ticket capability is unavailable"
-            )
+            raise ClaimingError("required delegated implement-ticket capability is unavailable")
 
     def _verify_candidate(self, candidate: Mapping[str, Any] | None) -> None:
         if candidate is not None and not self.candidate_verifier(candidate):
@@ -882,8 +887,7 @@ def _effective_policy(
         approved["ticket"]["material_fields"], current["ticket"]["material_fields"]
     )
     effective["ticket"]["require_no_blockers"] = (
-        approved["ticket"]["require_no_blockers"]
-        or current["ticket"]["require_no_blockers"]
+        approved["ticket"]["require_no_blockers"] or current["ticket"]["require_no_blockers"]
     )
     return effective
 
@@ -918,7 +922,7 @@ def _require_policy_identity(
     if policy["repository"]["identity"] != expected_repository:
         raise MailboxTransitionRejected("project policy repository identity is incompatible")
     if policy["execution"] != {
-        "capability": "agent-scripts.implement-ticket/delegated-execution/v1",
+        "capability": "agent-scripts.implement-ticket/delegated-execution/v2",
         "delivery_outcome": "ready_pr",
         "parallel_assignments": False,
     }:
@@ -953,6 +957,7 @@ def _policy_remote_matches_repository(target: PolicyTarget, repository: str) -> 
     else:
         remote_url = target.remote
     return _github_remote_url(remote_url, repository=repository)
+
 
 def _candidate_remote_reachable(candidate: Mapping[str, Any]) -> bool:
     remote_url = candidate.get("remote_url")
@@ -1008,7 +1013,7 @@ def _capability_compatible(target: HostTarget) -> bool:
     return (
         result["status"] == "compatible"
         and result["delegated_capability"]
-        == "agent-scripts.implement-ticket/delegated-execution/v1"
+        == "agent-scripts.implement-ticket/delegated-execution/v2"
     )
 
 

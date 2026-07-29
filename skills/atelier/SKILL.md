@@ -23,7 +23,7 @@ fail-closed startup preflight.
 The preflight must prove:
 
 - the exact plugin-qualified `agent-scripts:implement-ticket` skill identity;
-- the compatible `agent-scripts.implement-ticket/delegated-execution/v1`
+- the compatible `agent-scripts.implement-ticket/delegated-execution/v2`
   manifest, schemas, and dependency-owned validator;
 - the six v0 candidate, pull-request, and review authority actions declared by
   the host capability descriptor;
@@ -52,24 +52,24 @@ the fail-closed host preflight, and use `scripts/claiming.py`. Never mint a
 replacement fence for a stale worker or acknowledge a candidate that is not
 reachable at its exact declared remote ref and head.
 
-Delegated implementation and audit are not implemented yet. Work mode stops
-after durable claim/checkpoint coordination; it cannot launch Agent Scripts,
-validate a terminal result, or deliver the assignment. Do not emulate missing
-behavior with ad hoc orchestration, hidden local state, copied Agent Scripts
-workflows, or tracker mutations.
+Production delegated implementation is implemented for one active claimed
+assignment. Before delegation, read `references/delegation.md`, repeat the
+fail-closed host preflight, and use `scripts/delegation.py` to prepare the exact
+v2 invocation, service fresh-observation checkpoints, and validate one terminal
+result. Launch one fresh worker through the host with the installed
+`agent-scripts:implement-ticket` skill. Do not copy its workflow, spawn a
+substitute CLI process, cache provider observations, or widen Atelier's v0
+authority ceiling.
 
-When either unavailable behavior is requested:
+Production `audit` behavior is not implemented yet. When it is requested:
 
-1. Identify the requested behavior: delegated work or audit.
-1. Report that the mode is unavailable in the reset scaffold.
-1. Link the owning issue:
-   - delegated work: shaug/atelier#779
-   - `audit`: shaug/atelier#780
+1. Report that audit is unavailable in the reset scaffold.
+1. Link the owning issue: shaug/atelier#780.
 1. Make no mailbox, repository, ticket, pull-request, or acceptance mutation.
 
 An explicit host-readiness request may complete the read-only host preflight and
-return its exact compatibility or failure result. That does not make any
-production mode available.
+return its exact compatibility or failure result. That does not make audit
+available.
 
 ## Mailbox boundary
 

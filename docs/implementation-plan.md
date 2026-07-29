@@ -48,7 +48,7 @@ gate.
 ### Exit criteria
 
 - Agent Scripts publishes and validates
-  `agent-scripts.implement-ticket/delegated-execution/v1`.
+    `agent-scripts.implement-ticket/delegated-execution/v2`.
 - The design, [Git Mailbox Contract], [Atelier Project Policy Contract], and
   implementation plan agree on lifecycle, authority, delivery, and acceptance.
 - No legacy ticket, tag, or implementation has been mutated as part of this

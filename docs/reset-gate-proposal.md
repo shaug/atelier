@@ -40,7 +40,7 @@ The validated dependency is:
 
 - Agent Scripts commit: `861dd04c526d7e2ab7f33d112a00a370db17aae9`;
 - installed plugin: `agent-scripts@agent-scripts` version `0.1.0`;
-- delegated capability: `agent-scripts.implement-ticket/delegated-execution/v1`;
+  - delegated capability: `agent-scripts.implement-ticket/delegated-execution/v2`;
 - installed `implement-ticket` skill SHA-256:
   `307b660864b15a167e755d0f47840acb56d20e1e8ec940d110d84548aec85243`; and
 - capability manifest SHA-256:

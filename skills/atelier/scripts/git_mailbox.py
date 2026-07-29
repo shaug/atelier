@@ -110,6 +110,7 @@ class GitRunner(Protocol):
 
 Revalidate = Callable[[TransitionContext], None]
 PlanTransition = Callable[[TransitionContext], TransitionPlan]
+ObserveMailbox = Callable[[TransitionContext], Any]
 
 
 def _valid_mailbox_document_path(path: PurePosixPath) -> bool:
@@ -119,29 +120,23 @@ def _valid_mailbox_document_path(path: PurePosixPath) -> bool:
     if len(parts) == 3:
         collection, identifier, document = parts
         return (
-            collection == "projects"
-            and identifier.startswith("prj_")
-            and document == "project.md"
-        ) or (
-            collection == "initiatives"
-            and identifier.startswith("ini_")
-            and document == "initiative.md"
-        ) or (
-            collection == "work"
-            and identifier.startswith("wrk_")
-            and document == "work.md"
+            (
+                collection == "projects"
+                and identifier.startswith("prj_")
+                and document == "project.md"
+            )
+            or (
+                collection == "initiatives"
+                and identifier.startswith("ini_")
+                and document == "initiative.md"
+            )
+            or (collection == "work" and identifier.startswith("wrk_") and document == "work.md")
         )
     if len(parts) == 4 and parts[0] == "work" and parts[1].startswith("wrk_"):
         collection, document = parts[2:]
         return (
-            collection == "messages"
-            and document.startswith("msg_")
-            and document.endswith(".md")
-        ) or (
-            collection == "receipts"
-            and document.startswith("rcp_")
-            and document.endswith(".md")
-        )
+            collection == "messages" and document.startswith("msg_") and document.endswith(".md")
+        ) or (collection == "receipts" and document.startswith("rcp_") and document.endswith(".md"))
     return False
 
 
@@ -339,6 +334,30 @@ class GitMailboxWriter:
                     )
             raise AssertionError("bounded mailbox write loop terminated unexpectedly")
 
+    def observe(self, operation: str, inspect: ObserveMailbox) -> Any:
+        """Inspect one fresh, isolated canonical snapshot without mutating it."""
+
+        if not operation.strip():
+            raise ValueError("operation must not be empty")
+        with tempfile.TemporaryDirectory(prefix="atelier-mailbox-observe-") as temporary:
+            checkout = Path(temporary) / "mailbox"
+            self._initialize(checkout)
+            base_revision = self._fetch_current(checkout)
+            self._reset(checkout)
+            snapshot = reconstruct_mailbox(checkout)
+            self._require_canonical_branch(snapshot, operation=operation)
+            context_fingerprint = self._context_fingerprint(checkout)
+            result = inspect(
+                TransitionContext(
+                    checkout=checkout,
+                    base_revision=base_revision,
+                    snapshot=snapshot,
+                    attempt=1,
+                )
+            )
+            self._require_context_unchanged(checkout, expected=context_fingerprint)
+            return result
+
     def recover(self, pending: PendingWrite) -> WriteResult | None:
         """Resolve an ambiguous push through ancestry and exact historical content."""
 
@@ -490,9 +509,7 @@ class GitMailboxWriter:
                 "transition callback mutated its read-only context"
             ) from error
         if current != expected:
-            raise MailboxTransitionRejected(
-                "transition callback mutated its read-only context"
-            )
+            raise MailboxTransitionRejected("transition callback mutated its read-only context")
 
     def _read_prior_claims(
         self,
@@ -619,14 +636,22 @@ class GitMailboxWriter:
                     f"{path}: one checkpoint sequence requires one authorization entry"
                 )
             token_rotated = (
-                current_checkpoint["continuation_token"]
-                != prior_checkpoint["continuation_token"]
+                current_checkpoint["continuation_token"] != prior_checkpoint["continuation_token"]
             )
             if (sequence_delta == 1) != token_rotated:
                 raise MailboxTransitionRejected(
                     f"{path}: checkpoint sequence and continuation token must advance together"
                 )
             if current_claim["candidate"] != prior_claim["candidate"]:
+                if self._delivery_binds_pull_request(
+                    checkout,
+                    path,
+                    document,
+                    prior_claim,
+                    current_claim,
+                    changes,
+                ):
+                    continue
                 if sequence_delta != 1 or current_claim["candidate"] is None:
                     raise MailboxTransitionRejected(
                         f"{path}: candidate changes require one publication checkpoint"
@@ -641,6 +666,60 @@ class GitMailboxWriter:
                     raise MailboxTransitionRejected(
                         f"{path}: candidate publication checkpoint does not match candidate"
                     )
+
+    def _delivery_binds_pull_request(
+        self,
+        checkout: Path,
+        path: str,
+        document: Mapping[str, Any],
+        prior_claim: Mapping[str, Any],
+        current_claim: Mapping[str, Any],
+        changes: tuple[FileChange, ...],
+    ) -> bool:
+        """Allow delivery to bind the exact PR created under the last authorization."""
+
+        prior_candidate = prior_claim["candidate"]
+        current_candidate = current_claim["candidate"]
+        if prior_candidate is None or current_candidate is None:
+            return False
+        expected = dict(prior_candidate)
+        expected["pull_request"] = current_candidate["pull_request"]
+        if (
+            prior_candidate["pull_request"] is not None
+            or not isinstance(current_candidate["pull_request"], str)
+            or not current_candidate["pull_request"].startswith("https://github.com/")
+            or current_candidate != expected
+            or current_claim["checkpoint"] != prior_claim["checkpoint"]
+            or document["status"] != "delivered"
+            or document["attempt_receipt_id"] != document["delivery_receipt_id"]
+        ):
+            return False
+        ledger = current_claim["checkpoint"]["authorizations"]
+        if (
+            not ledger
+            or ledger[-1]["phase"] != "pre_external_mutation"
+            or ledger[-1]["action"] != "pull_request.create"
+            or ledger[-1]["candidate_head"] != current_candidate["head_revision"]
+        ):
+            return False
+        receipt_id = document["delivery_receipt_id"]
+        receipt_path = f"work/{PurePosixPath(path).parts[1]}/receipts/{receipt_id}.md"
+        if not any(
+            change.path == receipt_path and change.content is not None for change in changes
+        ):
+            return False
+        receipt, _ = _read_yaml(
+            checkout / receipt_path,
+            frontmatter=True,
+            label=receipt_path,
+        )
+        return bool(
+            receipt["outcome"] == "delivered"
+            and receipt["claim_id"] == current_claim["id"]
+            and receipt["worker_run_id"] == current_claim["worker_run_id"]
+            and receipt["candidate"] == current_candidate
+            and receipt["mutation_ownership"] == "retained"
+        )
 
     def _verify_new_claim(
         self,
@@ -818,9 +897,7 @@ class GitMailboxWriter:
         if ancestry.returncode == 1:
             return False
         if ancestry.returncode != 0:
-            raise MailboxReadBackError(
-                f"{pending.operation}: could not verify commit ancestry"
-            )
+            raise MailboxReadBackError(f"{pending.operation}: could not verify commit ancestry")
         for change in pending.changes:
             shown = self._run(checkout, ("show", f"{pending.commit}:{change.path}"))
             if change.content is None:
@@ -850,9 +927,7 @@ class GitMailboxWriter:
                 f"{operation}: canonical mailbox branch moved backwards or diverged"
             )
         if ancestry.returncode != 0:
-            raise MailboxReadBackError(
-                f"{operation}: could not verify canonical branch continuity"
-            )
+            raise MailboxReadBackError(f"{operation}: could not verify canonical branch continuity")
 
     def _output(self, cwd: Path, arguments: Sequence[str], purpose: str) -> str:
         result = self._run(cwd, arguments)
