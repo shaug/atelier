@@ -188,9 +188,7 @@ class GitMailboxWriteContract(unittest.TestCase):
         git(None, "clone", str(self.remote), str(seed))
         mailbox = fixtures.MailboxFixture(seed)
         self.work_id = mailbox.add_work(1, "approved")
-        self.repository = mailbox.projects[mailbox.works[self.work_id]["project_id"]][
-            "repository"
-        ]
+        self.repository = mailbox.projects[mailbox.works[self.work_id]["project_id"]]["repository"]
         git(seed, "add", "-A")
         git(
             seed,
@@ -769,6 +767,7 @@ class GitMailboxWriteContract(unittest.TestCase):
                     "action": "repository.candidate.create",
                     "proposed_effect_digest": fixtures.DIGEST,
                     "candidate_head": None,
+                    "candidate_remote_ref": None,
                     "acknowledged_candidate_head": None,
                     "recorded_at": fixtures.TIMESTAMP,
                 }
@@ -870,9 +869,7 @@ class GitMailboxWriteContract(unittest.TestCase):
         fresh = self.root / "fresh-handoff"
         git(None, "clone", str(self.remote), str(fresh))
         current = read_markdown(fresh / work_path)
-        released = read_markdown(
-            fresh / f"work/{self.work_id}/receipts/{receipt_id}.md"
-        )
+        released = read_markdown(fresh / f"work/{self.work_id}/receipts/{receipt_id}.md")
         self.assertEqual(released["candidate"], candidate)
         self.assertEqual(current["attempt_receipt_id"], receipt_id)
         self.assertEqual(current["claim"]["candidate"], candidate)
@@ -1115,9 +1112,7 @@ class GitMailboxWriteContract(unittest.TestCase):
             hook = context.checkout / ".git" / "hooks" / "pre-commit"
             hook.parent.mkdir(parents=True)
             hook.write_text(
-                "#!/bin/sh\n"
-                f"printf 'corrupted\\n' > {path}\n"
-                f"git add -- {path}\n",
+                f"#!/bin/sh\nprintf 'corrupted\\n' > {path}\ngit add -- {path}\n",
                 encoding="utf-8",
             )
             hook.chmod(0o700)
@@ -1304,9 +1299,7 @@ class GitMailboxWriteContract(unittest.TestCase):
                 checkpoint["authorizations"] = checkpoint["authorizations"][:-1]
                 checkpoint["sequence"] -= 1
             else:
-                checkpoint["authorizations"][-1]["proposed_effect_digest"] = (
-                    "sha256:" + ("f" * 64)
-                )
+                checkpoint["authorizations"][-1]["proposed_effect_digest"] = "sha256:" + ("f" * 64)
             return TransitionPlan(
                 f"{mutation} checkpoint ledger",
                 (FileChange(path, markdown(work)),),
@@ -1364,6 +1357,35 @@ class GitMailboxWriteContract(unittest.TestCase):
                         ),
                     )
                 self.assertEqual(self.remote_head(), before)
+
+    def test_delegated_invocation_digest_can_be_sealed_once(self) -> None:
+        self._claim(with_candidate=False)
+        path = f"work/{self.work_id}/work.md"
+
+        def seal(context: TransitionContext, digest: str) -> TransitionPlan:
+            work = read_markdown(context.checkout / path)
+            work["claim"]["invocation_digest"] = digest
+            return TransitionPlan(
+                "seal delegated invocation",
+                (FileChange(path, markdown(work)),),
+            )
+
+        self.writer().publish(
+            "seal delegated invocation",
+            revalidate=lambda context: None,
+            plan=lambda context: seal(context, fixtures.DIGEST),
+        )
+        sealed_head = self.remote_head()
+
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected, "delegated invocation binding is immutable"
+        ):
+            self.writer().publish(
+                "reseal delegated invocation",
+                revalidate=lambda context: None,
+                plan=lambda context: seal(context, "sha256:" + ("f" * 64)),
+            )
+        self.assertEqual(self.remote_head(), sealed_head)
 
     def test_takeover_must_preserve_verified_candidate(self) -> None:
         original_claim = self._claim(with_candidate=True)
@@ -1459,9 +1481,7 @@ class GitMailboxWriteContract(unittest.TestCase):
         second_path = f"work/{second_work_id}/work.md"
 
         def add_second_work(context: TransitionContext) -> TransitionPlan:
-            current = read_markdown(
-                context.checkout / f"work/{self.work_id}/work.md"
-            )
+            current = read_markdown(context.checkout / f"work/{self.work_id}/work.md")
             second = fixtures.base_work(
                 second_work_id,
                 current["project_id"],
@@ -1540,17 +1560,15 @@ class GitMailboxWriteContract(unittest.TestCase):
 
         def rebind_candidate(context: TransitionContext) -> TransitionPlan:
             work = read_markdown(context.checkout / path)
-            work["claim"]["candidate"]["remote_ref"] = (
-                "refs/heads/scott/rebound-candidate"
-            )
+            work["claim"]["candidate"]["remote_ref"] = "refs/heads/scott/rebound-candidate"
             return TransitionPlan(
                 "rebind candidate without checkpoint",
                 (FileChange(path, markdown(work)),),
             )
 
         with self.assertRaisesRegex(
-            MailboxTransitionRejected,
-            "candidate changes require one publication checkpoint",
+            (MailboxTransitionRejected, MailboxValidationError),
+            "candidate changes require one publication checkpoint|candidate-acknowledgement",
         ):
             self.writer().publish(
                 "rebind candidate without checkpoint",
@@ -1616,9 +1634,7 @@ class GitMailboxWriteContract(unittest.TestCase):
         for authorization in published_claim["checkpoint"]["authorizations"]:
             claim_value["checkpoint"]["authorizations"].append(copy.deepcopy(authorization))
             claim_value["checkpoint"]["sequence"] = authorization["sequence"]
-            claim_value["checkpoint"]["continuation_token"] = (
-                f"token-1-{authorization['sequence']}"
-            )
+            claim_value["checkpoint"]["continuation_token"] = f"token-1-{authorization['sequence']}"
             if authorization["phase"] == "candidate_published":
                 claim_value["candidate"] = copy.deepcopy(published_claim["candidate"])
 
@@ -1630,9 +1646,7 @@ class GitMailboxWriteContract(unittest.TestCase):
                 checkpoint_claim: dict[str, Any] = checkpoint_claim,
                 checkpoint_number: int = checkpoint_number,
             ) -> TransitionPlan:
-                work = read_markdown(
-                    context.checkout / f"work/{self.work_id}/work.md"
-                )
+                work = read_markdown(context.checkout / f"work/{self.work_id}/work.md")
                 work["claim"] = copy.deepcopy(checkpoint_claim)
                 return TransitionPlan(
                     f"advance checkpoint {checkpoint_number}",

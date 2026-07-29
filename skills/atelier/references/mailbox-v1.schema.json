@@ -108,6 +108,7 @@
         "action",
         "proposed_effect_digest",
         "candidate_head",
+        "candidate_remote_ref",
         "acknowledged_candidate_head",
         "recorded_at"
       ],
@@ -133,6 +134,16 @@
         },
         "candidate_head": {
           "$ref": "#/$defs/nullable_sha"
+        },
+        "candidate_remote_ref": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/branch_ref"
+            }
+          ]
         },
         "acknowledged_candidate_head": {
           "$ref": "#/$defs/nullable_sha"
@@ -228,6 +239,7 @@
         "approved_commit",
         "policy_commit",
         "ticket_observation_digest",
+        "invocation_digest",
         "claimed_at",
         "host",
         "checkpoint",
@@ -252,6 +264,16 @@
         },
         "ticket_observation_digest": {
           "$ref": "#/$defs/digest"
+        },
+        "invocation_digest": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "claimed_at": {
           "$ref": "#/$defs/timestamp"
@@ -748,7 +770,7 @@
           ],
           "properties": {
             "capability": {
-              "const": "agent-scripts.implement-ticket/delegated-execution/v1"
+                "const": "agent-scripts.implement-ticket/delegated-execution/v2"
             },
             "delivery_outcome": {
               "const": "ready_pr"

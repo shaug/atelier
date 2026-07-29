@@ -198,7 +198,7 @@ prerequisites preserve the platform/application boundary more honestly.
 ### Agent Scripts capability contract
 
 Before claiming work, Atelier must establish that the host can invoke a
-compatible `agent-scripts.implement-ticket/delegated-execution/v1` capability
+  compatible `agent-scripts.implement-ticket/delegated-execution/v2` capability
 and validate its `capability.json` discovery manifest plus versioned invocation,
 checkpoint, and result schemas. Finding a skill with the expected name is not
 sufficient.

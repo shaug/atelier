@@ -45,7 +45,7 @@ ticket:
     - relationships
 
 execution:
-  capability: agent-scripts.implement-ticket/delegated-execution/v1
+    capability: agent-scripts.implement-ticket/delegated-execution/v2
   delivery_outcome: ready_pr
   parallel_assignments: false
 
@@ -146,7 +146,7 @@ sorted by stable provider identifier before encoding.
 ### Execution
 
 `execution.capability` is exactly
-`agent-scripts.implement-ticket/delegated-execution/v1`.
+  `agent-scripts.implement-ticket/delegated-execution/v2`.
 
 `execution.delivery_outcome` is exactly `ready_pr`.
 

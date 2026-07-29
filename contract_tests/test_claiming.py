@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -32,6 +34,15 @@ from skills.atelier.scripts.claiming import (
     _render_document,
     new_identifier,
 )
+from skills.atelier.scripts.delegation import (
+    CAPABILITY,
+    INVOCATION_SCHEMA,
+    REQUEST_SCHEMA,
+    RESULT_SCHEMA,
+    DelegationCoordinator,
+    DelegationError,
+    _require_tracker_transition,
+)
 from skills.atelier.scripts.git_mailbox import (
     FileChange,
     GitMailboxWriter,
@@ -48,9 +59,77 @@ from skills.atelier.scripts.planning import (
     PolicyTarget,
 )
 
+APPROVED_EVIDENCE = EVIDENCE[:-1]
 DIGEST = "sha256:" + "d" * 64
 HEAD = "b" * 40
 CLAIMING_SCRIPT = Path(__file__).parents[1] / "skills/atelier/scripts/claiming.py"
+ROOT = Path(__file__).parents[1]
+HOST_CAPABILITY = ROOT / "skills/atelier/references/host-capability.json"
+INSTALLED_TICKET_SKILL = Path.home() / ".agents/skills/implement-ticket"
+REQUIRED_HOST_OPERATIONS = (
+    "github.issue.read",
+    "github.issue.relationships.read",
+    "github.pull-request.read",
+    "github.pull-request.comments.read",
+    "github.pull-request.reviews.read",
+    "github.pull-request.checks.read",
+    "github.pull-request.threads.read",
+)
+
+
+class ProtocolFixture:
+    def validate(self, kind: str, value: dict[str, Any]) -> list[str]:
+        expected = {
+            "invocation": INVOCATION_SCHEMA,
+            "checkpoint-request": REQUEST_SCHEMA,
+            "result": RESULT_SCHEMA,
+        }
+        return [] if value.get("schema") == expected[kind] else ["wrong protocol schema"]
+
+    def validate_checkpoint_progress(
+        self,
+        last_sequence: int,
+        current_token: str,
+        request: dict[str, Any],
+        response: dict[str, Any],
+    ) -> list[str]:
+        errors = []
+        if request["sequence"] != last_sequence + 1:
+            errors.append("sequence did not advance exactly once")
+        if request["continuation_token"] != current_token:
+            errors.append("continuation token is stale")
+        if response["request_sequence"] != request["sequence"]:
+            errors.append("response sequence mismatch")
+        return errors
+
+    def validate_checkpoint_exchange(
+        self,
+        request: dict[str, Any],
+        response: dict[str, Any],
+    ) -> list[str]:
+        return [] if response["request_sequence"] == request["sequence"] else ["sequence mismatch"]
+
+    def validate_result_checkpoint_state(
+        self,
+        invocation: dict[str, Any],
+        result: dict[str, Any],
+        last_sequence: int,
+        current_token: str,
+        observed_deployment,
+        observed_tracker,
+        consumed_authority: list[str],
+    ) -> list[str]:
+        errors = []
+        if result["invocation_id"] != invocation["invocation_id"]:
+            errors.append("result invocation mismatch")
+        if result["checkpoint"] != {
+            "last_sequence": last_sequence,
+            "continuation_token": current_token,
+        }:
+            errors.append("result checkpoint mismatch")
+        if set(result["authority_used"]) != set(consumed_authority):
+            errors.append("result authority mismatch")
+        return errors
 
 
 class ClaimingContract(unittest.TestCase):
@@ -98,6 +177,21 @@ class ClaimingContract(unittest.TestCase):
 
         self.observation_path = self.root / "observation.json"
         write_json(self.observation_path, observation())
+        observation_script = self.root / "observe.py"
+        observation_script.write_text(
+            """import json
+import sys
+from datetime import UTC, datetime
+
+path = sys.argv[1]
+with open(path, encoding=\"utf-8\") as stream:
+    value = json.load(stream)
+value[\"observed_at\"] = datetime.now(UTC).isoformat().replace(\"+00:00\", \"Z\")
+print(json.dumps(value, sort_keys=True))
+""",
+            encoding="utf-8",
+        )
+        self.observation_command = (sys.executable, str(observation_script), str(self.observation_path))
         self.work_id = fixtures.identifier("wrk", 778)
         self.initiative_id = fixtures.identifier("ini", 778)
         planner = Planner(str(self.mailbox_remote), "main")
@@ -111,7 +205,7 @@ class ClaimingContract(unittest.TestCase):
         preview = planner.preview_approval(
             self.work_id,
             expected_revision=1,
-            envelope=ApprovalEnvelope(AUTHORITY, EVIDENCE),
+            envelope=ApprovalEnvelope(AUTHORITY, APPROVED_EVIDENCE),
             policy_target=self.policy_target(),
             observation_path=self.observation_path,
             observation_not_before=OBSERVED_AT,
@@ -140,7 +234,12 @@ class ClaimingContract(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def write_policy(self, *, authority: tuple[str, ...] = AUTHORITY) -> None:
+    def write_policy(
+        self,
+        *,
+        authority: tuple[str, ...] = AUTHORITY,
+        evidence: tuple[str, ...] = APPROVED_EVIDENCE,
+    ) -> None:
         fixtures.write_yaml(
             self.policy_path,
             {
@@ -162,15 +261,35 @@ class ClaimingContract(unittest.TestCase):
                     "material_fields": ["body", "state", "relationships"],
                 },
                 "execution": {
-                    "capability": "agent-scripts.implement-ticket/delegated-execution/v1",
+                    "capability": "agent-scripts.implement-ticket/delegated-execution/v2",
                     "delivery_outcome": "ready_pr",
                     "parallel_assignments": False,
                 },
                 "authority": {"allow": list(authority)},
                 "validation": {"required_commands": ["just test", "just lint"]},
-                "acceptance": {"actor": "operator", "evidence": list(EVIDENCE)},
+                "acceptance": {"actor": "operator", "evidence": list(evidence)},
             },
         )
+
+    def commit_policy_change(
+        self,
+        *,
+        authority: tuple[str, ...] = AUTHORITY,
+        evidence: tuple[str, ...] = APPROVED_EVIDENCE,
+    ) -> None:
+        self.write_policy(authority=authority, evidence=evidence)
+        git(self.project_checkout, "add", ".atelier/policy.yaml")
+        git(
+            self.project_checkout,
+            "-c",
+            "user.name=Atelier Test",
+            "-c",
+            "user.email=atelier-test@invalid",
+            "commit",
+            "-m",
+            "change project policy",
+        )
+        git(self.project_checkout, "push", "origin", "HEAD:main")
 
     def policy_target(self, checkout: Path | None = None) -> PolicyTarget:
         return PolicyTarget(
@@ -179,7 +298,6 @@ class ClaimingContract(unittest.TestCase):
             canonical_ref="refs/heads/main",
             path=".atelier/policy.yaml",
         )
-
 
     def policy_remote_matches(self, target: PolicyTarget, repository: str) -> bool:
         configured = run_git(target.checkout, ("remote", "get-url", target.remote))
@@ -195,6 +313,37 @@ class ClaimingContract(unittest.TestCase):
             connector="github@openai-curated",
             operations=("read_issue",),
         )
+
+    def delegation_host_target(self) -> HostTarget:
+        return HostTarget(
+            descriptor_path=self.root / "host-capability.json",
+            skill_name="agent-scripts:implement-ticket",
+            skill_root=self.root / "agent-scripts",
+            connector="github@openai-curated",
+            operations=("read_issue",),
+        )
+
+    def installed_host_target(self) -> HostTarget:
+        return HostTarget(
+            descriptor_path=HOST_CAPABILITY,
+            skill_name="agent-scripts:implement-ticket",
+            skill_root=INSTALLED_TICKET_SKILL,
+            connector="github@openai-curated",
+            operations=REQUIRED_HOST_OPERATIONS,
+        )
+
+    def assert_installed_result_valid_if_available(self, result: dict[str, Any]) -> None:
+        if not (INSTALLED_TICKET_SKILL / "SKILL.md").is_file():
+            return
+        dependency = DelegationCoordinator(self.coordinator)._dependency(
+            self.installed_host_target()
+        )
+        self.assertEqual(dependency.validate("result", result), [])
+
+    def delegation(self) -> DelegationCoordinator:
+        coordinator = DelegationCoordinator(self.coordinator)
+        coordinator._dependency = lambda target: ProtocolFixture()
+        return coordinator
 
     def fresh_observation(self) -> dict[str, Any]:
         value = observation()
@@ -274,11 +423,14 @@ class ClaimingContract(unittest.TestCase):
         action: str,
         token: str,
         candidate_head: str | None = None,
+        candidate_remote_ref: str | None = None,
         phase: str = "pre_external_mutation",
         candidate: dict[str, Any] | None = None,
         coordinator: ClaimCoordinator | None = None,
         host_target: HostTarget | None = None,
     ):
+        if candidate_head is not None and candidate_remote_ref is None:
+            candidate_remote_ref = (candidate or self.candidate())["remote_ref"]
         return (coordinator or self.coordinator).authorize(
             self.work_id,
             CheckpointRequest(
@@ -287,6 +439,7 @@ class ClaimingContract(unittest.TestCase):
                 action=action,
                 proposed_effect_digest=DIGEST,
                 candidate_head=candidate_head,
+                candidate_remote_ref=candidate_remote_ref,
                 acknowledged_candidate_head=(
                     candidate_head if phase == "candidate_published" else None
                 ),
@@ -314,6 +467,307 @@ class ClaimingContract(unittest.TestCase):
             "workspace_id": None,
             "published_at": "2026-07-28T04:02:00Z",
         }
+
+    def delegated_invocation(self, claimed):
+        return self.delegation().prepare(
+            self.work_id,
+            self.fence(claimed),
+            approved_commit=self.approved_commit,
+            policy_target=self.policy_target(),
+            host_target=self.delegation_host_target(),
+            observation_path=self.observation_path,
+            observation_not_before=self.live_at,
+            checkpoint_invocation_path=self.root / "delegated-invocation.json",
+            observation_command=self.observation_command,
+            now=self.live_at + timedelta(seconds=30),
+        )
+
+    def delegated_request(
+        self,
+        invocation: dict[str, Any],
+        prior,
+        *,
+        action: str,
+        phase: str = "pre_external_mutation",
+        candidate: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "schema": REQUEST_SCHEMA,
+            "capability": CAPABILITY,
+            "invocation_id": invocation["invocation_id"],
+            "continuation_token": prior.continuation_token,
+            "sequence": prior.sequence + 1,
+            "phase": phase,
+            "action": action,
+            "ticket_observation": invocation["ticket"]["observation"],
+            "candidate": candidate,
+            "deployment": None,
+            "proposed_effect": f"{action} candidate",
+        }
+
+    def delegated_checkpoint(
+        self,
+        delegation: DelegationCoordinator,
+        invocation: dict[str, Any],
+        prior,
+        *,
+        action: str,
+        token: str,
+        phase: str = "pre_external_mutation",
+        candidate: dict[str, Any] | None = None,
+    ):
+        request = self.delegated_request(
+            invocation,
+            prior,
+            action=action,
+            phase=phase,
+            candidate=candidate,
+        )
+        response = delegation.checkpoint(
+            self.work_id,
+            invocation,
+            request,
+            approved_commit=self.approved_commit,
+            policy_target=self.policy_target(),
+            host_target=self.delegation_host_target(),
+            observation_path=self.observation_path,
+            observation_not_before=self.live_at,
+            recorded_at=self.live_at + timedelta(minutes=2),
+            next_continuation_token=token,
+            now=self.live_at + timedelta(minutes=2),
+        )
+        self.assertEqual(response["decision"], "allow", response)
+        return type(prior)(
+            operation="checkpoint",
+            work_id=self.work_id,
+            status="active",
+            claim_id=prior.claim_id,
+            worker_run_id=prior.worker_run_id,
+            sequence=request["sequence"],
+            continuation_token=response["continuation_token"],
+            commit="0" * 40,
+            base_revision="0" * 40,
+            branch="main",
+            attempts=1,
+            recovered=False,
+        )
+
+    def assert_checkpoint_denied_without_mutation(
+        self,
+        delegation: DelegationCoordinator,
+        invocation: dict[str, Any],
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        before = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+        response = delegation.checkpoint(
+            self.work_id,
+            invocation,
+            request,
+            approved_commit=self.approved_commit,
+            policy_target=self.policy_target(),
+            host_target=self.delegation_host_target(),
+            observation_path=self.observation_path,
+            observation_not_before=self.live_at,
+            recorded_at=self.live_at + timedelta(minutes=2),
+            next_continuation_token="must-not-be-used",
+            now=self.live_at + timedelta(minutes=2),
+        )
+        after = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+        self.assertEqual(response["decision"], "deny")
+        self.assertEqual(response["continuation_token"], request["continuation_token"])
+        self.assertEqual(after, before)
+        return response
+
+    def acceptance_records(self, invocation: dict[str, Any], candidate_head: str):
+        return [
+            {
+                "criterion": item["criterion"],
+                "required": item["required"],
+                "evidence_category": item["evidence_category"],
+                "stage": item["stage"],
+                "candidate_sha": candidate_head,
+                "deployed_sha": None,
+                "environment": item["environment"],
+                "url": item["url"],
+                "source": item["source"],
+                "status": "pass",
+            }
+            for item in invocation["acceptance_requirements"]
+        ]
+
+    def blocked_result(
+        self,
+        invocation: dict[str, Any],
+        checkpointed,
+        *,
+        tracker_mode: str = "none",
+        tracker_state: str = "open",
+        reviews: list[dict[str, Any]] | None = None,
+        candidate: dict[str, Any] | None = None,
+        authority_used: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "schema": RESULT_SCHEMA,
+            "capability": CAPABILITY,
+            "invocation_id": invocation["invocation_id"],
+            "terminal_state": "blocked",
+            "ticket": invocation["ticket"],
+            "repository": {
+                "identity": invocation["repository"]["identity"],
+                "base_ref": invocation["repository"]["base_ref"],
+                "base_sha": invocation["repository"]["base_sha"],
+            },
+            "tracker_transition": {
+                "provider": invocation["ticket"]["provider"],
+                "ticket_id": invocation["ticket"]["id"],
+                "mode": tracker_mode,
+                "state": tracker_state,
+                "observed_at": fixtures.TIMESTAMP,
+            },
+            "implementation_state": "published" if candidate else "local",
+            "candidate": candidate,
+            "handoff": {
+                "transferable": candidate is not None,
+                "reason": None if candidate else "No published candidate exists.",
+            },
+            "checkpoint": {
+                "last_sequence": checkpointed.sequence,
+                "continuation_token": checkpointed.continuation_token,
+            },
+            "validation": [],
+            "reviews": reviews or [],
+            "feedback": None,
+            "authority_used": (
+                authority_used
+                if authority_used is not None
+                else ["repository.candidate.create"]
+            ),
+            "acceptance_evidence": [
+                {
+                    "criterion": item["criterion"],
+                    "required": item["required"],
+                    "evidence_category": item["evidence_category"],
+                    "stage": item["stage"],
+                    "candidate_sha": candidate["head_sha"] if candidate else None,
+                    "deployed_sha": None,
+                    "environment": item["environment"],
+                    "url": item["url"],
+                    "source": None,
+                    "status": "missing",
+                }
+                for item in invocation["acceptance_requirements"]
+            ],
+            "unresolved_obligations": ["Resolve the implementation blocker."],
+            "blocking_reason": "The delegated worker could not publish a candidate.",
+            "next_action": "Planner decides whether to retry or revise the work.",
+        }
+
+    def assert_blocked_ref_substitution_rejected(self, *, with_prior_candidate: bool) -> None:
+        self.coordinator = ClaimCoordinator(
+            str(self.mailbox_remote),
+            "main",
+            candidate_verifier=lambda candidate: True,
+            capability_verifier=lambda target: True,
+            policy_remote_verifier=self.policy_remote_matches,
+        )
+        claimed = self.claim()
+        delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        prior = claimed
+        if with_prior_candidate:
+            acknowledged = {
+                "repository": invocation["repository"]["identity"],
+                "remote_url": invocation["repository"]["remote_url"],
+                "remote_ref": "refs/heads/scott/acknowledged-candidate",
+                "base_sha": invocation["repository"]["base_sha"],
+                "head_sha": HEAD,
+            }
+            pushed = self.delegated_checkpoint(
+                delegation,
+                invocation,
+                prior,
+                action="repository.candidate.push",
+                token="token-1",
+                candidate=acknowledged,
+            )
+            prior = self.delegated_checkpoint(
+                delegation,
+                invocation,
+                pushed,
+                action="repository.candidate.push",
+                token="token-2",
+                phase="candidate_published",
+                candidate=acknowledged,
+            )
+        authorized = {
+            "repository": invocation["repository"]["identity"],
+            "remote_url": invocation["repository"]["remote_url"],
+            "remote_ref": "refs/heads/scott/authorized-push",
+            "base_sha": invocation["repository"]["base_sha"],
+            "head_sha": "c" * 40 if with_prior_candidate else HEAD,
+        }
+        pushed = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            prior,
+            action="repository.candidate.push",
+            token="token-3" if with_prior_candidate else "token-1",
+            candidate=authorized,
+        )
+        substituted = {
+            **authorized,
+            "remote_ref": "refs/heads/scott/substituted-same-head",
+            "publication": {"kind": "ordinary", "pull_requests": []},
+        }
+        result = self.blocked_result(
+            invocation,
+            pushed,
+            candidate=substituted,
+            authority_used=["repository.candidate.push"],
+        )
+        before = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+
+        with self.assertRaisesRegex(MailboxTransitionRejected, "exact push authorization"):
+            delegation.finalize(
+                self.work_id,
+                invocation,
+                result,
+                self.fence(pushed),
+                approved_commit=self.approved_commit,
+                policy_target=self.policy_target(),
+                host_target=self.delegation_host_target(),
+                observation_path=self.observation_path,
+                observation_not_before=self.live_at,
+                ended_at=self.live_at + timedelta(minutes=3),
+                now=self.live_at + timedelta(minutes=3),
+            )
+
+        after = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+        self.assertEqual(after, before)
 
     def publish_candidate_with_descendant(self, *, with_pull_request: bool = False):
         candidate_head = git(self.project_checkout, "rev-parse", "HEAD").stdout.strip()
@@ -416,9 +870,7 @@ class ClaimingContract(unittest.TestCase):
                             "mechanism": "review-code-change",
                             "verdict": "clean",
                             "candidate_revision": candidate_head,
-                            "comparison_base_revision": work["claim"]["candidate"][
-                                "base_revision"
-                            ],
+                            "comparison_base_revision": work["claim"]["candidate"]["base_revision"],
                             "observed_at": fixtures.TIMESTAMP,
                         },
                     ),
@@ -559,7 +1011,6 @@ class ClaimingContract(unittest.TestCase):
             ["pre_external_mutation", "candidate_published"],
         )
 
-
     def test_default_policy_remote_verifier_binds_github_repository_identity(self) -> None:
         git(
             self.project_checkout,
@@ -630,7 +1081,6 @@ class ClaimingContract(unittest.TestCase):
                 token="token-1",
                 candidate_head=HEAD,
             )
-
 
     def test_active_takeover_preserves_published_candidate_with_handoff_receipt(self) -> None:
         published, candidate_head = self.publish_candidate_with_descendant()
@@ -856,9 +1306,7 @@ class ClaimingContract(unittest.TestCase):
         self.assertEqual(reblocked_snapshot["views"]["blocked"], [self.work_id])
 
     def test_delivered_takeover_returns_active_with_historical_delivery(self) -> None:
-        published, candidate_head = self.publish_candidate_with_descendant(
-            with_pull_request=True
-        )
+        published, candidate_head = self.publish_candidate_with_descendant(with_pull_request=True)
         receipt_id = self.deliver_candidate(published, candidate_head)
         takeover = self.coordinator.takeover(
             self.work_id,
@@ -1051,6 +1499,979 @@ class ClaimingContract(unittest.TestCase):
             )
         after = git(None, "--git-dir", str(self.mailbox_remote), "rev-parse", "main").stdout.strip()
         self.assertEqual(after, before)
+
+    def test_delegation_uses_current_policy_acceptance_after_approval_tightens(self) -> None:
+        self.write_policy(evidence=EVIDENCE)
+        git(self.project_checkout, "add", ".atelier/policy.yaml")
+        git(
+            self.project_checkout,
+            "-c",
+            "user.name=Atelier Test",
+            "-c",
+            "user.email=atelier-test@invalid",
+            "commit",
+            "-m",
+            "tighten acceptance evidence",
+        )
+        git(self.project_checkout, "push", "origin", "HEAD:main")
+
+        claimed = self.claim()
+        invocation = self.delegated_invocation(claimed)
+
+        self.assertEqual(
+            [item["criterion"] for item in invocation["acceptance_requirements"]],
+            list(EVIDENCE),
+        )
+
+    def test_delegation_rejects_tracker_mutation_for_ready_and_blocked_results(self) -> None:
+        current = observation()
+        for terminal in ("ready_pr", "blocked"):
+            for transition in (
+                {"provider": "github", "ticket_id": "777", "mode": "manual", "state": "open"},
+                {
+                    "provider": "github",
+                    "ticket_id": "777",
+                    "mode": "automatic",
+                    "state": "closed",
+                },
+            ):
+                with self.subTest(terminal=terminal, transition=transition):
+                    result = {
+                        "terminal_state": terminal,
+                        "ticket": {"provider": "github"},
+                        "tracker_transition": transition,
+                    }
+                    with self.assertRaisesRegex(MailboxTransitionRejected, "tracker transition"):
+                        _require_tracker_transition(result, current)
+
+    def test_delegation_prepares_v2_invocation_and_records_blocked_receipt(self) -> None:
+        claimed = self.claim()
+        delegation = self.delegation()
+        invocation = delegation.prepare(
+            self.work_id,
+            self.fence(claimed),
+            approved_commit=self.approved_commit,
+            policy_target=self.policy_target(),
+            host_target=self.delegation_host_target(),
+            observation_path=self.observation_path,
+            observation_not_before=self.live_at,
+            checkpoint_invocation_path=self.root / "delegated-invocation.json",
+            observation_command=self.observation_command,
+            now=self.live_at + timedelta(seconds=30),
+        )
+        self.assertEqual(invocation["schema"], INVOCATION_SCHEMA)
+        self.assertEqual(invocation["capability"], CAPABILITY)
+        self.assertEqual(invocation["ticket"]["observation"], self.fresh_observation_digest())
+        self.assertEqual(
+            invocation["accepted_terminal_states"], ["ready_pr", "blocked", "requires_epic"]
+        )
+        checkpointed = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            claimed,
+            action="repository.candidate.create",
+            token="token-1",
+        )
+        result = {
+            "schema": RESULT_SCHEMA,
+            "capability": CAPABILITY,
+            "invocation_id": invocation["invocation_id"],
+            "terminal_state": "blocked",
+            "ticket": invocation["ticket"],
+            "repository": {
+                "identity": invocation["repository"]["identity"],
+                "base_ref": invocation["repository"]["base_ref"],
+                "base_sha": invocation["repository"]["base_sha"],
+            },
+            "tracker_transition": {
+                "provider": "github",
+                "ticket_id": invocation["ticket"]["id"],
+                "mode": "none",
+                "state": "open",
+                "observed_at": fixtures.TIMESTAMP,
+            },
+            "implementation_state": "local",
+            "candidate": None,
+            "handoff": {"transferable": False, "reason": "No published candidate exists."},
+            "checkpoint": {
+                "last_sequence": checkpointed.sequence,
+                "continuation_token": checkpointed.continuation_token,
+            },
+            "validation": [],
+            "reviews": [],
+            "feedback": None,
+            "authority_used": ["repository.candidate.create"],
+            "acceptance_evidence": [
+                {
+                    "criterion": item["criterion"],
+                    "required": item["required"],
+                    "evidence_category": item["evidence_category"],
+                    "stage": item["stage"],
+                    "candidate_sha": None,
+                    "deployed_sha": None,
+                    "environment": item["environment"],
+                    "url": item["url"],
+                    "source": None,
+                    "status": "missing",
+                }
+                for item in invocation["acceptance_requirements"]
+            ],
+            "unresolved_obligations": ["Resolve the implementation blocker."],
+            "blocking_reason": "The delegated worker could not publish a candidate.",
+            "next_action": "Planner decides whether to retry or revise the work.",
+        }
+        delegation.finalize(
+            self.work_id,
+            invocation,
+            result,
+            self.fence(checkpointed),
+            approved_commit=self.approved_commit,
+            policy_target=self.policy_target(),
+            host_target=self.delegation_host_target(),
+            observation_path=self.observation_path,
+            observation_not_before=self.live_at,
+            ended_at=self.live_at + timedelta(minutes=3),
+            now=self.live_at + timedelta(minutes=3),
+        )
+        checkout = self.mailbox_clone("delegated-blocked-read")
+        work, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="work",
+        )
+        receipt, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/receipts/{work['attempt_receipt_id']}.md",
+            frontmatter=True,
+            label="receipt",
+        )
+        self.assertEqual(work["status"], "blocked")
+        self.assertEqual(receipt["outcome"], "blocked")
+        self.assertEqual(receipt["unresolved_obligations"], result["unresolved_obligations"])
+        reconstruct_mailbox(checkout)
+
+    def test_delegation_accepts_v2_blocked_result_without_obligations(self) -> None:
+        claimed = self.claim()
+        fixture_delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        checkpointed = self.delegated_checkpoint(
+            fixture_delegation,
+            invocation,
+            claimed,
+            action="repository.candidate.create",
+            token="token-1",
+        )
+        result = self.blocked_result(invocation, checkpointed)
+        result["unresolved_obligations"] = []
+        self.assert_installed_result_valid_if_available(result)
+
+        fixture_delegation.finalize(
+            self.work_id,
+            invocation,
+            result,
+            self.fence(checkpointed),
+            approved_commit=self.approved_commit,
+            policy_target=self.policy_target(),
+            host_target=self.delegation_host_target(),
+            observation_path=self.observation_path,
+            observation_not_before=self.live_at,
+            ended_at=self.live_at + timedelta(minutes=3),
+            now=self.live_at + timedelta(minutes=3),
+        )
+
+        checkout = self.mailbox_clone("installed-v2-blocked-read")
+        work, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="work",
+        )
+        receipt, body = _read_yaml(
+            checkout / f"work/{self.work_id}/receipts/{work['attempt_receipt_id']}.md",
+            frontmatter=True,
+            label="receipt",
+        )
+        self.assertEqual(work["status"], "blocked")
+        self.assertEqual(receipt["unresolved_obligations"], [])
+        self.assertEqual(body, result["blocking_reason"])
+        reconstruct_mailbox(checkout)
+
+    def test_delegation_records_v2_requires_epic_result(self) -> None:
+        claimed = self.claim()
+        fixture_delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        result = self.blocked_result(invocation, claimed, authority_used=[])
+        result.update(
+            {
+                "terminal_state": "requires_epic",
+                "implementation_state": "none",
+                "candidate": None,
+                "handoff": {
+                    "transferable": False,
+                    "reason": "Whole epic requires implement-epic",
+                },
+                "unresolved_obligations": [],
+                "blocking_reason": None,
+                "next_action": "Return the work to the planner for epic decomposition.",
+            }
+        )
+        self.assert_installed_result_valid_if_available(result)
+
+        fixture_delegation.finalize(
+            self.work_id,
+            invocation,
+            result,
+            self.fence(claimed),
+            approved_commit=self.approved_commit,
+            policy_target=self.policy_target(),
+            host_target=self.delegation_host_target(),
+            observation_path=self.observation_path,
+            observation_not_before=self.live_at,
+            ended_at=self.live_at + timedelta(minutes=3),
+            now=self.live_at + timedelta(minutes=3),
+        )
+
+        checkout = self.mailbox_clone("installed-v2-requires-epic-read")
+        work, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="work",
+        )
+        receipt, body = _read_yaml(
+            checkout / f"work/{self.work_id}/receipts/{work['attempt_receipt_id']}.md",
+            frontmatter=True,
+            label="receipt",
+        )
+        self.assertEqual(work["status"], "blocked")
+        self.assertEqual(receipt["outcome"], "blocked")
+        self.assertEqual(body, result["handoff"]["reason"])
+        reconstruct_mailbox(checkout)
+
+    def test_delegation_rejects_blocked_tracker_mutation_before_receipt(self) -> None:
+        claimed = self.claim()
+        delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        checkpointed = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            claimed,
+            action="repository.candidate.create",
+            token="token-1",
+        )
+        result = self.blocked_result(
+            invocation, checkpointed, tracker_mode="manual", tracker_state="closed"
+        )
+        before = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+
+        with self.assertRaisesRegex(MailboxTransitionRejected, "tracker transition"):
+            delegation.finalize(
+                self.work_id,
+                invocation,
+                result,
+                self.fence(checkpointed),
+                approved_commit=self.approved_commit,
+                policy_target=self.policy_target(),
+                host_target=self.delegation_host_target(),
+                observation_path=self.observation_path,
+                observation_not_before=self.live_at,
+                ended_at=self.live_at + timedelta(minutes=3),
+                now=self.live_at + timedelta(minutes=3),
+            )
+
+        after = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+        self.assertEqual(after, before)
+
+    def test_delegation_rejects_altered_invocation_at_finalization(self) -> None:
+        claimed = self.claim()
+        delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        checkpointed = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            claimed,
+            action="repository.candidate.create",
+            token="token-1",
+        )
+        result = self.blocked_result(invocation, checkpointed)
+        altered = {**invocation, "validation": ["just test"]}
+        before = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+
+        with self.assertRaisesRegex(DelegationError, "sealed digest"):
+            delegation.finalize(
+                self.work_id,
+                altered,
+                result,
+                self.fence(checkpointed),
+                approved_commit=self.approved_commit,
+                policy_target=self.policy_target(),
+                host_target=self.delegation_host_target(),
+                observation_path=self.observation_path,
+                observation_not_before=self.live_at,
+                ended_at=self.live_at + timedelta(minutes=3),
+                now=self.live_at + timedelta(minutes=3),
+            )
+
+        after = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+        self.assertEqual(after, before)
+
+    def test_delegation_normalizes_unavailable_blocked_review(self) -> None:
+        claimed = self.claim()
+        delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        candidate = {
+            "repository": invocation["repository"]["identity"],
+            "remote_url": invocation["repository"]["remote_url"],
+            "remote_ref": "refs/heads/scott/blocked-candidate",
+            "base_sha": invocation["repository"]["base_sha"],
+            "head_sha": HEAD,
+        }
+        created = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            claimed,
+            action="repository.candidate.push",
+            token="token-1",
+            candidate=candidate,
+        )
+        published = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            created,
+            action="repository.candidate.push",
+            token="token-2",
+            phase="candidate_published",
+            candidate=candidate,
+        )
+        reviews = [
+            {
+                "name": "review-code-change",
+                "outcome": "unavailable",
+                "candidate_sha": HEAD,
+                "observed_at": fixtures.TIMESTAMP,
+            },
+        ]
+        terminal_candidate = {
+            **candidate,
+            "publication": {"kind": "ordinary", "pull_requests": []},
+        }
+        result = self.blocked_result(
+            invocation,
+            published,
+            reviews=reviews,
+            candidate=terminal_candidate,
+            authority_used=["repository.candidate.push"],
+        )
+        delegation.finalize(
+            self.work_id,
+            invocation,
+            result,
+            self.fence(published),
+            approved_commit=self.approved_commit,
+            policy_target=self.policy_target(),
+            host_target=self.delegation_host_target(),
+            observation_path=self.observation_path,
+            observation_not_before=self.live_at,
+            ended_at=self.live_at + timedelta(minutes=3),
+            now=self.live_at + timedelta(minutes=3),
+        )
+
+        checkout = self.mailbox_clone("delegated-review-read")
+        work, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="work",
+        )
+        receipt, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/receipts/{work['attempt_receipt_id']}.md",
+            frontmatter=True,
+            label="receipt",
+        )
+        self.assertEqual(
+            [review["verdict"] for review in receipt["reviews"]],
+            ["blocked"],
+        )
+        self.assertEqual(receipt["reviews"][0]["mechanism"], "review-code-change")
+        reconstruct_mailbox(checkout)
+
+    def test_delegation_denies_stale_checkpoint_without_mailbox_mutation(self) -> None:
+        claimed = self.claim()
+        delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        request = self.delegated_request(invocation, claimed, action="repository.candidate.create")
+        request["continuation_token"] = "stale-token"
+
+        self.assert_checkpoint_denied_without_mutation(delegation, invocation, request)
+
+    def test_delegation_denies_wrong_sequence_with_current_token_without_mutation(self) -> None:
+        claimed = self.claim()
+        delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        request = self.delegated_request(invocation, claimed, action="repository.candidate.create")
+        request["sequence"] += 1
+
+        self.assert_checkpoint_denied_without_mutation(delegation, invocation, request)
+
+    def test_delegation_denies_altered_invocation_without_mutation(self) -> None:
+        claimed = self.claim()
+        delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        altered = {**invocation, "validation": ["just test"]}
+        request = self.delegated_request(altered, claimed, action="repository.candidate.create")
+
+        response = self.assert_checkpoint_denied_without_mutation(delegation, altered, request)
+        self.assertIn("sealed digest", response["reason"])
+
+    def test_delegation_denies_foreign_checkpoint_candidate_without_mutation(self) -> None:
+        claimed = self.claim()
+        delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        candidate = {
+            "repository": invocation["repository"]["identity"],
+            "remote_url": "https://github.com/foreign/project.git",
+            "remote_ref": "refs/heads/scott/foreign-candidate",
+            "base_sha": invocation["repository"]["base_sha"],
+            "head_sha": HEAD,
+        }
+        request = self.delegated_request(
+            invocation,
+            claimed,
+            action="repository.candidate.push",
+            candidate=candidate,
+        )
+
+        response = self.assert_checkpoint_denied_without_mutation(delegation, invocation, request)
+        self.assertIn("foreign", response["reason"])
+
+    @unittest.skipUnless(
+        (INSTALLED_TICKET_SKILL / "references/delegated-execution/validate.py").is_file(),
+        "exact installed Agent Scripts v2 bundle is unavailable",
+    )
+    def test_checkpoint_command_services_one_request_with_installed_v2_bundle(self) -> None:
+        claimed = self.claim()
+        github_remote = "git@github.com:example/project-1.git"
+        git(
+            self.project_checkout,
+            "config",
+            f"url.{self.project_remote}.insteadOf",
+            github_remote,
+        )
+        installed_policy_target = PolicyTarget(
+            checkout=self.project_checkout,
+            remote=github_remote,
+            canonical_ref="refs/heads/main",
+            path=".atelier/policy.yaml",
+        )
+        delegation = DelegationCoordinator(
+            ClaimCoordinator(str(self.mailbox_remote), "main")
+        )
+        invocation = delegation.prepare(
+            self.work_id,
+            self.fence(claimed),
+            approved_commit=self.approved_commit,
+            policy_target=installed_policy_target,
+            host_target=self.installed_host_target(),
+            observation_path=self.observation_path,
+            observation_not_before=self.live_at,
+            checkpoint_invocation_path=self.root / "installed-delegated-invocation.json",
+            observation_command=self.observation_command,
+            now=self.live_at + timedelta(seconds=30),
+        )
+        request = self.delegated_request(
+            invocation,
+            claimed,
+            action="repository.candidate.create",
+        )
+
+        completed = subprocess.run(
+            invocation["checkpoint"]["command"],
+            input=json.dumps(request),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        response = json.loads(completed.stdout)
+        self.assertEqual(response["decision"], "allow", response)
+        self.assertEqual(response["request_sequence"], 1)
+        checkout = self.mailbox_clone("checkpoint-command-read")
+        work, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="work",
+        )
+        self.assertEqual(work["claim"]["checkpoint"]["sequence"], 1)
+
+    def test_delegation_denies_checkpoint_after_current_policy_tightens(self) -> None:
+        claimed = self.claim()
+        delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        request = self.delegated_request(
+            invocation,
+            claimed,
+            action="repository.candidate.create",
+        )
+        self.commit_policy_change(evidence=EVIDENCE)
+
+        response = self.assert_checkpoint_denied_without_mutation(delegation, invocation, request)
+
+        self.assertIn("stale", response["reason"])
+
+    def test_delegation_rejects_terminal_result_after_current_policy_tightens(self) -> None:
+        claimed = self.claim()
+        delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        checkpointed = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            claimed,
+            action="repository.candidate.create",
+            token="token-1",
+        )
+        result = self.blocked_result(invocation, checkpointed)
+        self.commit_policy_change(evidence=EVIDENCE)
+        before = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+
+        with self.assertRaisesRegex(MailboxTransitionRejected, "stale"):
+            delegation.finalize(
+                self.work_id,
+                invocation,
+                result,
+                self.fence(checkpointed),
+                approved_commit=self.approved_commit,
+                policy_target=self.policy_target(),
+                host_target=self.delegation_host_target(),
+                observation_path=self.observation_path,
+                observation_not_before=self.live_at,
+                ended_at=self.live_at + timedelta(minutes=3),
+                now=self.live_at + timedelta(minutes=3),
+            )
+
+        after = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+        self.assertEqual(after, before)
+
+    def test_blocked_result_rejects_same_head_on_unauthorized_ref_without_prior(self) -> None:
+        self.assert_blocked_ref_substitution_rejected(with_prior_candidate=False)
+
+    def test_blocked_result_rejects_same_head_on_unauthorized_ref_after_prior(self) -> None:
+        self.assert_blocked_ref_substitution_rejected(with_prior_candidate=True)
+
+    def test_blocked_result_recovers_unacknowledged_pushed_candidate(self) -> None:
+        claimed = self.claim()
+        delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        candidate = {
+            "repository": invocation["repository"]["identity"],
+            "remote_url": invocation["repository"]["remote_url"],
+            "remote_ref": "refs/heads/scott/recover-pushed-candidate",
+            "base_sha": invocation["repository"]["base_sha"],
+            "head_sha": HEAD,
+        }
+        pushed = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            claimed,
+            action="repository.candidate.push",
+            token="token-1",
+            candidate=candidate,
+        )
+        terminal_candidate = {
+            **candidate,
+            "publication": {"kind": "ordinary", "pull_requests": []},
+        }
+        result = self.blocked_result(
+            invocation,
+            pushed,
+            candidate=terminal_candidate,
+            authority_used=["repository.candidate.push"],
+        )
+
+        delegation.finalize(
+            self.work_id,
+            invocation,
+            result,
+            self.fence(pushed),
+            approved_commit=self.approved_commit,
+            policy_target=self.policy_target(),
+            host_target=self.delegation_host_target(),
+            observation_path=self.observation_path,
+            observation_not_before=self.live_at,
+            ended_at=self.live_at + timedelta(minutes=3),
+            now=self.live_at + timedelta(minutes=3),
+        )
+
+        checkout = self.mailbox_clone("recovered-pushed-candidate-read")
+        work, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="work",
+        )
+        receipt, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/receipts/{work['attempt_receipt_id']}.md",
+            frontmatter=True,
+            label="receipt",
+        )
+        self.assertEqual(work["claim"]["candidate"]["head_revision"], HEAD)
+        self.assertEqual(receipt["candidate"]["head_revision"], HEAD)
+        reconstruct_mailbox(checkout)
+
+    def test_blocked_result_replaces_older_candidate_with_latest_verified_push(self) -> None:
+        self.coordinator = ClaimCoordinator(
+            str(self.mailbox_remote),
+            "main",
+            candidate_verifier=lambda candidate: True,
+            capability_verifier=lambda target: True,
+            policy_remote_verifier=self.policy_remote_matches,
+        )
+        claimed = self.claim()
+        delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        old_candidate = {
+            "repository": invocation["repository"]["identity"],
+            "remote_url": invocation["repository"]["remote_url"],
+            "remote_ref": "refs/heads/scott/older-candidate",
+            "base_sha": invocation["repository"]["base_sha"],
+            "head_sha": HEAD,
+        }
+        old_push = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            claimed,
+            action="repository.candidate.push",
+            token="token-1",
+            candidate=old_candidate,
+        )
+        old_published = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            old_push,
+            action="repository.candidate.push",
+            token="token-2",
+            phase="candidate_published",
+            candidate=old_candidate,
+        )
+        latest_head = "c" * 40
+        latest_candidate = {
+            **old_candidate,
+            "remote_ref": "refs/heads/scott/latest-candidate",
+            "head_sha": latest_head,
+        }
+        latest_push = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            old_published,
+            action="repository.candidate.push",
+            token="token-3",
+            candidate=latest_candidate,
+        )
+        result = self.blocked_result(
+            invocation,
+            latest_push,
+            candidate={
+                **latest_candidate,
+                "publication": {"kind": "ordinary", "pull_requests": []},
+            },
+            authority_used=["repository.candidate.push"],
+        )
+
+        delegation.finalize(
+            self.work_id,
+            invocation,
+            result,
+            self.fence(latest_push),
+            approved_commit=self.approved_commit,
+            policy_target=self.policy_target(),
+            host_target=self.delegation_host_target(),
+            observation_path=self.observation_path,
+            observation_not_before=self.live_at,
+            ended_at=self.live_at + timedelta(minutes=3),
+            now=self.live_at + timedelta(minutes=3),
+        )
+
+        checkout = self.mailbox_clone("latest-pushed-candidate-read")
+        work, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="work",
+        )
+        self.assertEqual(work["claim"]["candidate"]["head_revision"], latest_head)
+        reconstruct_mailbox(checkout)
+
+    def test_delegation_delivers_one_exact_ready_pull_request(self) -> None:
+        claimed = self.claim()
+        self.coordinator = ClaimCoordinator(
+            str(self.mailbox_remote),
+            "main",
+            candidate_verifier=lambda value: _candidate_remote_reachable(
+                {**value, "remote_url": str(self.project_remote)}
+            ),
+            capability_verifier=lambda target: True,
+            policy_remote_verifier=self.policy_remote_matches,
+        )
+        delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        candidate_head = git(self.project_checkout, "rev-parse", "HEAD").stdout.strip()
+        candidate_ref = "refs/heads/scott/delegated-candidate"
+        git(self.project_checkout, "push", "origin", f"{candidate_head}:{candidate_ref}")
+        candidate = {
+            "repository": self.repository,
+            "remote_url": invocation["repository"]["remote_url"],
+            "remote_ref": candidate_ref,
+            "base_sha": invocation["repository"]["base_sha"],
+            "head_sha": candidate_head,
+        }
+        push = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            claimed,
+            action="repository.candidate.push",
+            token="token-1",
+            candidate=candidate,
+        )
+        published = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            push,
+            action="repository.candidate.push",
+            token="token-2",
+            phase="candidate_published",
+            candidate=candidate,
+        )
+        pull_request = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            published,
+            action="pull_request.create",
+            token="token-3",
+            candidate=candidate,
+        )
+        pull_request_url = "https://github.com/example/project-1/pull/900"
+        live = observation(with_pull_request=True)
+        live["observed_at"] = (
+            (self.live_at + timedelta(minutes=3)).isoformat().replace("+00:00", "Z")
+        )
+        live["pull_request"]["url"] = pull_request_url
+        live["pull_request"]["base"].update(
+            ref=invocation["repository"]["base_ref"],
+            sha=invocation["repository"]["base_sha"],
+        )
+        live["pull_request"]["head"].update(ref=candidate_ref, sha=candidate_head)
+        write_json(self.observation_path, live)
+        result = {
+            "schema": RESULT_SCHEMA,
+            "capability": CAPABILITY,
+            "invocation_id": invocation["invocation_id"],
+            "terminal_state": "ready_pr",
+            "ticket": invocation["ticket"],
+            "repository": {
+                "identity": invocation["repository"]["identity"],
+                "base_ref": invocation["repository"]["base_ref"],
+                "base_sha": invocation["repository"]["base_sha"],
+            },
+            "tracker_transition": {
+                "provider": "github",
+                "ticket_id": invocation["ticket"]["id"],
+                "mode": "none",
+                "state": "open",
+                "observed_at": fixtures.TIMESTAMP,
+            },
+            "implementation_state": "published",
+            "candidate": {
+                **candidate,
+                "publication": {
+                    "kind": "ordinary",
+                    "pull_requests": [
+                        {
+                            "id": "900",
+                            "url": pull_request_url,
+                            "base_ref": invocation["repository"]["base_ref"],
+                            "base_sha": invocation["repository"]["base_sha"],
+                            "head_ref": candidate_ref,
+                            "head_sha": candidate_head,
+                            "state": "open",
+                        }
+                    ],
+                },
+            },
+            "handoff": {"transferable": True, "reason": None},
+            "checkpoint": {
+                "last_sequence": pull_request.sequence,
+                "continuation_token": pull_request.continuation_token,
+            },
+            "validation": [
+                {
+                    "name": command,
+                    "outcome": "passed",
+                    "candidate_sha": candidate_head,
+                    "observed_at": fixtures.TIMESTAMP,
+                }
+                for command in invocation["validation"]
+            ],
+            "reviews": [
+                {
+                    "name": "review-code-change",
+                    "outcome": "passed",
+                    "candidate_sha": candidate_head,
+                    "observed_at": fixtures.TIMESTAMP,
+                }
+            ],
+            "feedback": {
+                "unresolved_material_count": 0,
+                "candidate_sha": candidate_head,
+                "observed_at": fixtures.TIMESTAMP,
+            },
+            "authority_used": ["repository.candidate.push", "pull_request.create"],
+            "acceptance_evidence": self.acceptance_records(invocation, candidate_head),
+            "unresolved_obligations": [],
+            "blocking_reason": None,
+            "next_action": "Atelier validates and presents the candidate for operator acceptance.",
+        }
+        def finalize(reported_result: dict[str, Any]) -> None:
+            delegation.finalize(
+                self.work_id,
+                invocation,
+                reported_result,
+                self.fence(pull_request),
+                approved_commit=self.approved_commit,
+                policy_target=self.policy_target(),
+                host_target=self.delegation_host_target(),
+                observation_path=self.observation_path,
+                observation_not_before=self.live_at + timedelta(minutes=3),
+                ended_at=self.live_at + timedelta(minutes=4),
+                now=self.live_at + timedelta(minutes=4),
+            )
+
+        before_rejection = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+        for pr_field, live_section, live_field, substituted in (
+            ("head_ref", "head", "ref", "refs/heads/substituted"),
+            ("head_sha", "head", "sha", "c" * 40),
+            ("base_sha", "base", "sha", "d" * 40),
+        ):
+            substituted_result = json.loads(json.dumps(result))
+            substituted_live = json.loads(json.dumps(live))
+            reported_pr = substituted_result["candidate"]["publication"]["pull_requests"][0]
+            reported_pr[pr_field] = substituted
+            substituted_live["pull_request"][live_section][live_field] = substituted
+            write_json(self.observation_path, substituted_live)
+            with self.assertRaisesRegex(
+                MailboxTransitionRejected,
+                "terminal pull request does not identify the acknowledged candidate",
+            ):
+                finalize(substituted_result)
+            self.assertEqual(
+                git(
+                    None,
+                    "--git-dir",
+                    str(self.mailbox_remote),
+                    "rev-parse",
+                    "main",
+                ).stdout.strip(),
+                before_rejection,
+            )
+        foreign_head = json.loads(json.dumps(live))
+        foreign_head["pull_request"]["head"]["repository"] = "foreign/fork"
+        write_json(self.observation_path, foreign_head)
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "live pull request identity is not the terminal candidate",
+        ):
+            finalize(result)
+        self.assertEqual(
+            git(
+                None,
+                "--git-dir",
+                str(self.mailbox_remote),
+                "rev-parse",
+                "main",
+            ).stdout.strip(),
+            before_rejection,
+        )
+        write_json(self.observation_path, live)
+
+        foreign_review = json.loads(json.dumps(result))
+        foreign_review["reviews"][0]["name"] = "generic-review"
+        self.assert_installed_result_valid_if_available(foreign_review)
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "review evidence uses a mechanism Atelier cannot represent",
+        ):
+            finalize(foreign_review)
+        self.assertEqual(
+            git(
+                None,
+                "--git-dir",
+                str(self.mailbox_remote),
+                "rev-parse",
+                "main",
+            ).stdout.strip(),
+            before_rejection,
+        )
+
+        finalize(result)
+        checkout = self.mailbox_clone("delegated-delivered-read")
+        work, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="work",
+        )
+        receipt, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/receipts/{work['delivery_receipt_id']}.md",
+            frontmatter=True,
+            label="receipt",
+        )
+        self.assertEqual(work["status"], "delivered")
+        self.assertEqual(work["claim"]["candidate"]["pull_request"], pull_request_url)
+        self.assertEqual(receipt["candidate"], work["claim"]["candidate"])
+        reconstruct_mailbox(checkout)
+
+    def fresh_observation_digest(self) -> str:
+        checkout = self.mailbox_clone("delegated-digest-read")
+        work, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="work",
+        )
+        return work["claim"]["ticket_observation_digest"] if work["claim"] else ""
 
     def test_cli_generates_a_strict_durable_identifier(self) -> None:
         completed = subprocess.run(

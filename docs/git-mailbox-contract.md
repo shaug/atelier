@@ -416,6 +416,7 @@ claim:
   approved_commit: 0123456789abcdef0123456789abcdef01234567
   policy_commit: 0123456789abcdef0123456789abcdef01234567
   ticket_observation_digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  invocation_digest: null
   claimed_at: 2026-07-25T12:05:00Z
   host: codex
   checkpoint:
@@ -424,6 +425,11 @@ claim:
     authorizations: []
   candidate: null
 ```
+
+Delegation preparation changes `invocation_digest` exactly once from `null` to
+the SHA-256 digest of the complete canonical delegated invocation. The digest is
+immutable thereafter and every checkpoint and terminal result must reproduce
+the sealed invocation before Atelier may consume authority or record a receipt.
 
 Every entry in `checkpoint.authorizations` has this complete shape:
 
@@ -434,12 +440,13 @@ phase: pre_external_mutation
 action: repository.candidate.create
 proposed_effect_digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 candidate_head: null
+candidate_remote_ref: null
 acknowledged_candidate_head: null
 recorded_at: 2026-07-25T12:06:00Z
 ```
 
 `phase` is `pre_external_mutation` or `candidate_published`; `action` uses the
-Agent Scripts v1 vocabulary. SHA fields are exact candidate revisions or `null`
+Agent Scripts v2 vocabulary. SHA fields are exact candidate revisions or `null`
 when the action has no candidate. All other fields are required. Entries are in
 strictly increasing sequence order and are append-only. When transferable
 implementation state first exists, the worker updates the claim only after
@@ -464,9 +471,10 @@ reachable from `remote_ref` on the verified declared remote. A local-only SHA,
 an unverified push, or a mutable branch name without the exact remote ref and
 head is not a candidate.
 
-After every candidate push, the worker verifies remote reachability, publishes
-the new exact head in the claim, and verifies that mailbox transition before
-relying on that candidate for review, delivery, or another external mutation.
+After every candidate push, the worker normally verifies remote reachability,
+publishes the new exact head in the claim, and verifies that mailbox transition
+before relying on that candidate for review, delivery, or another external
+mutation.
 
 Claims do not expire automatically.
 
@@ -475,19 +483,27 @@ pre-mutation request must name the current claim, sequence, and continuation
 token. Atelier fetches and reevaluates current claim, revision, policy, ticket,
 candidate, and authority. On allowance, one atomic commit increments `sequence`,
 rotates `continuation_token`, and appends an authorization entry containing the
-invocation ID, phase, action, proposed-effect digest, exact candidate head,
-acknowledged candidate head, and recorded time. Atelier pushes and reads that
+invocation ID, phase, action, proposed-effect digest, exact candidate head and
+remote ref, acknowledged candidate head, and recorded time. Atelier pushes and
 exact checkpoint back before returning `allow`. Denial echoes the prior token
 and does not advance the checkpoint or ledger. A consumed sequence or token
 cannot be replayed, and the ledger is never truncated or rewritten.
 
 `candidate_published` uses the same compare-and-swap transition while also
 recording the exact remotely reachable candidate. An unavailable or ambiguous
-mailbox outcome does not acknowledge the candidate. Before accepting any
-terminal result, Atelier requires its sequence and continuation token to equal
-the current claim-ledger tail. It also requires the terminal `authority_used`
-set to equal the allowed `pre_external_mutation` actions in that ledger; either
-under-reporting or an unrecorded action blocks the result.
+mailbox outcome does not acknowledge the candidate for further mutation. If the
+push succeeded but that acknowledgement transition failed, a terminal blocked
+result may recover the exact candidate only when its identity matches the sealed
+invocation, the ledger tail names its exact pre-mutation push head and remote ref,
+remote reachability is reverified, and the blocked receipt binds the candidate in the
+same atomic mailbox transition. That receipt becomes the verified transferable
+handoff for a later claim.
+
+Before accepting any terminal result, Atelier requires its sequence and
+continuation token to equal the current claim-ledger tail. It also requires the
+terminal `authority_used` set to equal the allowed `pre_external_mutation`
+actions in that ledger; either under-reporting or an unrecorded action blocks the
+result.
 
 A worker releases a claim explicitly when it stops without delivering the work.
 An operator or planner may perform an explicit takeover when the prior worker

@@ -153,9 +153,7 @@ def candidate(repository: str, number: int) -> dict[str, Any]:
         "remote_ref": f"refs/heads/scott/work-{number}",
         "base_revision": SHA_A,
         "head_revision": SHA_B,
-        "pull_request": (
-            f"https://github.com/{repository.removeprefix('github:')}/pull/{number}"
-        ),
+        "pull_request": (f"https://github.com/{repository.removeprefix('github:')}/pull/{number}"),
         "workspace_id": None,
         "published_at": TIMESTAMP,
     }
@@ -172,6 +170,7 @@ def claim(repository: str, number: int, *, with_candidate: bool) -> dict[str, An
                 "action": "repository.candidate.push",
                 "proposed_effect_digest": DIGEST,
                 "candidate_head": SHA_B,
+                "candidate_remote_ref": f"refs/heads/scott/work-{number}",
                 "acknowledged_candidate_head": None,
                 "recorded_at": TIMESTAMP,
             },
@@ -182,6 +181,7 @@ def claim(repository: str, number: int, *, with_candidate: bool) -> dict[str, An
                 "action": "repository.candidate.push",
                 "proposed_effect_digest": DIGEST,
                 "candidate_head": SHA_B,
+                "candidate_remote_ref": f"refs/heads/scott/work-{number}",
                 "acknowledged_candidate_head": SHA_B,
                 "recorded_at": TIMESTAMP,
             },
@@ -192,6 +192,7 @@ def claim(repository: str, number: int, *, with_candidate: bool) -> dict[str, An
                 "action": "pull_request.create",
                 "proposed_effect_digest": DIGEST,
                 "candidate_head": SHA_B,
+                "candidate_remote_ref": f"refs/heads/scott/work-{number}",
                 "acknowledged_candidate_head": None,
                 "recorded_at": TIMESTAMP,
             },
@@ -206,6 +207,7 @@ def claim(repository: str, number: int, *, with_candidate: bool) -> dict[str, An
         "approved_commit": SHA_A,
         "policy_commit": SHA_A,
         "ticket_observation_digest": DIGEST,
+        "invocation_digest": None,
         "claimed_at": TIMESTAMP,
         "host": "codex",
         "checkpoint": {
@@ -370,9 +372,7 @@ class MailboxFixture:
         if status != "draft":
             work["approval"] = approval(repository)
         if status in {"active", "blocked", "delivered"}:
-            work["claim"] = claim(
-                repository, number, with_candidate=status == "delivered"
-            )
+            work["claim"] = claim(repository, number, with_candidate=status == "delivered")
         self.messages[work_id] = {}
         self.receipts[work_id] = {}
         if status == "blocked":
@@ -515,7 +515,7 @@ class MailboxContract(unittest.TestCase):
                 "material_fields": ["body", "state", "relationships"],
             },
             "execution": {
-                "capability": "agent-scripts.implement-ticket/delegated-execution/v1",
+                "capability": "agent-scripts.implement-ticket/delegated-execution/v2",
                 "delivery_outcome": "ready_pr",
                 "parallel_assignments": False,
             },
@@ -530,9 +530,7 @@ class MailboxContract(unittest.TestCase):
         self.assertEqual(path.read_bytes(), before)
         policy["authority"]["allow"].append("merge")
         write_yaml(path, policy)
-        with self.assertRaisesRegex(
-            MAILBOX.MailboxValidationError, "unsupported value"
-        ):
+        with self.assertRaisesRegex(MAILBOX.MailboxValidationError, "unsupported value"):
             MAILBOX.validate_project_policy(path)
         policy["authority"]["allow"] = list(AUTHORITY)
         policy["execution"]["parallel_assignments"] = 0
@@ -555,26 +553,18 @@ class MailboxContract(unittest.TestCase):
         policy["mailbox"]["remote"] = "https://user:secret@github.com/example/mailbox.git"
         write_yaml(path, policy)
         before = path.read_bytes()
-        with self.assertRaisesRegex(
-            MAILBOX.MailboxValidationError, "remote-credentials"
-        ):
+        with self.assertRaisesRegex(MAILBOX.MailboxValidationError, "remote-credentials"):
             MAILBOX.validate_project_policy(path)
         self.assertEqual(path.read_bytes(), before)
         policy["mailbox"]["remote"] = "git@github.com:example/mailbox.git"
         policy["repository"]["identity"] = "github:./.."
         write_yaml(path, policy)
-        with self.assertRaisesRegex(
-            MAILBOX.MailboxValidationError, "repository-identity"
-        ):
+        with self.assertRaisesRegex(MAILBOX.MailboxValidationError, "repository-identity"):
             MAILBOX.validate_project_policy(path)
         policy["repository"]["identity"] = repository
-        policy["mailbox"]["remote"] = (
-            "https://github.com/example/mailbox.git?access_token=secret"
-        )
+        policy["mailbox"]["remote"] = "https://github.com/example/mailbox.git?access_token=secret"
         write_yaml(path, policy)
-        with self.assertRaisesRegex(
-            MAILBOX.MailboxValidationError, "remote-credentials"
-        ):
+        with self.assertRaisesRegex(MAILBOX.MailboxValidationError, "remote-credentials"):
             MAILBOX.validate_project_policy(path)
 
     def test_fresh_clones_reconstruct_all_views_identically(self) -> None:
@@ -597,9 +587,7 @@ class MailboxContract(unittest.TestCase):
         active = self.fixture.add_work(3, "active")
         blocked = self.fixture.add_work(4, "blocked")
         delivered = self.fixture.add_work(5, "delivered")
-        readiness = {
-            ready: {"policy": True, "ticket": True, "capability": True}
-        }
+        readiness = {ready: {"policy": True, "ticket": True, "capability": True}}
         git_run(self.root, "init", "-b", "main")
         git_run(self.root, "config", "user.name", "Atelier Contract")
         git_run(self.root, "config", "user.email", "atelier@example.invalid")
@@ -871,9 +859,9 @@ class MailboxContract(unittest.TestCase):
         self.fixture = MailboxFixture(self.root)
         delivered = self.fixture.add_work(2, "delivered")
         receipt_id = self.fixture.works[delivered]["delivery_receipt_id"]
-        self.fixture.receipts[delivered][receipt_id]["validation"][0][
-            "candidate_revision"
-        ] = "d" * 40
+        self.fixture.receipts[delivered][receipt_id]["validation"][0]["candidate_revision"] = (
+            "d" * 40
+        )
         self.fixture.write_work(delivered)
         self.assert_invalid("validation-candidate")
 
@@ -921,6 +909,7 @@ class MailboxContract(unittest.TestCase):
                 "action": "pull_request.create",
                 "proposed_effect_digest": DIGEST,
                 "candidate_head": "d" * 40,
+                "candidate_remote_ref": work["claim"]["candidate"]["remote_ref"],
                 "acknowledged_candidate_head": None,
                 "recorded_at": TIMESTAMP,
             }
@@ -974,6 +963,7 @@ class MailboxContract(unittest.TestCase):
                     "action": "repository.candidate.push",
                     "proposed_effect_digest": DIGEST,
                     "candidate_head": next_head,
+                    "candidate_remote_ref": work["claim"]["candidate"]["remote_ref"],
                     "acknowledged_candidate_head": None,
                     "recorded_at": TIMESTAMP,
                 },
@@ -984,6 +974,7 @@ class MailboxContract(unittest.TestCase):
                     "action": "repository.candidate.push",
                     "proposed_effect_digest": DIGEST,
                     "candidate_head": next_head,
+                    "candidate_remote_ref": work["claim"]["candidate"]["remote_ref"],
                     "acknowledged_candidate_head": next_head,
                     "recorded_at": TIMESTAMP,
                 },
@@ -1153,9 +1144,7 @@ class MailboxContract(unittest.TestCase):
         work["claim"] = None
         work["blocking_message_id"] = None
         work["attempt_receipt_id"] = None
-        self.fixture.receipts[work_id][receipt_id]["mutation_ownership"] = (
-            "relinquished"
-        )
+        self.fixture.receipts[work_id][receipt_id]["mutation_ownership"] = "relinquished"
         self.fixture.write_work(work_id)
 
         self.assert_invalid("blocked-ownership")
@@ -1163,9 +1152,7 @@ class MailboxContract(unittest.TestCase):
     def test_delivered_receipt_rejects_failed_validation(self) -> None:
         work_id = self.fixture.add_work(1, "delivered")
         receipt_id = self.fixture.works[work_id]["delivery_receipt_id"]
-        self.fixture.receipts[work_id][receipt_id]["validation"][0]["outcome"] = (
-            "failed"
-        )
+        self.fixture.receipts[work_id][receipt_id]["validation"][0]["outcome"] = "failed"
         self.fixture.write_work(work_id)
 
         self.assert_invalid("delivered-receipt")
@@ -1273,9 +1260,7 @@ class MailboxContract(unittest.TestCase):
         receipt_id = work["delivery_receipt_id"]
         invalid_timestamp = "2026-07-27 12:00:00+00:00"
         work["claim"]["candidate"]["published_at"] = invalid_timestamp
-        self.fixture.receipts[work_id][receipt_id]["candidate"][
-            "published_at"
-        ] = invalid_timestamp
+        self.fixture.receipts[work_id][receipt_id]["candidate"]["published_at"] = invalid_timestamp
         self.fixture.write_work(work_id)
         self.assert_invalid("schema-one-of")
 
@@ -1287,9 +1272,7 @@ class MailboxContract(unittest.TestCase):
         receipt_id = work["delivery_receipt_id"]
         mismatched_remote = "git@github.com:another/project.git"
         work["claim"]["candidate"]["remote_url"] = mismatched_remote
-        self.fixture.receipts[work_id][receipt_id]["candidate"][
-            "remote_url"
-        ] = mismatched_remote
+        self.fixture.receipts[work_id][receipt_id]["candidate"]["remote_url"] = mismatched_remote
         self.fixture.write_work(work_id)
         self.assert_invalid("candidate-remote-url")
 
@@ -1316,9 +1299,9 @@ class MailboxContract(unittest.TestCase):
                 work = self.fixture.works[work_id]
                 receipt_id = work["delivery_receipt_id"]
                 work["claim"]["candidate"]["workspace_id"] = machine_path
-                self.fixture.receipts[work_id][receipt_id]["candidate"][
-                    "workspace_id"
-                ] = machine_path
+                self.fixture.receipts[work_id][receipt_id]["candidate"]["workspace_id"] = (
+                    machine_path
+                )
                 self.fixture.write_work(work_id)
                 self.assert_invalid("schema-one-of")
 
@@ -1354,18 +1337,14 @@ class MailboxContract(unittest.TestCase):
         second_project["policy"]["repository"] = repository_alias
         second_work = self.fixture.works[second]
         second_work["approval"]["policy"]["repository"] = repository_alias
-        second_work["native_ticket"]["url"] = (
-            "https://github.com/EXAMPLE/PROJECT-1/issues/2"
-        )
+        second_work["native_ticket"]["url"] = "https://github.com/EXAMPLE/PROJECT-1/issues/2"
         self.fixture.write_project(second_project_id)
         self.fixture.write_work(second)
 
         with self.assertRaises(MAILBOX.MailboxValidationError) as caught:
             MAILBOX.reconstruct_mailbox(self.root)
         codes = {item.code for item in caught.exception.diagnostics}
-        self.assertTrue(
-            {"duplicate-repository", "parallel-assignments"}.issubset(codes)
-        )
+        self.assertTrue({"duplicate-repository", "parallel-assignments"}.issubset(codes))
 
     def test_duplicate_yaml_keys_and_unexpected_layout_fail_closed(self) -> None:
         manifest = self.root / "atelier.yaml"
@@ -1451,9 +1430,7 @@ class MailboxContract(unittest.TestCase):
 
         with self.assertRaises(MAILBOX.MailboxValidationError) as caught:
             MAILBOX.reconstruct_mailbox(self.root)
-        diagnostic = next(
-            item for item in caught.exception.diagnostics if item.code == "layout"
-        )
+        diagnostic = next(item for item in caught.exception.diagnostics if item.code == "layout")
         self.assertEqual(diagnostic.path, "projects")
 
     def test_invalid_utf8_document_has_a_relative_encoding_diagnostic(self) -> None:
@@ -1461,9 +1438,7 @@ class MailboxContract(unittest.TestCase):
 
         with self.assertRaises(MAILBOX.MailboxValidationError) as caught:
             MAILBOX.reconstruct_mailbox(self.root)
-        diagnostic = next(
-            item for item in caught.exception.diagnostics if item.code == "encoding"
-        )
+        diagnostic = next(item for item in caught.exception.diagnostics if item.code == "encoding")
         self.assertEqual(diagnostic.path, "atelier.yaml")
 
     def test_malformed_single_quoted_yaml_fails_closed(self) -> None:
@@ -1502,9 +1477,7 @@ class MailboxContract(unittest.TestCase):
 
         readiness_path = Path(self.temporary.name) / "readiness.json"
         readiness_path.write_bytes(b"\xff")
-        with self.assertRaisesRegex(
-            MAILBOX.MailboxValidationError, "readiness-encoding"
-        ):
+        with self.assertRaisesRegex(MAILBOX.MailboxValidationError, "readiness-encoding"):
             MAILBOX._read_readiness(readiness_path)
 
 

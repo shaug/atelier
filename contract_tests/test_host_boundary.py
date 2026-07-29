@@ -220,20 +220,24 @@ class HostBoundaryContract(unittest.TestCase):
             "import json, sys\n"
             "value = json.load(open(sys.argv[2], encoding='utf-8'))\n"
             "raise SystemExit(0 if value.get('id') == "
-            "'agent-scripts.implement-ticket/delegated-execution/v1' else 1)\n",
+            "'agent-scripts.implement-ticket/delegated-execution/v2' else 1)\n",
             encoding="utf-8",
         )
         manifest = {
-            "schema": "agent-scripts.implement-ticket/capability-manifest/v1",
-            "id": "agent-scripts.implement-ticket/delegated-execution/v1",
+            "schema": "agent-scripts.implement-ticket/capability-manifest/v2",
+            "id": "agent-scripts.implement-ticket/delegated-execution/v2",
             "contract": "CONTRACT.md",
             "invocation_schema": "invocation.schema.json",
             "checkpoint_request_schema": "checkpoint-request.schema.json",
             "checkpoint_response_schema": "checkpoint-response.schema.json",
             "result_schema": "result.schema.json",
             "validator": "validate.py",
-            "terminal_states": ["ready_pr", "blocked", "requires_epic"],
-            "checkpoint_phases": ["pre_external_mutation", "candidate_published"],
+            "terminal_states": ["ready_pr", "ready_prs", "merged", "blocked", "requires_epic"],
+            "checkpoint_phases": [
+                "pre_external_mutation",
+                "candidate_published",
+                "deployment_observed",
+            ],
         }
         self.manifest_path = capability_root / "capability.json"
         write_json(self.manifest_path, manifest)
@@ -246,7 +250,7 @@ class HostBoundaryContract(unittest.TestCase):
         descriptor = {
             "schema": "atelier.host-capability/v1",
             "reference_host": "codex",
-            "delegated_capability": ("agent-scripts.implement-ticket/delegated-execution/v1"),
+            "delegated_capability": ("agent-scripts.implement-ticket/delegated-execution/v2"),
             "delegated_authority_actions": AUTHORITY_ACTIONS,
             "accepted_terminal_states": ["ready_pr", "blocked", "requires_epic"],
             "delegated_skill": {
@@ -320,7 +324,7 @@ class HostBoundaryContract(unittest.TestCase):
         self.assertEqual(payload["reference_host"], "codex")
         self.assertEqual(
             payload["delegated_capability"],
-            "agent-scripts.implement-ticket/delegated-execution/v1",
+            "agent-scripts.implement-ticket/delegated-execution/v2",
         )
         self.assertEqual(payload["native_state_access"], "read-only")
         self.assertFalse(payload["fallback_to_copied_workflows"])

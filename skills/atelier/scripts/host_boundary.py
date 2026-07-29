@@ -216,7 +216,7 @@ def load_descriptor(path: Path = DEFAULT_DESCRIPTOR) -> dict[str, Any]:
         raise HostBoundaryError("reference host must be codex")
     if (
         descriptor["delegated_capability"]
-        != "agent-scripts.implement-ticket/delegated-execution/v1"
+        != "agent-scripts.implement-ticket/delegated-execution/v2"
     ):
         raise HostBoundaryError("delegated capability identifier is incompatible")
     if descriptor["native_state_access"] != "read-only":

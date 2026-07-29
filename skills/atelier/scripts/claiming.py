@@ -33,6 +33,7 @@ from skills.atelier.scripts.identifiers import new_identifier
 from skills.atelier.scripts.mailbox import (
     MailboxValidationError,
     _github_remote_url,
+    _valid_branch_ref,
     validate_project_policy,
 )
 from skills.atelier.scripts.planning import (
@@ -111,10 +112,12 @@ class CheckpointRequest:
     action: str
     proposed_effect_digest: str
     candidate_head: str | None
+    candidate_remote_ref: str | None
     acknowledged_candidate_head: str | None
     next_continuation_token: str
     recorded_at: datetime
     candidate: Mapping[str, Any] | None = None
+    ticket_observation_digest: str | None = None
 
 
 @dataclass(frozen=True)
@@ -255,6 +258,7 @@ class ClaimCoordinator:
                     "approved_commit": approved_commit,
                     "policy_commit": state.current_policy.commit,
                     "ticket_observation_digest": state.ticket_digest,
+                    "invocation_digest": None,
                     "claimed_at": _timestamp(claimed_at),
                     "host": "codex",
                     "checkpoint": {
@@ -293,6 +297,7 @@ class ClaimCoordinator:
         observation_path: Path,
         observation_not_before: datetime,
         now: datetime | None = None,
+        state_revalidator: Callable[[_ExecutionState], None] | None = None,
     ) -> ClaimResult:
         """Allow one exact external action or acknowledge one exact published candidate."""
         _require_identifier(work_id, "wrk")
@@ -310,6 +315,8 @@ class ClaimCoordinator:
                 observation_not_before=observation_not_before,
                 now=now,
             )
+            if state_revalidator is not None:
+                state_revalidator(state)
             if state.work["status"] != "active":
                 raise MailboxTransitionRejected(f"{work_id}: checkpoints require active work")
             claim = _require_fence(state.work, request.fence)
@@ -318,6 +325,13 @@ class ClaimCoordinator:
             if claim["ticket_observation_digest"] != state.ticket_digest:
                 raise MailboxTransitionRejected(
                     f"{work_id}: material ticket observation changed during the invocation"
+                )
+            if (
+                request.ticket_observation_digest is not None
+                and request.ticket_observation_digest != state.ticket_digest
+            ):
+                raise MailboxTransitionRejected(
+                    f"{work_id}: checkpoint ticket observation is not current"
                 )
             effective_authority = set(state.effective_policy["authority"]["allow"])
             approved_authority = set(state.work["approval"]["authority_ceiling"])
@@ -336,8 +350,7 @@ class ClaimCoordinator:
             work["claim"] = copy.deepcopy(planned["claim"])
             return TransitionPlan(
                 commit_message=(
-                    f"record {request.phase} checkpoint {request.fence.sequence + 1} "
-                    f"for {work_id}"
+                    f"record {request.phase} checkpoint {request.fence.sequence + 1} for {work_id}"
                 ),
                 changes=(FileChange(_work_path(work_id), _render_document(work, state.body)),),
             )
@@ -537,6 +550,7 @@ class ClaimCoordinator:
                 "approved_commit": approved_commit,
                 "policy_commit": state.current_policy.commit,
                 "ticket_observation_digest": state.ticket_digest,
+                "invocation_digest": None,
                 "claimed_at": _timestamp(taken_over_at),
                 "host": "codex",
                 "checkpoint": {
@@ -768,9 +782,11 @@ class ClaimCoordinator:
             if (
                 request.action != "repository.candidate.push"
                 or request.candidate_head is None
+                or request.candidate_remote_ref is None
                 or request.acknowledged_candidate_head != request.candidate_head
                 or candidate is None
                 or candidate.get("head_revision") != request.candidate_head
+                or candidate.get("remote_ref") != request.candidate_remote_ref
             ):
                 raise MailboxTransitionRejected(
                     "candidate publication must acknowledge one exact repository candidate push"
@@ -784,6 +800,7 @@ class ClaimCoordinator:
                 prior["phase"] != "pre_external_mutation"
                 or prior["action"] != "repository.candidate.push"
                 or prior["candidate_head"] != request.candidate_head
+                or prior["candidate_remote_ref"] != request.candidate_remote_ref
                 or prior["proposed_effect_digest"] != request.proposed_effect_digest
             ):
                 raise MailboxTransitionRejected(
@@ -796,17 +813,25 @@ class ClaimCoordinator:
                 raise MailboxTransitionRejected(
                     "pre-mutation checkpoint cannot acknowledge a candidate"
                 )
-            if request.action in CANDIDATE_REQUIRED_ACTIONS and request.candidate_head is None:
+            if request.action in CANDIDATE_REQUIRED_ACTIONS and (
+                request.candidate_head is None or request.candidate_remote_ref is None
+            ):
                 raise MailboxTransitionRejected(
-                    f"action {request.action!r} requires an exact candidate head"
+                    f"action {request.action!r} requires an exact candidate head and remote ref"
                 )
             current_head = (
                 claim["candidate"]["head_revision"] if claim["candidate"] is not None else None
             )
+            current_ref = (
+                claim["candidate"]["remote_ref"] if claim["candidate"] is not None else None
+            )
             if (
                 request.action in CANDIDATE_REQUIRED_ACTIONS
                 and request.action != "repository.candidate.push"
-                and request.candidate_head != current_head
+                and (
+                    request.candidate_head != current_head
+                    or request.candidate_remote_ref != current_ref
+                )
             ):
                 raise MailboxTransitionRejected(
                     f"action {request.action!r} does not name the acknowledged candidate"
@@ -822,6 +847,7 @@ class ClaimCoordinator:
                 "action": request.action,
                 "proposed_effect_digest": request.proposed_effect_digest,
                 "candidate_head": request.candidate_head,
+                "candidate_remote_ref": request.candidate_remote_ref,
                 "acknowledged_candidate_head": request.acknowledged_candidate_head,
                 "recorded_at": _timestamp(request.recorded_at),
             }
@@ -831,9 +857,7 @@ class ClaimCoordinator:
 
     def _verify_capability(self, target: HostTarget) -> None:
         if not self.capability_verifier(target):
-            raise ClaimingError(
-                "required delegated implement-ticket capability is unavailable"
-            )
+            raise ClaimingError("required delegated implement-ticket capability is unavailable")
 
     def _verify_candidate(self, candidate: Mapping[str, Any] | None) -> None:
         if candidate is not None and not self.candidate_verifier(candidate):
@@ -882,8 +906,7 @@ def _effective_policy(
         approved["ticket"]["material_fields"], current["ticket"]["material_fields"]
     )
     effective["ticket"]["require_no_blockers"] = (
-        approved["ticket"]["require_no_blockers"]
-        or current["ticket"]["require_no_blockers"]
+        approved["ticket"]["require_no_blockers"] or current["ticket"]["require_no_blockers"]
     )
     return effective
 
@@ -918,7 +941,7 @@ def _require_policy_identity(
     if policy["repository"]["identity"] != expected_repository:
         raise MailboxTransitionRejected("project policy repository identity is incompatible")
     if policy["execution"] != {
-        "capability": "agent-scripts.implement-ticket/delegated-execution/v1",
+        "capability": "agent-scripts.implement-ticket/delegated-execution/v2",
         "delivery_outcome": "ready_pr",
         "parallel_assignments": False,
     }:
@@ -953,6 +976,7 @@ def _policy_remote_matches_repository(target: PolicyTarget, repository: str) -> 
     else:
         remote_url = target.remote
     return _github_remote_url(remote_url, repository=repository)
+
 
 def _candidate_remote_reachable(candidate: Mapping[str, Any]) -> bool:
     remote_url = candidate.get("remote_url")
@@ -1008,7 +1032,7 @@ def _capability_compatible(target: HostTarget) -> bool:
     return (
         result["status"] == "compatible"
         and result["delegated_capability"]
-        == "agent-scripts.implement-ticket/delegated-execution/v1"
+        == "agent-scripts.implement-ticket/delegated-execution/v2"
     )
 
 
@@ -1055,6 +1079,12 @@ def _validate_checkpoint_request(request: CheckpointRequest) -> None:
     ):
         if value is not None:
             _require_sha(value, label)
+    if (request.candidate_head is None) != (request.candidate_remote_ref is None):
+        raise ClaimingError("candidate_head and candidate_remote_ref must be present together")
+    if request.candidate_remote_ref is not None and not _valid_branch_ref(
+        request.candidate_remote_ref
+    ):
+        raise ClaimingError("candidate_remote_ref must be a valid full Git branch ref")
     _require_token(request.next_continuation_token, "next_continuation_token")
     if request.next_continuation_token == request.fence.continuation_token:
         raise ClaimingError("next continuation token must rotate")
@@ -1336,6 +1366,7 @@ def main() -> int:
                     action=checkpoint["action"],
                     proposed_effect_digest=checkpoint["proposed_effect_digest"],
                     candidate_head=checkpoint["candidate_head"],
+                    candidate_remote_ref=checkpoint["candidate_remote_ref"],
                     acknowledged_candidate_head=checkpoint["acknowledged_candidate_head"],
                     next_continuation_token=checkpoint["next_continuation_token"],
                     recorded_at=_parse_timestamp(checkpoint["recorded_at"]),

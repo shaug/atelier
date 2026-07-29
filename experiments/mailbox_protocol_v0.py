@@ -312,6 +312,7 @@ def authorize_checkpoint(
             "action": action,
             "proposed_effect_digest": ticket_digest({"action": action, "claim_id": claim_id}),
             "candidate_head": None,
+            "candidate_remote_ref": None,
             "acknowledged_candidate_head": None,
             "recorded_at": "2026-07-25T12:25:00Z",
         }

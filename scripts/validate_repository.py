@@ -82,8 +82,11 @@ def validate_skill(errors: list[str]) -> None:
         errors.append("Atelier skill frontmatter must include a description")
     if "[TODO:" in text:
         errors.append("Atelier skill contains a TODO placeholder")
-    if "Delegated implementation and audit are not implemented yet" not in text:
-        errors.append("skill must state that delegated work and audit are unavailable")
+    if "Production `audit` behavior is not implemented yet" not in text:
+        errors.append("skill must state that audit is unavailable")
+    for relative in ("references/delegation.md", "scripts/delegation.py"):
+        if not (path.parent / relative).is_file():
+            errors.append(f"delegated work boundary missing: {relative}")
 
 
 def validate_reset_boundary(errors: list[str]) -> None:

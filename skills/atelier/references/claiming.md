@@ -109,7 +109,8 @@ Add a `checkpoint` object containing:
 - the current `fence` (`claim_id`, `worker_run_id`, `sequence`, and
   `continuation_token`);
 - `phase`, `action`, and `proposed_effect_digest`;
-- `candidate_head` and `acknowledged_candidate_head`, including explicit nulls;
+- `candidate_head`, `candidate_remote_ref`, and `acknowledged_candidate_head`,
+  including explicit nulls;
 - a new `next_continuation_token`;
 - `recorded_at`; and
 - `candidate`, explicitly null except for `candidate_published`.

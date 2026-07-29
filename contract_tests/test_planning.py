@@ -218,7 +218,7 @@ class PlanningContract(unittest.TestCase):
                 "material_fields": ["body", "state", "relationships"],
             },
             "execution": {
-                "capability": "agent-scripts.implement-ticket/delegated-execution/v1",
+                "capability": "agent-scripts.implement-ticket/delegated-execution/v2",
                 "delivery_outcome": "ready_pr",
                 "parallel_assignments": False,
             },
@@ -285,10 +285,7 @@ class PlanningContract(unittest.TestCase):
 
     def initiative_digest(self) -> str:
         checkout = self.mailbox_clone()
-        content = (
-            checkout
-            / f"initiatives/{self.initiative_id}/initiative.md"
-        ).read_bytes()
+        content = (checkout / f"initiatives/{self.initiative_id}/initiative.md").read_bytes()
         return f"sha256:{hashlib.sha256(content).hexdigest()}"
 
     def create(self) -> None:
@@ -783,10 +780,9 @@ class PlanningContract(unittest.TestCase):
             )
 
         checkout = self.mailbox_clone()
-        initiative = (
-            checkout
-            / f"initiatives/{self.initiative_id}/initiative.md"
-        ).read_text(encoding="utf-8")
+        initiative = (checkout / f"initiatives/{self.initiative_id}/initiative.md").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("The newer shared outcome.", initiative)
         self.assertNotIn("The stale shared outcome.", initiative)
 
