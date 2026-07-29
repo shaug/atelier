@@ -61,15 +61,16 @@ result. Launch one fresh worker through the host with the installed
 substitute CLI process, cache provider observations, or widen Atelier's v0
 authority ceiling.
 
-Production `audit` behavior is not implemented yet. When it is requested:
+Production `audit` behavior is implemented for one delivered or accepted
+assignment. Before audit, read `references/audit.md`, repeat the fail-closed host
+preflight, obtain one fresh complete GitHub observation, and use
+`scripts/audit.py audit`. Preserve every predicate verdict and visible feedback
+disposition in the report; do not infer success from unavailable or stale state.
 
-1. Report that audit is unavailable in the reset scaffold.
-1. Link the owning issue: shaug/atelier#780.
-1. Make no mailbox, repository, ticket, pull-request, or acceptance mutation.
-
-An explicit host-readiness request may complete the read-only host preflight and
-return its exact compatibility or failure result. That does not make audit
-available.
+Audit itself is read-only. Only after the operator explicitly confirms the
+report's exact acceptance fence may `scripts/audit.py accept` publish the one
+acceptance commit. Acceptance never implies merge, deployment, native-ticket
+mutation, or issue closure.
 
 ## Mailbox boundary
 
