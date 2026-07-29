@@ -45,7 +45,7 @@ claim:
   approved_commit: 8e4e96e7e50888412fcf11fb7a64e74fedc88950
   policy_commit: 7224a2396b5e289b80e59f4cf677959b0848ae75
   ticket_observation_digest: sha256:923b7a5018d64b5d6090398dd6f4cea7bfdec31a25b49d2561b03ab8824c9e81
-  invocation_digest: null
+  invocation_digest: sha256:06c0717f6ab423daee9db62260c4abb54423797a3697dd8aa520c1277f34fa17
   claimed_at: '2026-07-29T22:36:24.754432Z'
   host: codex
   checkpoint:
