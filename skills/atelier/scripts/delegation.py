@@ -657,6 +657,18 @@ def _require_ready_pr(
     if publication["kind"] != "ordinary" or len(publication["pull_requests"]) != 1:
         raise MailboxTransitionRejected("Atelier v0 accepts one ordinary pull request")
     pull_request = publication["pull_requests"][0]
+    if (
+        pull_request["head_ref"],
+        pull_request["head_sha"],
+        pull_request["base_sha"],
+    ) != (
+        candidate["remote_ref"],
+        candidate["head_sha"],
+        candidate["base_sha"],
+    ):
+        raise MailboxTransitionRejected(
+            "terminal pull request does not identify the acknowledged candidate"
+        )
     current = claim["candidate"]
     if current is None or (
         candidate["repository"],

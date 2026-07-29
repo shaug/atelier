@@ -2360,24 +2360,11 @@ print(json.dumps(value, sort_keys=True))
             "blocking_reason": None,
             "next_action": "Atelier validates and presents the candidate for operator acceptance.",
         }
-        foreign_review = json.loads(json.dumps(result))
-        foreign_review["reviews"][0]["name"] = "generic-review"
-        self.assert_installed_result_valid_if_available(foreign_review)
-        before_rejection = git(
-            None,
-            "--git-dir",
-            str(self.mailbox_remote),
-            "rev-parse",
-            "main",
-        ).stdout.strip()
-        with self.assertRaisesRegex(
-            MailboxTransitionRejected,
-            "review evidence uses a mechanism Atelier cannot represent",
-        ):
+        def finalize(reported_result: dict[str, Any]) -> None:
             delegation.finalize(
                 self.work_id,
                 invocation,
-                foreign_review,
+                reported_result,
                 self.fence(pull_request),
                 approved_commit=self.approved_commit,
                 policy_target=self.policy_target(),
@@ -2387,28 +2374,62 @@ print(json.dumps(value, sort_keys=True))
                 ended_at=self.live_at + timedelta(minutes=4),
                 now=self.live_at + timedelta(minutes=4),
             )
-        after_rejection = git(
+
+        before_rejection = git(
             None,
             "--git-dir",
             str(self.mailbox_remote),
             "rev-parse",
             "main",
         ).stdout.strip()
-        self.assertEqual(after_rejection, before_rejection)
+        for pr_field, live_section, live_field, substituted in (
+            ("head_ref", "head", "ref", "refs/heads/substituted"),
+            ("head_sha", "head", "sha", "c" * 40),
+            ("base_sha", "base", "sha", "d" * 40),
+        ):
+            substituted_result = json.loads(json.dumps(result))
+            substituted_live = json.loads(json.dumps(live))
+            reported_pr = substituted_result["candidate"]["publication"]["pull_requests"][0]
+            reported_pr[pr_field] = substituted
+            substituted_live["pull_request"][live_section][live_field] = substituted
+            write_json(self.observation_path, substituted_live)
+            with self.assertRaisesRegex(
+                MailboxTransitionRejected,
+                "terminal pull request does not identify the acknowledged candidate",
+            ):
+                finalize(substituted_result)
+            self.assertEqual(
+                git(
+                    None,
+                    "--git-dir",
+                    str(self.mailbox_remote),
+                    "rev-parse",
+                    "main",
+                ).stdout.strip(),
+                before_rejection,
+            )
+        write_json(self.observation_path, live)
 
-        delegation.finalize(
-            self.work_id,
-            invocation,
-            result,
-            self.fence(pull_request),
-            approved_commit=self.approved_commit,
-            policy_target=self.policy_target(),
-            host_target=self.delegation_host_target(),
-            observation_path=self.observation_path,
-            observation_not_before=self.live_at + timedelta(minutes=3),
-            ended_at=self.live_at + timedelta(minutes=4),
-            now=self.live_at + timedelta(minutes=4),
+        foreign_review = json.loads(json.dumps(result))
+        foreign_review["reviews"][0]["name"] = "generic-review"
+        self.assert_installed_result_valid_if_available(foreign_review)
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "review evidence uses a mechanism Atelier cannot represent",
+        ):
+            finalize(foreign_review)
+        self.assertEqual(
+            git(
+                None,
+                "--git-dir",
+                str(self.mailbox_remote),
+                "rev-parse",
+                "main",
+            ).stdout.strip(),
+            before_rejection,
         )
+
+        finalize(result)
         checkout = self.mailbox_clone("delegated-delivered-read")
         work, _ = _read_yaml(
             checkout / f"work/{self.work_id}/work.md",
