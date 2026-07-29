@@ -538,6 +538,27 @@ class GitMailboxWriter:
                     )
                 self._verify_new_claim(checkout, path, current_claim)
                 work_id = PurePosixPath(path).parts[1]
+                takeover_times: set[str] = set()
+                for change in changes:
+                    message_path = PurePosixPath(change.path)
+                    if (
+                        change.content is None
+                        or len(message_path.parts) != 4
+                        or message_path.parts[:3] != ("work", work_id, "messages")
+                    ):
+                        continue
+                    message, _ = _read_yaml(
+                        checkout / change.path,
+                        frontmatter=True,
+                        label=change.path,
+                    )
+                    if (
+                        message["kind"] == "notification"
+                        and message["author_role"] == "planner"
+                        and message["worker_run_id"] is None
+                        and message["subject"] == "Claim taken over"
+                    ):
+                        takeover_times.add(message["created_at"])
                 for change in changes:
                     receipt_path = PurePosixPath(change.path)
                     if (
@@ -554,6 +575,13 @@ class GitMailboxWriter:
                     if (
                         receipt["outcome"] == "released"
                         and receipt["claim_id"] == prior_claim["id"]
+                        and not (
+                            document["attempt_receipt_id"] == receipt["id"]
+                            and receipt["worker_run_id"] == prior_claim["worker_run_id"]
+                            and receipt["candidate"] == prior_claim["candidate"]
+                            and receipt["mutation_ownership"] == "relinquished"
+                            and receipt["ended_at"] in takeover_times
+                        )
                     ):
                         raise MailboxTransitionRejected(
                             f"{path}: release and new claim require distinct transitions"

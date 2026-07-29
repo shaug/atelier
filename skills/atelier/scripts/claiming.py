@@ -489,6 +489,7 @@ class ClaimCoordinator:
         worker_run_id: str,
         continuation_token: str,
         takeover_message_id: str,
+        takeover_receipt_id: str | None = None,
         reason: str,
         taken_over_at: datetime,
         approved_commit: str,
@@ -503,6 +504,8 @@ class ClaimCoordinator:
         _require_identifier(claim_id, "clm")
         _require_identifier(worker_run_id, "run")
         _require_identifier(takeover_message_id, "msg")
+        if takeover_receipt_id is not None:
+            _require_identifier(takeover_receipt_id, "rcp")
         _require_token(continuation_token, "continuation_token")
         _require_text(reason, "reason")
         _require_timestamp(taken_over_at, "taken_over_at")
@@ -545,6 +548,21 @@ class ClaimCoordinator:
             }
             current_status = state.work["status"]
             takeover_status = "active" if current_status == "delivered" else current_status
+            takeover_receipt = None
+            if current_status == "active":
+                if takeover_receipt_id is None:
+                    raise MailboxTransitionRejected(
+                        f"{work_id}: active takeover requires a stable receipt identity"
+                    )
+                takeover_receipt = _attempt_receipt(
+                    state.work,
+                    prior_claim,
+                    receipt_id=takeover_receipt_id,
+                    outcome="released",
+                    mutation_ownership="relinquished",
+                    ended_at=taken_over_at,
+                    evidence=AttemptEvidence(),
+                )
             current_blocker = state.work["blocking_message_id"]
             takeover_message = {
                 "schema": "atelier.message/v1",
@@ -565,6 +583,7 @@ class ClaimCoordinator:
                 state=state,
                 claim=new_claim,
                 takeover_message=takeover_message,
+                takeover_receipt=takeover_receipt,
                 status=takeover_status,
             )
 
@@ -583,6 +602,19 @@ class ClaimCoordinator:
                 ),
                 FileChange(_work_path(work_id), _render_document(work, state.body)),
             ]
+            if planned["takeover_receipt"] is not None:
+                work["attempt_receipt_id"] = takeover_receipt_id
+                changes = [
+                    FileChange(
+                        _receipt_path(work_id, takeover_receipt_id),
+                        _render_document(planned["takeover_receipt"], reason),
+                    ),
+                    FileChange(
+                        _message_path(work_id, takeover_message_id),
+                        _render_document(planned["takeover_message"], reason),
+                    ),
+                    FileChange(_work_path(work_id), _render_document(work, state.body)),
+                ]
             return TransitionPlan(
                 commit_message=f"take over {work_id}",
                 changes=tuple(changes),
@@ -1345,6 +1377,7 @@ def main() -> int:
                 worker_run_id=request["worker_run_id"],
                 continuation_token=request["continuation_token"],
                 takeover_message_id=request["takeover_message_id"],
+                takeover_receipt_id=request.get("takeover_receipt_id"),
                 reason=request["reason"],
                 taken_over_at=_parse_timestamp(request["taken_over_at"]),
                 approved_commit=request["approved_commit"],

@@ -631,6 +631,82 @@ class ClaimingContract(unittest.TestCase):
                 candidate_head=HEAD,
             )
 
+
+    def test_active_takeover_preserves_published_candidate_with_handoff_receipt(self) -> None:
+        published, candidate_head = self.publish_candidate_with_descendant()
+        prior_fence = self.fence(published)
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "active takeover requires a stable receipt identity",
+        ):
+            self.coordinator.takeover(
+                self.work_id,
+                prior_fence,
+                claim_id=new_identifier("clm"),
+                worker_run_id=new_identifier("run"),
+                continuation_token="missing-active-takeover-receipt",
+                takeover_message_id=new_identifier("msg"),
+                reason="Candidate provenance cannot be implicit.",
+                taken_over_at=OBSERVED_AT + timedelta(minutes=4),
+                approved_commit=self.approved_commit,
+                policy_target=self.policy_target(),
+                host_target=self.host_target(),
+                observation_path=self.observation_path,
+                observation_not_before=self.live_at,
+                now=OBSERVED_AT + timedelta(minutes=4),
+            )
+
+        takeover_receipt_id = new_identifier("rcp")
+        takeover = self.coordinator.takeover(
+            self.work_id,
+            prior_fence,
+            claim_id=new_identifier("clm"),
+            worker_run_id=new_identifier("run"),
+            continuation_token="active-takeover-token-0",
+            takeover_message_id=new_identifier("msg"),
+            takeover_receipt_id=takeover_receipt_id,
+            reason="The active worker disappeared after publishing its candidate.",
+            taken_over_at=OBSERVED_AT + timedelta(minutes=4),
+            approved_commit=self.approved_commit,
+            policy_target=self.policy_target(),
+            host_target=self.host_target(),
+            observation_path=self.observation_path,
+            observation_not_before=self.live_at,
+            now=OBSERVED_AT + timedelta(minutes=4),
+        )
+        checkout = self.mailbox_clone("active-takeover-read")
+        work, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="active takeover work",
+        )
+        receipt, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/receipts/{takeover_receipt_id}.md",
+            frontmatter=True,
+            label="active takeover handoff",
+        )
+        snapshot = reconstruct_mailbox(checkout)
+        self.assertEqual(takeover.status, "active")
+        self.assertEqual(work["attempt_receipt_id"], takeover_receipt_id)
+        self.assertEqual(work["claim"]["checkpoint"]["sequence"], 0)
+        self.assertEqual(work["claim"]["checkpoint"]["authorizations"], [])
+        self.assertEqual(work["claim"]["candidate"]["head_revision"], candidate_head)
+        self.assertEqual(receipt["claim_id"], prior_fence.claim_id)
+        self.assertEqual(receipt["worker_run_id"], prior_fence.worker_run_id)
+        self.assertEqual(receipt["candidate"]["head_revision"], candidate_head)
+        self.assertEqual(receipt["outcome"], "released")
+        self.assertEqual(receipt["mutation_ownership"], "relinquished")
+        self.assertEqual(snapshot["views"]["active"], [self.work_id])
+
+        with self.assertRaisesRegex(MailboxTransitionRejected, "stale or foreign"):
+            self.coordinator.release(
+                self.work_id,
+                prior_fence,
+                receipt_id=new_identifier("rcp"),
+                reason="The fenced worker cannot release the replacement claim.",
+                ended_at=OBSERVED_AT + timedelta(minutes=5),
+            )
+
     def test_blocked_takeover_preserves_unresolved_blocker_and_candidate(self) -> None:
         published, _candidate_head = self.publish_candidate_with_descendant()
         blocker_id = new_identifier("msg")

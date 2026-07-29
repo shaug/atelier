@@ -135,11 +135,13 @@ recording the candidate.
   execution identities and explicit takeover handoffs, never global wall-clock order.
 - `takeover` requires the exact `replaced_fence`, fresh claim and run
   identifiers, a fresh continuation token, a stable `takeover_message_id`, a
-  reason, and timestamp. It records the rationale, starts an empty checkpoint
-  ledger, and copies the prior candidate exactly. Blocked takeover preserves the
-  unresolved blocker and remains blocked. Delivered takeover clears only the
-  delivery pointer, retains the delivery as the current historical attempt, and
-  returns the transferred candidate to active work.
+  reason, and timestamp. Active takeover additionally requires a stable
+  `takeover_receipt_id`; it records the replaced active attempt as released and
+  relinquished so an inherited candidate has durable provenance while the new
+  checkpoint ledger starts empty. Blocked takeover preserves the unresolved
+  blocker and remains blocked. Delivered takeover clears only the delivery
+  pointer, retains the delivery as the current historical attempt, and returns
+  the transferred candidate to active work.
 
 Never invent a token after losing it, reuse a released claim or run identity,
 discard a candidate during takeover, combine release and reacquisition into one
