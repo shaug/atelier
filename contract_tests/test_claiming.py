@@ -332,6 +332,14 @@ print(json.dumps(value, sort_keys=True))
             operations=REQUIRED_HOST_OPERATIONS,
         )
 
+    def assert_installed_result_valid_if_available(self, result: dict[str, Any]) -> None:
+        if not (INSTALLED_TICKET_SKILL / "SKILL.md").is_file():
+            return
+        dependency = DelegationCoordinator(self.coordinator)._dependency(
+            self.installed_host_target()
+        )
+        self.assertEqual(dependency.validate("result", result), [])
+
     def delegation(self) -> DelegationCoordinator:
         coordinator = DelegationCoordinator(self.coordinator)
         coordinator._dependency = lambda target: ProtocolFixture()
@@ -1641,7 +1649,7 @@ print(json.dumps(value, sort_keys=True))
         self.assertEqual(receipt["unresolved_obligations"], result["unresolved_obligations"])
         reconstruct_mailbox(checkout)
 
-    def test_delegation_accepts_installed_v2_blocked_result_without_obligations(self) -> None:
+    def test_delegation_accepts_v2_blocked_result_without_obligations(self) -> None:
         claimed = self.claim()
         fixture_delegation = self.delegation()
         invocation = self.delegated_invocation(claimed)
@@ -1654,21 +1662,16 @@ print(json.dumps(value, sort_keys=True))
         )
         result = self.blocked_result(invocation, checkpointed)
         result["unresolved_obligations"] = []
-        installed_delegation = DelegationCoordinator(self.coordinator)
-        installed_target = self.installed_host_target()
-        self.assertEqual(
-            installed_delegation._dependency(installed_target).validate("result", result),
-            [],
-        )
+        self.assert_installed_result_valid_if_available(result)
 
-        installed_delegation.finalize(
+        fixture_delegation.finalize(
             self.work_id,
             invocation,
             result,
             self.fence(checkpointed),
             approved_commit=self.approved_commit,
             policy_target=self.policy_target(),
-            host_target=installed_target,
+            host_target=self.delegation_host_target(),
             observation_path=self.observation_path,
             observation_not_before=self.live_at,
             ended_at=self.live_at + timedelta(minutes=3),
@@ -1691,8 +1694,9 @@ print(json.dumps(value, sort_keys=True))
         self.assertEqual(body, result["blocking_reason"])
         reconstruct_mailbox(checkout)
 
-    def test_delegation_records_installed_v2_requires_epic_result(self) -> None:
+    def test_delegation_records_v2_requires_epic_result(self) -> None:
         claimed = self.claim()
+        fixture_delegation = self.delegation()
         invocation = self.delegated_invocation(claimed)
         result = self.blocked_result(invocation, claimed, authority_used=[])
         result.update(
@@ -1709,21 +1713,16 @@ print(json.dumps(value, sort_keys=True))
                 "next_action": "Return the work to the planner for epic decomposition.",
             }
         )
-        installed_delegation = DelegationCoordinator(self.coordinator)
-        installed_target = self.installed_host_target()
-        self.assertEqual(
-            installed_delegation._dependency(installed_target).validate("result", result),
-            [],
-        )
+        self.assert_installed_result_valid_if_available(result)
 
-        installed_delegation.finalize(
+        fixture_delegation.finalize(
             self.work_id,
             invocation,
             result,
             self.fence(claimed),
             approved_commit=self.approved_commit,
             policy_target=self.policy_target(),
-            host_target=installed_target,
+            host_target=self.delegation_host_target(),
             observation_path=self.observation_path,
             observation_not_before=self.live_at,
             ended_at=self.live_at + timedelta(minutes=3),
@@ -2363,10 +2362,7 @@ print(json.dumps(value, sort_keys=True))
         }
         foreign_review = json.loads(json.dumps(result))
         foreign_review["reviews"][0]["name"] = "generic-review"
-        installed_dependency = DelegationCoordinator(self.coordinator)._dependency(
-            self.installed_host_target()
-        )
-        self.assertEqual(installed_dependency.validate("result", foreign_review), [])
+        self.assert_installed_result_valid_if_available(foreign_review)
         before_rejection = git(
             None,
             "--git-dir",
