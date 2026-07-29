@@ -5,7 +5,7 @@ title: Document the production dogfood lifecycle
 project_id: prj_019faf81-a727-7f87-b3bf-ee92b37450eb
 initiative_id: ini_019faf98-b7e3-7f60-818b-d34bc08bf3a4
 status: draft
-revision: 1
+revision: 2
 dependencies: []
 replaces: []
 native_ticket:
@@ -21,11 +21,11 @@ acceptance: null
 ---
 ## Intent
 
-Add one operator-facing reference that explains how separate planner, worker, recovery, audit, and explicit acceptance tasks coordinate through native GitHub state and the canonical Git mailbox.
+Add one operator-facing reference that explains how separate planner, worker, fresh-task recovery, audit, and explicit acceptance tasks coordinate only through native GitHub state and the canonical Git mailbox.
 
 ## Rationale
 
-The first v0 dogfood needs a durable, executable lifecycle reference that preserves accountability across fresh tasks.
+The first v0 dogfood needs a durable, executable lifecycle reference that preserves accountability across task interruption without relying on transcript memory.
 
 ## Scope
 
@@ -33,28 +33,28 @@ Add skills/atelier/references/dogfood.md and link it from skills/atelier/SKILL.m
 
 ## Non Goals
 
-Do not change behavior, add automation or provider mutation code, merge, deploy, close issues, or include post-v0 #782/#783 work.
+Do not change behavior, add automation, add provider mutation code, merge, deploy, close an issue, or include post-v0 #782/#783 work.
 
 ## Constraints
 
-Preserve every authority boundary; add no runtime, provider, daemon, or shared state; do not claim this dogfood run succeeded; Agent Scripts owns implementation; validate with just lint and just test.
+Preserve every authority boundary. Add no runtime, provider, daemon, or shared state. Do not claim in the reference that this dogfood run succeeded. Agent Scripts owns implementation. Required validation is exactly just lint and just test.
 
 ## Edge Cases
 
-Cover interruption and fresh-task recovery, stale or unknown evidence, and the distinction between delivery, acceptance, and merge.
+Cover interruption and recovery from a fresh task, stale or unknown evidence that must fail closed, and the distinctions among delivery, operator acceptance, and merge.
 
 ## Related Context
 
-Keep the reference consistent with the existing planning, claiming, delegation, audit, host-boundary, and Git-mailbox references.
+Use native GitHub issue #781 and the canonical Git mailbox as durable coordination state; keep the reference consistent with the existing planning, claiming, delegation, audit, host-boundary, mailbox-validation, and Git-mailbox-write references.
 
 ## Done Definition
 
-The documentation is exact, executable, operator-facing, and consistent with the existing production lifecycle references.
+The documentation is exact, executable, operator-facing, and consistent with the existing production planning, claiming, delegation, recovery, audit, and acceptance references.
 
 ## Verification Expectations
 
-Run just lint and just test and preserve their results for independent review.
+Run just lint and just test; preserve both results for an independent review of the exact candidate head.
 
 ## Review Shape Guidance
 
-Keep this as one coherent docs-only pull request.
+Deliver one coherent docs-only pull request.
