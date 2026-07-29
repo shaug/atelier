@@ -641,7 +641,11 @@ print(json.dumps(value, sort_keys=True))
             "validation": [],
             "reviews": reviews or [],
             "feedback": None,
-            "authority_used": authority_used or ["repository.candidate.create"],
+            "authority_used": (
+                authority_used
+                if authority_used is not None
+                else ["repository.candidate.create"]
+            ),
             "acceptance_evidence": [
                 {
                     "criterion": item["criterion"],
@@ -1635,6 +1639,111 @@ print(json.dumps(value, sort_keys=True))
         self.assertEqual(work["status"], "blocked")
         self.assertEqual(receipt["outcome"], "blocked")
         self.assertEqual(receipt["unresolved_obligations"], result["unresolved_obligations"])
+        reconstruct_mailbox(checkout)
+
+    def test_delegation_accepts_installed_v2_blocked_result_without_obligations(self) -> None:
+        claimed = self.claim()
+        fixture_delegation = self.delegation()
+        invocation = self.delegated_invocation(claimed)
+        checkpointed = self.delegated_checkpoint(
+            fixture_delegation,
+            invocation,
+            claimed,
+            action="repository.candidate.create",
+            token="token-1",
+        )
+        result = self.blocked_result(invocation, checkpointed)
+        result["unresolved_obligations"] = []
+        installed_delegation = DelegationCoordinator(self.coordinator)
+        installed_target = self.installed_host_target()
+        self.assertEqual(
+            installed_delegation._dependency(installed_target).validate("result", result),
+            [],
+        )
+
+        installed_delegation.finalize(
+            self.work_id,
+            invocation,
+            result,
+            self.fence(checkpointed),
+            approved_commit=self.approved_commit,
+            policy_target=self.policy_target(),
+            host_target=installed_target,
+            observation_path=self.observation_path,
+            observation_not_before=self.live_at,
+            ended_at=self.live_at + timedelta(minutes=3),
+            now=self.live_at + timedelta(minutes=3),
+        )
+
+        checkout = self.mailbox_clone("installed-v2-blocked-read")
+        work, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="work",
+        )
+        receipt, body = _read_yaml(
+            checkout / f"work/{self.work_id}/receipts/{work['attempt_receipt_id']}.md",
+            frontmatter=True,
+            label="receipt",
+        )
+        self.assertEqual(work["status"], "blocked")
+        self.assertEqual(receipt["unresolved_obligations"], [])
+        self.assertEqual(body, result["blocking_reason"])
+        reconstruct_mailbox(checkout)
+
+    def test_delegation_records_installed_v2_requires_epic_result(self) -> None:
+        claimed = self.claim()
+        invocation = self.delegated_invocation(claimed)
+        result = self.blocked_result(invocation, claimed, authority_used=[])
+        result.update(
+            {
+                "terminal_state": "requires_epic",
+                "implementation_state": "none",
+                "candidate": None,
+                "handoff": {
+                    "transferable": False,
+                    "reason": "Whole epic requires implement-epic",
+                },
+                "unresolved_obligations": [],
+                "blocking_reason": None,
+                "next_action": "Return the work to the planner for epic decomposition.",
+            }
+        )
+        installed_delegation = DelegationCoordinator(self.coordinator)
+        installed_target = self.installed_host_target()
+        self.assertEqual(
+            installed_delegation._dependency(installed_target).validate("result", result),
+            [],
+        )
+
+        installed_delegation.finalize(
+            self.work_id,
+            invocation,
+            result,
+            self.fence(claimed),
+            approved_commit=self.approved_commit,
+            policy_target=self.policy_target(),
+            host_target=installed_target,
+            observation_path=self.observation_path,
+            observation_not_before=self.live_at,
+            ended_at=self.live_at + timedelta(minutes=3),
+            now=self.live_at + timedelta(minutes=3),
+        )
+
+        checkout = self.mailbox_clone("installed-v2-requires-epic-read")
+        work, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="work",
+        )
+        receipt, body = _read_yaml(
+            checkout / f"work/{self.work_id}/receipts/{work['attempt_receipt_id']}.md",
+            frontmatter=True,
+            label="receipt",
+        )
+        self.assertEqual(work["status"], "blocked")
+        self.assertEqual(receipt["outcome"], "blocked")
+        self.assertEqual(body, result["handoff"]["reason"])
         reconstruct_mailbox(checkout)
 
     def test_delegation_rejects_blocked_tracker_mutation_before_receipt(self) -> None:

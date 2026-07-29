@@ -424,7 +424,11 @@ class DelegationCoordinator:
             body = (
                 "Delegated candidate delivered."
                 if outcome == "delivered"
-                else result["blocking_reason"]
+                else (
+                    result["blocking_reason"]
+                    if terminal == "blocked"
+                    else result["handoff"]["reason"] or result["next_action"]
+                )
             )
             if outcome == "delivered":
                 self.claims._verify_candidate(claim["candidate"])
@@ -732,10 +736,8 @@ def _delivered_candidate(
 def _blocked_candidate(
     result: Mapping[str, Any], claim: Mapping[str, Any], recorded_at: datetime
 ) -> dict[str, Any] | None:
-    if not result["blocking_reason"] or not result["unresolved_obligations"]:
-        raise MailboxTransitionRejected(
-            "blocked results require a reason and unresolved obligations"
-        )
+    if result["terminal_state"] == "requires_epic":
+        return copy.deepcopy(claim["candidate"])
     candidate = result["candidate"]
     current = claim["candidate"]
     if candidate is None:
