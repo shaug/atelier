@@ -46,16 +46,24 @@ Before planning, read `references/planning.md` and follow its draft, revision,
 preview, explicit operator approval, and promotion boundary. Use
 `scripts/planning.py`; do not emulate a second persistence or approval path.
 
-The `work` and `audit` modes are not implemented yet. Do not emulate missing
-Atelier behavior with ad hoc orchestration, hidden local state, copied Agent
-Scripts workflows, or tracker mutations.
+Production work coordination through claim, checkpoint, block, release, and
+takeover is implemented. Before claiming, read `references/claiming.md`, repeat
+the fail-closed host preflight, and use `scripts/claiming.py`. Never mint a
+replacement fence for a stale worker or acknowledge a candidate that is not
+reachable at its exact declared remote ref and head.
 
-When either unavailable mode is requested:
+Delegated implementation and audit are not implemented yet. Work mode stops
+after durable claim/checkpoint coordination; it cannot launch Agent Scripts,
+validate a terminal result, or deliver the assignment. Do not emulate missing
+behavior with ad hoc orchestration, hidden local state, copied Agent Scripts
+workflows, or tracker mutations.
 
-1. Identify the requested mode: `work` or `audit`.
+When either unavailable behavior is requested:
+
+1. Identify the requested behavior: delegated work or audit.
 1. Report that the mode is unavailable in the reset scaffold.
 1. Link the owning issue:
-   - `work`: shaug/atelier#778 and shaug/atelier#779
+   - delegated work: shaug/atelier#779
    - `audit`: shaug/atelier#780
 1. Make no mailbox, repository, ticket, pull-request, or acceptance mutation.
 
@@ -66,8 +74,8 @@ production mode available.
 ## Mailbox boundary
 
 The strict v1 mailbox schema and fresh-clone reconstruction helper are
-implemented. Verified fast-forward canonical writes and the bounded plan-mode
-transitions are also implemented. Before interpreting mailbox documents, read
+implemented. Verified fast-forward canonical writes plus bounded plan and claim
+coordination transitions are also implemented. Before interpreting mailbox documents, read
 `references/mailbox-validation.md` and use its read-only helper.
 Before persisting a transition, read `references/git-mailbox-writes.md` and use
 its isolated compare-and-swap writer.

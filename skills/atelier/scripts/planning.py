@@ -7,10 +7,8 @@ import argparse
 import hashlib
 import json
 import re
-import secrets
 import sys
 import tempfile
-import time
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, fields, replace
 from datetime import UTC, datetime
@@ -33,6 +31,7 @@ from skills.atelier.scripts.git_mailbox import (
     run_git,
 )
 from skills.atelier.scripts.host_boundary import HostBoundaryError, validate_observation
+from skills.atelier.scripts.identifiers import new_identifier as _new_identifier
 from skills.atelier.scripts.mailbox import (
     MailboxValidationError,
     _read_yaml,
@@ -206,21 +205,10 @@ def new_identifier(prefix: str) -> str:
 
     if prefix not in {"ini", "wrk"}:
         raise PlanningError("planning identifiers support only ini and wrk prefixes")
-    milliseconds = int(time.time() * 1000)
-    if milliseconds >= 1 << 48:
-        raise PlanningError("current time exceeds the UUIDv7 timestamp range")
-    random_bits = secrets.randbits(74)
-    value = milliseconds << 80
-    value |= 0x7 << 76
-    value |= ((random_bits >> 62) & 0xFFF) << 64
-    value |= 0b10 << 62
-    value |= random_bits & ((1 << 62) - 1)
-    hexadecimal = f"{value:032x}"
-    uuid = (
-        f"{hexadecimal[:8]}-{hexadecimal[8:12]}-{hexadecimal[12:16]}-"
-        f"{hexadecimal[16:20]}-{hexadecimal[20:]}"
-    )
-    return f"{prefix}_{uuid}"
+    try:
+        return _new_identifier(prefix)
+    except ValueError as error:
+        raise PlanningError(str(error)) from error
 
 
 class Planner:
