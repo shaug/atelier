@@ -440,6 +440,7 @@ phase: pre_external_mutation
 action: repository.candidate.create
 proposed_effect_digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 candidate_head: null
+candidate_remote_ref: null
 acknowledged_candidate_head: null
 recorded_at: 2026-07-25T12:06:00Z
 ```
