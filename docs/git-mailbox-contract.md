@@ -696,12 +696,23 @@ acceptance:
     required-validation-reported: satisfied
     independent-review-current: satisfied
     unresolved-feedback-zero: satisfied
+  audit_evidence:
+    schema: atelier.audit-evidence/v1
+    review:
+      mechanism: review-code-change
+      verdict: clean
+      candidate_revision: 2222222222222222222222222222222222222222
+      comparison_base_revision: 1111111111111111111111111111111111111111
+      observed_at: 2026-07-25T13:14:30Z
+      findings: []
+    feedback_dispositions: []
 ```
 
-Acceptance records what was verified at that commit. If evidence later becomes
-unavailable, stale, or contradictory, history is not rewritten. Audit reports
-the current promise as `unknown`, `stale`, or `violated` and cites the earlier
-acceptance.
+Acceptance records what was verified at that commit, including the exact structured
+review findings and explicit dispositions for top-level review and comment bodies.
+If evidence later becomes unavailable, stale, or contradictory, history is not
+rewritten. Audit reports the current promise as `unknown`, `stale`, or `violated`
+and cites the earlier acceptance.
 
 ## Minimal planner-worker interactions
 

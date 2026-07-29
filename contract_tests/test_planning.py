@@ -126,6 +126,7 @@ def observation(*, blocked: bool = False, with_pull_request: bool = False) -> di
         "pull_request_comments": [],
         "reviews": [],
         "checks": [],
+        "required_checks": {"configuration_read": True, "contexts": []},
         "threads": [],
         "completeness": {
             "issue": True,
@@ -135,6 +136,7 @@ def observation(*, blocked: bool = False, with_pull_request: bool = False) -> di
             "pull_request_comments": True,
             "reviews": True,
             "checks": True,
+            "required_checks": True,
             "threads": True,
         },
     }

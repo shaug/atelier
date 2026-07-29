@@ -413,6 +413,18 @@ class MailboxFixture:
                 "policy_commit": SHA_A,
                 "candidate_revision": SHA_B,
                 "evidence": {name: "satisfied" for name in EVIDENCE},
+                "audit_evidence": {
+                    "schema": "atelier.audit-evidence/v1",
+                    "review": {
+                        "mechanism": "review-code-change",
+                        "verdict": "clean",
+                        "candidate_revision": SHA_B,
+                        "comparison_base_revision": SHA_A,
+                        "observed_at": TIMESTAMP,
+                        "findings": [],
+                    },
+                    "feedback_dispositions": [],
+                },
             }
         self.works[work_id] = work
         self.write_work(work_id)

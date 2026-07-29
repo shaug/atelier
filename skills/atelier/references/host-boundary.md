@@ -37,6 +37,7 @@ Before native-state inspection or future work delegation:
      --operation github.pull-request.comments.read \
      --operation github.pull-request.reviews.read \
      --operation github.pull-request.checks.read \
+     --operation github.repository.required-checks.read \
      --operation github.pull-request.threads.read
    ```
 
@@ -44,9 +45,14 @@ Before native-state inspection or future work delegation:
    provider read. Read live GitHub state and normalize it to
    `github-observation.schema.json`. Preserve GitHub node IDs, exact candidate
    SHAs, timestamps, native `parent`, `subIssues`, `blockedBy`, and `blocking`
-   relationships, and complete pagination. Mark every completeness field true
-   only after the corresponding collection is fully read. Set `observed_at`
-   after the last required read completes.
+   relationships, and complete pagination. Read the effective required-check
+   configuration from branch protection and repository rulesets, normalizing each
+   configured context name plus optional GitHub App or ruleset integration ID.
+   Preserve the observed check/status kind and integration ID on every result, and
+   record whether the configuration read succeeded. Mark every completeness field
+   true only after the corresponding
+   collection is fully read. Set `observed_at` after the last required read
+   completes.
 6. Validate the observation:
 
    ```text

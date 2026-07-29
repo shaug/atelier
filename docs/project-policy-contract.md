@@ -244,26 +244,36 @@ Each predicate has one authoritative source and exact evaluation.
 ### `pull-request-open`
 
 - **Source:** live GitHub pull-request state.
-- **Satisfied:** the PR is open.
-- **Violated:** the PR is closed or merged.
+- **Satisfied:** the PR is open and not a draft.
+- **Violated:** the PR is closed, merged, or still a draft.
 - **Unknown:** GitHub cannot be read.
 - **Stale:** not applicable.
 
 ### `pull-request-mergeable`
 
-- **Source:** live GitHub mergeability.
-- **Satisfied:** GitHub reports the PR mergeable.
-- **Violated:** GitHub reports a conflict.
-- **Unknown:** mergeability is unavailable or still being calculated.
-- **Stale:** the PR head changed after the observation.
+- **Source:** live GitHub conflict and merge-state status.
+- **Satisfied:** GitHub reports the exact head mergeable and its current merge state
+  does not block readiness. `UNSTABLE` does not fail this predicate by itself;
+  configured required checks are evaluated separately.
+- **Violated:** GitHub reports a conflict or a policy-blocked merge state.
+- **Unknown:** conflict or merge-state status is unavailable or still being
+  calculated.
+- **Stale:** the PR head or exact comparison base changed after the observation.
 
 ### `required-checks-pass`
 
-- **Source:** live required GitHub checks for the exact PR head.
-- **Satisfied:** every required check completed successfully.
-- **Violated:** a required check completed unsuccessfully.
-- **Unknown:** required-check configuration or a required result cannot be read.
-- **Stale:** the PR head changed after the check result.
+- **Source:** live required-check configuration plus check results for the exact PR
+  head. Required identities are the exact context name plus optional GitHub App or
+  ruleset integration identity obtained from effective branch protection and
+  repository rulesets; observed results retain their check/status kind and
+  integration identity.
+- **Satisfied:** the required configuration was read and every named required
+  check from its configured provider completed successfully; an empty configured
+  set is satisfied.
+- **Violated:** a named required check completed unsuccessfully.
+- **Unknown:** required-check configuration or a named required result from its
+  configured provider cannot be read, is missing, or is ambiguous.
+- **Stale:** a named required result belongs to another PR head.
 
 ### `required-validation-reported`
 
@@ -276,20 +286,26 @@ Each predicate has one authoritative source and exact evaluation.
 
 ### `independent-review-current`
 
-- **Source:** a structured `review-code-change` result recorded in the receipt.
-- **Satisfied:** the result is clean and bound to the delivered SHA and
-  comparison base.
-- **Violated:** the result requires changes.
-- **Unknown:** the result is missing, malformed, or blocked.
-- **Stale:** the delivered head or effective comparison base changed.
+- **Source:** the delivered receipt plus normalized aggregate
+  `review-code-change` audit evidence with structured finding dispositions.
+- **Satisfied:** both records are clean, every finding has a non-unresolved
+  disposition, and both are bound to the delivered SHA and comparison base.
+- **Violated:** the result requires changes or retains an unresolved finding.
+- **Unknown:** either record is missing, malformed, blocked, or contradictory.
+- **Stale:** the delivered head, live PR base, or effective comparison base changed.
 
 ### `unresolved-feedback-zero`
 
-- **Source:** live GitHub review, comment, and thread state.
-- **Satisfied:** no unresolved material review, comment, or thread remains.
-- **Violated:** an unresolved material item remains.
-- **Unknown:** thread-aware feedback cannot be read.
-- **Stale:** the PR head changed after a previously clean observation.
+- **Source:** live GitHub review, comment, and thread state plus the normalized
+  audit-evidence dispositions bound to provider IDs and exact body digests.
+- **Satisfied:** every nonempty top-level review or comment body has an explicit
+  non-unresolved disposition and no unresolved material thread or receipt
+  obligation remains. This predicate is an unconditional v0 acceptance guard,
+  even when an older approval omitted it from `required_evidence`.
+- **Violated:** an item is explicitly unresolved, the live review decision requires
+  changes, or a material thread or receipt obligation remains unresolved.
+- **Unknown:** thread-aware feedback cannot be read or a live body lacks a disposition.
+- **Stale:** a disposition identifies missing feedback or an earlier body revision.
 
 ## Policy drift
 
