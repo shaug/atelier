@@ -1,0 +1,45 @@
+schema: atelier.project-policy/v1
+mailbox:
+  remote: git@github.com:shaug/atelier.git
+  realm_id: personal
+  canonical_branch: atelier-mailbox
+  project_id: prj_019faf81-a727-7f87-b3bf-ee92b37450eb
+repository:
+  identity: github:shaug/atelier
+  canonical_ref: refs/heads/main
+ticket:
+  provider: github
+  allowed_states:
+    - open
+  require_no_blockers: true
+  material_fields:
+    - body
+    - state
+    - relationships
+execution:
+  capability: agent-scripts.implement-ticket/delegated-execution/v2
+  delivery_outcome: ready_pr
+  parallel_assignments: false
+authority:
+  allow:
+    - repository.candidate.create
+    - repository.candidate.push
+    - pull_request.create
+    - pull_request.update
+    - review.reply
+    - review.resolve
+validation:
+  required_commands:
+    - just test
+    - just lint
+acceptance:
+  actor: operator
+  evidence:
+    - candidate-remote-reachable
+    - pull-request-head-current
+    - pull-request-open
+    - pull-request-mergeable
+    - required-checks-pass
+    - required-validation-reported
+    - independent-review-current
+    - unresolved-feedback-zero
