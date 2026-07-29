@@ -612,6 +612,10 @@ def _mailbox_candidate(
 
 
 def _attempt_evidence(result: Mapping[str, Any]) -> AttemptEvidence:
+    if any(item["name"] != "review-code-change" for item in result["reviews"]):
+        raise MailboxTransitionRejected(
+            "review evidence uses a mechanism Atelier cannot represent"
+        )
     verdicts = {
         "passed": "clean",
         "failed": "changes_required",

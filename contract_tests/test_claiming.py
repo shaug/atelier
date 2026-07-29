@@ -1837,7 +1837,7 @@ print(json.dumps(value, sort_keys=True))
         ).stdout.strip()
         self.assertEqual(after, before)
 
-    def test_delegation_normalizes_failed_and_unavailable_blocked_reviews(self) -> None:
+    def test_delegation_normalizes_unavailable_blocked_review(self) -> None:
         claimed = self.claim()
         delegation = self.delegation()
         invocation = self.delegated_invocation(claimed)
@@ -1867,13 +1867,7 @@ print(json.dumps(value, sort_keys=True))
         )
         reviews = [
             {
-                "name": "correctness",
-                "outcome": "failed",
-                "candidate_sha": HEAD,
-                "observed_at": fixtures.TIMESTAMP,
-            },
-            {
-                "name": "simplicity",
+                "name": "review-code-change",
                 "outcome": "unavailable",
                 "candidate_sha": HEAD,
                 "observed_at": fixtures.TIMESTAMP,
@@ -1917,12 +1911,9 @@ print(json.dumps(value, sort_keys=True))
         )
         self.assertEqual(
             [review["verdict"] for review in receipt["reviews"]],
-            ["changes_required", "blocked"],
+            ["blocked"],
         )
-        self.assertEqual(
-            {review["mechanism"] for review in receipt["reviews"]},
-            {"review-code-change"},
-        )
+        self.assertEqual(receipt["reviews"][0]["mechanism"], "review-code-change")
         reconstruct_mailbox(checkout)
 
     def test_delegation_denies_stale_checkpoint_without_mailbox_mutation(self) -> None:
@@ -2370,6 +2361,45 @@ print(json.dumps(value, sort_keys=True))
             "blocking_reason": None,
             "next_action": "Atelier validates and presents the candidate for operator acceptance.",
         }
+        foreign_review = json.loads(json.dumps(result))
+        foreign_review["reviews"][0]["name"] = "generic-review"
+        installed_dependency = DelegationCoordinator(self.coordinator)._dependency(
+            self.installed_host_target()
+        )
+        self.assertEqual(installed_dependency.validate("result", foreign_review), [])
+        before_rejection = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "review evidence uses a mechanism Atelier cannot represent",
+        ):
+            delegation.finalize(
+                self.work_id,
+                invocation,
+                foreign_review,
+                self.fence(pull_request),
+                approved_commit=self.approved_commit,
+                policy_target=self.policy_target(),
+                host_target=self.delegation_host_target(),
+                observation_path=self.observation_path,
+                observation_not_before=self.live_at + timedelta(minutes=3),
+                ended_at=self.live_at + timedelta(minutes=4),
+                now=self.live_at + timedelta(minutes=4),
+            )
+        after_rejection = git(
+            None,
+            "--git-dir",
+            str(self.mailbox_remote),
+            "rev-parse",
+            "main",
+        ).stdout.strip()
+        self.assertEqual(after_rejection, before_rejection)
+
         delegation.finalize(
             self.work_id,
             invocation,
