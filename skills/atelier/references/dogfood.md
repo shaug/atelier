@@ -22,7 +22,7 @@ Keep these roles in separate tasks:
 - The worker claims it and delegates its implementation to Agent Scripts.
 - A fresh recovery task reconstructs state after a deliberate interruption.
 - The auditor reads the delivered state and presents predicate verdicts.
-- The operator alone accepts or rejects the audited delivery.
+- The operator alone may accept the audited delivery.
 
 Each task may read native GitHub state and reconstruct the canonical Git
 mailbox. No task may rely on another task's transcript, an uncommitted local
@@ -110,6 +110,12 @@ the same evidence and the confirmed fence. Acceptance records the operator's
 decision in the mailbox. It does not merge, deploy, mutate or close the native
 ticket, delete a branch, or accept the parent initiative.
 
+If the operator declines the fence, do not run `accept` and do not invent a
+rejection record. The current v0 production boundary has no durable rejection
+transition: the work remains delivered, and a separate authorized product
+change is required before this runbook can claim to preserve a rejected
+decision.
+
 ## Preserve the evidence packet
 
 Keep the following identifiers and artifacts available through native GitHub
@@ -121,7 +127,7 @@ state or the canonical mailbox:
 | Claim and delegation | Claim ID, worker run ID, full checkpoint ledger, immutable invocation digest, and exact Agent Scripts capability identity. |
 | Candidate and delivery | Remote URL, full ref, head SHA, candidate acknowledgement, required validation results, independent review identity/verdict, and pull-request topology. |
 | Recovery | Previous fence, checkpoint tail, block/release/takeover receipt, rationale, and verified transferable candidate or explicit absence. |
-| Audit and acceptance | Complete provider observations, normalized review and feedback dispositions, audit report/fence, explicit operator decision, and acceptance commit when accepted. |
+| Audit and acceptance | Complete provider observations, normalized review and feedback dispositions, audit report/fence, and the acceptance commit when explicitly accepted. A declined fence remains delivered; v0 records no rejection transition. |
 
 If any item cannot be reread, is stale, or conflicts with current native or
 mailbox state, report that condition. Do not replace it with a narrative claim
