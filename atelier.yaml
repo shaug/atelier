@@ -1,0 +1,3 @@
+schema: atelier.mailbox/v1
+realm_id: personal
+canonical_branch: atelier-mailbox
