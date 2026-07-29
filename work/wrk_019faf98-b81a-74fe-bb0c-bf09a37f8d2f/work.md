@@ -4,7 +4,7 @@ id: wrk_019faf98-b81a-74fe-bb0c-bf09a37f8d2f
 title: Document the production dogfood lifecycle
 project_id: prj_019faf81-a727-7f87-b3bf-ee92b37450eb
 initiative_id: ini_019faf98-b7e3-7f60-818b-d34bc08bf3a4
-status: draft
+status: approved
 revision: 2
 dependencies: []
 replaces: []
@@ -12,7 +12,32 @@ native_ticket:
   provider: github
   id: '781'
   url: https://github.com/shaug/atelier/issues/781
-approval: null
+approval:
+  approved_by: operator
+  approved_at: '2026-07-29T20:52:04Z'
+  revision: 2
+  policy:
+    repository: github:shaug/atelier
+    commit: 7224a2396b5e289b80e59f4cf677959b0848ae75
+    path: .atelier/policy.yaml
+  authority_ceiling:
+  - repository.candidate.create
+  - repository.candidate.push
+  - pull_request.create
+  - pull_request.update
+  - review.reply
+  - review.resolve
+  acceptance:
+    mode: operator
+    required_evidence:
+    - candidate-remote-reachable
+    - pull-request-head-current
+    - pull-request-open
+    - pull-request-mergeable
+    - required-checks-pass
+    - required-validation-reported
+    - independent-review-current
+    - unresolved-feedback-zero
 claim: null
 blocking_message_id: null
 attempt_receipt_id: null
