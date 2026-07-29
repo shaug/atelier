@@ -4,7 +4,7 @@ id: wrk_019faf98-b81a-74fe-bb0c-bf09a37f8d2f
 title: Document the production dogfood lifecycle
 project_id: prj_019faf81-a727-7f87-b3bf-ee92b37450eb
 initiative_id: ini_019faf98-b7e3-7f60-818b-d34bc08bf3a4
-status: blocked
+status: approved
 revision: 2
 dependencies: []
 replaces: []
@@ -38,41 +38,9 @@ approval:
     - required-validation-reported
     - independent-review-current
     - unresolved-feedback-zero
-claim:
-  id: clm_019fb005-9920-7c8e-8349-3e752e07567e
-  worker_run_id: run_019fb005-98b9-7a31-8435-cb59d361c430
-  work_revision: 2
-  approved_commit: 8e4e96e7e50888412fcf11fb7a64e74fedc88950
-  policy_commit: 7224a2396b5e289b80e59f4cf677959b0848ae75
-  ticket_observation_digest: sha256:923b7a5018d64b5d6090398dd6f4cea7bfdec31a25b49d2561b03ab8824c9e81
-  invocation_digest: sha256:06c0717f6ab423daee9db62260c4abb54423797a3697dd8aa520c1277f34fa17
-  claimed_at: '2026-07-29T22:36:24.754432Z'
-  host: codex
-  checkpoint:
-    sequence: 1
-    continuation_token: i3KQqvV0MKqBY1ncU3AYYs2GrxS-ORI4l6lLFiAb1WU
-    authorizations:
-    - sequence: 1
-      invocation_id: run_019fb005-98b9-7a31-8435-cb59d361c430
-      phase: pre_external_mutation
-      action: repository.candidate.push
-      proposed_effect_digest: sha256:54cfa772e60a51a0fcd8bff8a29f01deb435911f09cd84eab89cc31da001d3bd
-      candidate_head: fc9022ffd1b47a74a1b85580bca5dc4a504cef78
-      candidate_remote_ref: refs/heads/scott/issue-781-dogfood-guide
-      acknowledged_candidate_head: null
-      recorded_at: '2026-07-29T22:48:44.376994Z'
-  candidate:
-    repository: github:shaug/atelier
-    remote: origin
-    remote_url: https://github.com/shaug/atelier.git
-    remote_ref: refs/heads/scott/issue-781-dogfood-guide
-    base_revision: 7224a2396b5e289b80e59f4cf677959b0848ae75
-    head_revision: fc9022ffd1b47a74a1b85580bca5dc4a504cef78
-    pull_request: null
-    workspace_id: null
-    published_at: '2026-07-29T22:21:56Z'
-blocking_message_id: msg_019fb015-389c-71cc-8bd6-24856a1aadaf
-attempt_receipt_id: rcp_019fb015-389c-772c-8e96-6f66e68c1ef6
+claim: null
+blocking_message_id: null
+attempt_receipt_id: rcp_019fb015-7f52-7145-b7d5-6b49f4fb58f4
 delivery_receipt_id: null
 acceptance: null
 ---
