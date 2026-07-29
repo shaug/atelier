@@ -49,8 +49,8 @@ claim:
   claimed_at: '2026-07-29T20:58:53Z'
   host: codex
   checkpoint:
-    sequence: 3
-    continuation_token: w1Pd6ouimF2eAmfXzyC96HeJNvrv1IQVBM5fQlq9tnI
+    sequence: 4
+    continuation_token: cigN7y6cBeFnFkYngJbuX_ROyloFelrVVDWgG3pb0HE
     authorizations:
     - sequence: 1
       invocation_id: run_019fafac-4fe5-796f-aa10-130f87141949
@@ -79,6 +79,15 @@ claim:
       candidate_remote_ref: refs/heads/scott/issue-781-dogfood-guide
       acknowledged_candidate_head: null
       recorded_at: '2026-07-29T21:55:16.342094Z'
+    - sequence: 4
+      invocation_id: run_019fafac-4fe5-796f-aa10-130f87141949
+      phase: pre_external_mutation
+      action: repository.candidate.push
+      proposed_effect_digest: sha256:5ee8cac0e9c538bbc5db7c3992d9187d63b4dcb21182680381b44c366e221aa7
+      candidate_head: fc9022ffd1b47a74a1b85580bca5dc4a504cef78
+      candidate_remote_ref: refs/heads/scott/issue-781-dogfood-guide
+      acknowledged_candidate_head: null
+      recorded_at: '2026-07-29T22:15:44.500053Z'
   candidate: null
 blocking_message_id: null
 attempt_receipt_id: null
