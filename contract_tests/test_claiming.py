@@ -2418,7 +2418,7 @@ print(json.dumps(value, sort_keys=True))
         self.assertEqual(work["claim"]["candidate"]["head_revision"], latest_head)
         reconstruct_mailbox(checkout)
 
-    def test_inherited_candidate_survives_pr_block_release_reclaim_and_delivery(self) -> None:
+    def test_denied_pr_ack_recovery_survives_release_reclaim_and_delivery(self) -> None:
         def fresh_coordinator() -> ClaimCoordinator:
             return ClaimCoordinator(
                 str(self.mailbox_remote),
@@ -2601,9 +2601,6 @@ print(json.dumps(value, sort_keys=True))
         )
 
         self.coordinator = fresh_coordinator()
-        advanced_claim = self.claim(token="head-advance-token-0")
-        advanced_delegation = self.delegation()
-        advanced_invocation = self.delegated_invocation(advanced_claim)
         git(
             self.project_checkout,
             "-c",
@@ -2613,11 +2610,31 @@ print(json.dumps(value, sort_keys=True))
             "commit",
             "--allow-empty",
             "-m",
-            "Advance inherited candidate",
+            "Advance canonical base",
         )
-        advanced_head = git(self.project_checkout, "rev-parse", "HEAD").stdout.strip()
-        git(self.project_checkout, "push", "origin", f"{advanced_head}:{candidate_ref}")
-        advanced_candidate = {**candidate, "head_sha": advanced_head}
+        git(self.project_checkout, "push", "origin", "HEAD:main")
+        advanced_claim = self.claim(token="head-advance-token-0")
+        advanced_delegation = self.delegation()
+        advanced_invocation = self.delegated_invocation(advanced_claim)
+        advanced_base = advanced_invocation["repository"]["base_sha"]
+        self.assertNotEqual(advanced_base, candidate["base_sha"])
+        candidate_tree = git(self.project_checkout, "rev-parse", "HEAD^{tree}").stdout.strip()
+        advanced_head = git(
+            self.project_checkout,
+            "-c",
+            "user.name=Atelier Test",
+            "-c",
+            "user.email=atelier-test@invalid",
+            "commit-tree",
+            candidate_tree,
+            "-m",
+            "Rewrite inherited candidate",
+        ).stdout.strip()
+        advanced_candidate = {
+            **candidate,
+            "base_sha": advanced_base,
+            "head_sha": advanced_head,
+        }
         advanced_terminal_candidate = {
             **advanced_candidate,
             "publication": {
@@ -2643,29 +2660,52 @@ print(json.dumps(value, sort_keys=True))
             token="head-advance-token-1",
             candidate=advanced_candidate,
         )
-        advanced_published = self.delegated_checkpoint(
-            advanced_delegation,
+        git(
+            self.project_checkout,
+            "push",
+            "--force",
+            "origin",
+            f"{advanced_head}:{candidate_ref}",
+        )
+        recoverable_candidate = {
+            **advanced_candidate,
+            "publication": {"kind": "ordinary", "pull_requests": []},
+        }
+        denied_publication = self.delegated_request(
             advanced_invocation,
             advanced_push,
             action="repository.candidate.push",
-            token="head-advance-token-2",
             phase="candidate_published",
-            candidate=advanced_terminal_candidate,
+            candidate=recoverable_candidate,
+        )
+        denial = self.assert_checkpoint_denied_without_mutation(
+            advanced_delegation,
+            advanced_invocation,
+            denied_publication,
+        )
+        self.assertIn(
+            "candidate pull request metadata lacks exact pre-mutation authority",
+            denial["reason"],
         )
         advanced_blocked_result = self.blocked_result(
             advanced_invocation,
-            advanced_published,
-            candidate=advanced_terminal_candidate,
+            advanced_push,
+            candidate=recoverable_candidate,
             authority_used=["repository.candidate.push"],
         )
         advanced_blocked_result["blocking_reason"] = (
-            "The same pull request remains blocked after its candidate head advanced."
+            "The candidate push succeeded, but publication acknowledgement was denied "
+            "because the existing pull request lacked fresh exact authority."
         )
+        advanced_blocked_result["unresolved_obligations"] = [
+            "Release and reclaim the exact pushed candidate.",
+            "Obtain fresh pull_request.update authority before restoring the existing PR.",
+        ]
         advanced_delegation.finalize(
             self.work_id,
             advanced_invocation,
             advanced_blocked_result,
-            self.fence(advanced_published),
+            self.fence(advanced_push),
             approved_commit=self.approved_commit,
             policy_target=self.policy_target(),
             host_target=self.delegation_host_target(),
@@ -2689,41 +2729,50 @@ print(json.dumps(value, sort_keys=True))
                 "remote": "origin",
                 "remote_url": candidate["remote_url"],
                 "remote_ref": candidate_ref,
-                "base_revision": candidate["base_sha"],
+                "base_revision": advanced_base,
                 "head_revision": advanced_head,
-                "pull_request": pull_request_url,
+                "pull_request": None,
                 "workspace_id": None,
-                "published_at": (self.live_at + timedelta(minutes=2))
+                "published_at": (self.live_at + timedelta(minutes=3))
                 .isoformat()
                 .replace("+00:00", "Z"),
             },
         )
         self.assertEqual(advanced_work["claim"]["inherited_receipt_id"], release_id)
-
-        advanced_work["claim"]["inherited_receipt_id"] = first_release_id
-        fixtures.write_markdown(
-            advanced_checkout / f"work/{self.work_id}/work.md",
-            advanced_work,
+        blocked_receipt, _ = _read_yaml(
+            advanced_checkout
+            / f"work/{self.work_id}/receipts/{advanced_work['attempt_receipt_id']}.md",
+            frontmatter=True,
+            label="denied acknowledgement receipt",
         )
-        with self.assertRaisesRegex(MailboxValidationError, "checkpoint-pr-authority"):
-            reconstruct_mailbox(advanced_checkout)
+        prior_receipt, _ = _read_yaml(
+            advanced_checkout / f"work/{self.work_id}/receipts/{release_id}.md",
+            frontmatter=True,
+            label="prior PR-bearing receipt",
+        )
+        self.assertIsNone(blocked_receipt["candidate"]["pull_request"])
+        self.assertEqual(
+            blocked_receipt["unresolved_obligations"],
+            advanced_blocked_result["unresolved_obligations"],
+        )
+        self.assertEqual(prior_receipt["candidate"]["pull_request"], pull_request_url)
 
         advanced_release_id = new_identifier("rcp")
         self.coordinator.release(
             self.work_id,
-            self.fence(advanced_published),
+            self.fence(advanced_push),
             receipt_id=advanced_release_id,
-            reason="Transfer the same-PR advanced candidate to a final worker.",
+            reason="Transfer the denied-acknowledgement candidate to a final worker.",
             ended_at=OBSERVED_AT + timedelta(minutes=8),
         )
         self.coordinator = fresh_coordinator()
         final_claim = self.claim(token="ready-pr-token-0")
         final_delegation = self.delegation()
         final_invocation = self.delegated_invocation(final_claim)
-        replacement_pull_request_url = "https://github.com/example/project-1/pull/795"
+        replacement_pull_request_url = pull_request_url
         replacement_terminal_candidate = json.loads(json.dumps(advanced_terminal_candidate))
         replacement_pull_request = replacement_terminal_candidate["publication"]["pull_requests"][0]
-        replacement_pull_request["id"] = "795"
+        replacement_pull_request["id"] = "794"
         replacement_pull_request["url"] = replacement_pull_request_url
         replacement_authorized = self.delegated_checkpoint(
             final_delegation,
