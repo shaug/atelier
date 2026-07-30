@@ -41,7 +41,7 @@ approval:
 claim:
   id: clm_019fb207-d29f-78f8-832c-7aca86e4db06
   worker_run_id: run_019fb207-d2e4-728b-9630-e3f755fed50f
-  inherited_receipt_id: rcp_019fb1f0-d83e-7b62-9cd0-91a8c2de5d66
+  inherited_receipt_id: null
   work_revision: 2
   approved_commit: 8e4e96e7e50888412fcf11fb7a64e74fedc88950
   policy_commit: b072158d739952d687673bfdd9c371f2115597b3
@@ -63,18 +63,9 @@ claim:
       candidate_pull_request: null
       acknowledged_candidate_head: null
       recorded_at: '2026-07-30T08:16:12.052434Z'
-  candidate:
-    repository: github:shaug/atelier
-    remote: origin
-    remote_url: https://github.com/shaug/atelier.git
-    remote_ref: refs/heads/scott/issue-781-dogfood-guide
-    base_revision: b072158d739952d687673bfdd9c371f2115597b3
-    head_revision: c1ff7f433d52826f5bed4c45d5bbd86bbf78781d
-    pull_request: https://github.com/shaug/atelier/pull/793
-    workspace_id: null
-    published_at: '2026-07-30T07:27:02.772360Z'
+  candidate: null
 blocking_message_id: null
-attempt_receipt_id: rcp_019fb1f0-d83e-7b62-9cd0-91a8c2de5d66
+attempt_receipt_id: null
 delivery_receipt_id: null
 acceptance: null
 ---
