@@ -65,6 +65,15 @@ match the still-open current native ticket before recording a receipt.
   blocked receipt atomically, records one unresolved planner decision, and retains
   mutation ownership. A later attempt still needs fresh exact PR authority before
   it can publish or restore PR metadata.
+- If installing that recovery advances canonical main beyond the sealed invocation
+  base, only this same terminal blocked recovery may finalize across the stale base.
+  The replacement must still be the final exact authorized push on the inherited
+  repository, remote, and ref, must assert no PR metadata, and must retain unresolved
+  obligations. The receipt records both base revisions as a durable obligation.
+  Checkpoints, ordinary blocked results, and delivery remain current-base-only. A
+  fresh claimant may advance the recovered candidate to current main only through
+  an exact push and `candidate_published` acknowledgement before restoring PR
+  metadata under fresh exact authority.
 - `requires_epic` is recorded as a blocked attempt for planner action. Atelier
   does not invoke `implement-epic` from delegated work.
 

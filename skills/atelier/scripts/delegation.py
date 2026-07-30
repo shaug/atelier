@@ -409,10 +409,20 @@ class DelegationCoordinator:
                 observation_not_before=observation_not_before,
                 now=now,
             )
-            _require_current_invocation_contract(invocation, state)
             if state.work["status"] != "active":
                 raise MailboxTransitionRejected(f"{work_id}: terminal result requires active work")
             claim = copy.deepcopy(_require_fence(state.work, fence))
+            stale_base_recovery = _stale_base_blocked_recovery(
+                invocation,
+                result,
+                claim,
+                current_base=state.current_policy.commit,
+            )
+            _require_current_invocation_contract(
+                invocation,
+                state,
+                allow_stale_base=stale_base_recovery,
+            )
             if claim["invocation_digest"] != _canonical_digest(invocation):
                 raise MailboxTransitionRejected(
                     "delegated invocation does not match its sealed digest"
@@ -421,6 +431,17 @@ class DelegationCoordinator:
                 raise MailboxTransitionRejected("terminal ticket observation is not current")
             _require_tracker_transition(result, state.observation)
             evidence = _attempt_evidence(result)
+            if stale_base_recovery:
+                evidence = AttemptEvidence(
+                    validation=evidence.validation,
+                    reviews=evidence.reviews,
+                    unresolved_obligations=(
+                        *evidence.unresolved_obligations,
+                        "Delegated invocation base "
+                        f"{invocation['repository']['base_sha']} is stale against "
+                        f"current canonical base {state.current_policy.commit}.",
+                    ),
+                )
             outcome = "delivered" if terminal == "ready_pr" else "blocked"
             body = (
                 "Delegated candidate delivered."
@@ -876,8 +897,62 @@ def _require_tracker_transition(result: Mapping[str, Any], observation: Mapping[
         )
 
 
+def _stale_base_blocked_recovery(
+    invocation: Mapping[str, Any],
+    result: Mapping[str, Any],
+    claim: Mapping[str, Any],
+    *,
+    current_base: str,
+) -> bool:
+    candidate = result.get("candidate")
+    current = claim.get("candidate")
+    ledger = claim["checkpoint"]["authorizations"]
+    if (
+        invocation["repository"]["base_sha"] == current_base
+        or result["terminal_state"] != "blocked"
+        or result["implementation_state"] != "published"
+        or not result["handoff"]["transferable"]
+        or not result["unresolved_obligations"]
+        or candidate is None
+        or current is None
+        or current["pull_request"] is None
+        or candidate["publication"] != {"kind": "ordinary", "pull_requests": []}
+        or not ledger
+    ):
+        return False
+    candidate_identity = (
+        candidate["repository"],
+        candidate["remote_url"],
+        candidate["remote_ref"],
+        candidate["base_sha"],
+        candidate["head_sha"],
+    )
+    current_identity = (
+        current["repository"],
+        current["remote_url"],
+        current["remote_ref"],
+        current["base_revision"],
+        current["head_revision"],
+    )
+    last = ledger[-1]
+    return (
+        candidate_identity != current_identity
+        and candidate["repository"] == invocation["repository"]["identity"]
+        and candidate["remote_url"] == invocation["repository"]["remote_url"]
+        and candidate["base_sha"] == invocation["repository"]["base_sha"]
+        and candidate["remote_ref"] != invocation["repository"]["base_ref"]
+        and last["phase"] == "pre_external_mutation"
+        and last["action"] == "repository.candidate.push"
+        and last["candidate_head"] == candidate["head_sha"]
+        and last["candidate_remote_ref"] == candidate["remote_ref"]
+    )
+
+
 def _require_current_invocation_contract(
-    invocation: Mapping[str, Any], state: Any
+    invocation: Mapping[str, Any],
+    state: Any,
+    *,
+    allow_stale_base: bool = False,
 ) -> None:
     policy = state.effective_policy
     current_acceptance = list(policy["acceptance"]["evidence"])
@@ -888,7 +963,10 @@ def _require_current_invocation_contract(
         raise MailboxTransitionRejected(
             "delegated invocation repository does not match the current project"
         )
-    if invocation["repository"]["base_sha"] != state.current_policy.commit:
+    if (
+        invocation["repository"]["base_sha"] != state.current_policy.commit
+        and not allow_stale_base
+    ):
         raise MailboxTransitionRejected(
             "delegated invocation base is stale against the current repository"
         )
