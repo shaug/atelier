@@ -50,12 +50,16 @@ asking to continue does not grant worker authority.
 1. Start without the planner transcript. Complete a fresh host preflight, read
    the canonical mailbox with `mailbox-validation.md`, and capture a complete
    current GitHub observation.
-2. Read `claiming.md`. Claim only the approved, eligible assignment with
-   `scripts/claiming.py claim`; retain the returned claim ID, worker run ID,
-   continuation token, and approved mailbox commit.
+2. Read `claiming.md`. From canonical mailbox Git history, identify the exact
+   commit that promoted the current work revision to `approved`; supply it as
+   `approved_commit` when claiming the eligible assignment with
+   `scripts/claiming.py claim`. Retain the returned claim ID, worker run ID,
+   continuation token, canonical claim-transition `commit`, and `base_revision`.
 3. Read `delegation.md`. Use `scripts/delegation.py` with `operation: prepare`
-   to seal one immutable Agent Scripts v2 invocation and its host-owned fresh
-   observation command into the claim.
+   to write one immutable Agent Scripts v2 invocation to the current task's
+   host-local path. Preparation seals only the invocation digest into the claim;
+   the invocation and its host-owned fresh observation command are not shared
+   mailbox state and are not reusable by a recovery task.
 4. Give that unchanged invocation to one fresh
    `agent-scripts:implement-ticket` worker. The implementation worker follows
    Agent Scripts' own workflow, uses every checkpoint before an allowed
