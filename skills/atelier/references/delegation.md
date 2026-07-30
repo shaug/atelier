@@ -74,6 +74,19 @@ match the still-open current native ticket before recording a receipt.
   fresh claimant may advance the recovered candidate to current main only through
   an exact push and `candidate_published` acknowledgement before restoring PR
   metadata under fresh exact authority.
+- If installing the recovery also adds native blockers after the sealed ticket
+  observation, the caller may provide `invocation_observation_path` for that same
+  terminal blocked recovery only. Atelier validates the historical observation,
+  binds its material digest to the unchanged invocation and result, and compares
+  it with the fresh terminal observation. The repository, ticket identity, title,
+  body, state, update timestamp, parent, sub-issues, blocking relationships, and
+  every pre-existing blocker must be identical. The only permitted difference is
+  a nonempty set of additive blockers that are all currently closed. The receipt
+  records both ticket-observation digests and the exact added blocker numbers and
+  identities as a durable obligation. Missing historical evidence, open or
+  reopened blockers, removed or changed dependencies, and every other ticket
+  change fail closed. This exception never applies to checkpoints, `ready_pr`,
+  delivery, audit, or acceptance.
 - `requires_epic` is recorded as a blocked attempt for planner action. Atelier
   does not invoke `implement-epic` from delegated work.
 
@@ -91,6 +104,8 @@ The CLI accepts one JSON object containing:
 - `observation_path` and `observation_not_before`;
 - for `prepare`, `checkpoint_invocation_path` and the host-owned
   `observation_command`; and
+- for the exact additive-closed-blocker terminal recovery,
+  `invocation_observation_path`; and
 - the remaining operation-specific fence, invocation, checkpoint request, result,
   and timestamps.
 
