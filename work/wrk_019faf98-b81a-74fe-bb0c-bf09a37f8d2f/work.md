@@ -4,7 +4,7 @@ id: wrk_019faf98-b81a-74fe-bb0c-bf09a37f8d2f
 title: Document the production dogfood lifecycle
 project_id: prj_019faf81-a727-7f87-b3bf-ee92b37450eb
 initiative_id: ini_019faf98-b7e3-7f60-818b-d34bc08bf3a4
-status: active
+status: delivered
 revision: 2
 dependencies: []
 replaces: []
@@ -100,12 +100,12 @@ claim:
     remote_ref: refs/heads/scott/issue-781-dogfood-guide
     base_revision: b072158d739952d687673bfdd9c371f2115597b3
     head_revision: b267cc67ae4ab34843e3d56d4bc67ad6888a21af
-    pull_request: null
+    pull_request: https://github.com/shaug/atelier/pull/793
     workspace_id: null
     published_at: '2026-07-30T08:33:05.258386Z'
 blocking_message_id: null
-attempt_receipt_id: rcp_019fb21f-24d0-792a-8749-fd49e264a254
-delivery_receipt_id: null
+attempt_receipt_id: rcp_019fb22a-202a-74a4-93e5-639f05cbe10e
+delivery_receipt_id: rcp_019fb22a-202a-74a4-93e5-639f05cbe10e
 acceptance: null
 ---
 ## Intent
