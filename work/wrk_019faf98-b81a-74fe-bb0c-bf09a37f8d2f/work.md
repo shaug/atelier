@@ -50,8 +50,8 @@ claim:
   claimed_at: '2026-07-30T06:59:57.568610Z'
   host: codex
   checkpoint:
-    sequence: 3
-    continuation_token: OQJo1lx2JFxoCVxqJ7imHkQ1hz3FpVA37DmScUXdLYA
+    sequence: 4
+    continuation_token: 2vdOUh9c6j2_gMFVOAas9qwcKn6gJLwuhGRcBin8x-g
     authorizations:
     - sequence: 1
       invocation_id: run_019fb1d1-d376-78d1-991d-fe1065d13eb4
@@ -83,16 +83,26 @@ claim:
       candidate_pull_request: null
       acknowledged_candidate_head: null
       recorded_at: '2026-07-30T07:26:05.342856Z'
+    - sequence: 4
+      invocation_id: run_019fb1d1-d376-78d1-991d-fe1065d13eb4
+      phase: candidate_published
+      action: repository.candidate.push
+      proposed_effect_digest: sha256:5afbc557a379f7a3e2f057ce4434ef9cf0fe1f151df33ed17d746cc1e20c58c4
+      candidate_head: c1ff7f433d52826f5bed4c45d5bbd86bbf78781d
+      candidate_remote_ref: refs/heads/scott/issue-781-dogfood-guide
+      candidate_pull_request: null
+      acknowledged_candidate_head: c1ff7f433d52826f5bed4c45d5bbd86bbf78781d
+      recorded_at: '2026-07-30T07:27:02.772360Z'
   candidate:
     repository: github:shaug/atelier
     remote: origin
     remote_url: https://github.com/shaug/atelier.git
     remote_ref: refs/heads/scott/issue-781-dogfood-guide
     base_revision: b072158d739952d687673bfdd9c371f2115597b3
-    head_revision: 904314c835a870fe9dd0a0d75f4ff1e23e78cad8
+    head_revision: c1ff7f433d52826f5bed4c45d5bbd86bbf78781d
     pull_request: null
     workspace_id: null
-    published_at: '2026-07-30T06:57:26.442429Z'
+    published_at: '2026-07-30T07:27:02.772360Z'
 blocking_message_id: null
 attempt_receipt_id: rcp_019fb1d1-4fc2-78e7-bd9d-455915812202
 delivery_receipt_id: null
