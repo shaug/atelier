@@ -41,6 +41,7 @@ approval:
 claim:
   id: clm_019fb015-ef90-7ed0-8fab-9768b255aa2d
   worker_run_id: run_019fb015-ee9a-77de-9062-990f107e9bbf
+  inherited_receipt_id: rcp_019fb015-7f52-7145-b7d5-6b49f4fb58f4
   work_revision: 2
   approved_commit: 8e4e96e7e50888412fcf11fb7a64e74fedc88950
   policy_commit: 7224a2396b5e289b80e59f4cf677959b0848ae75
@@ -59,6 +60,7 @@ claim:
       proposed_effect_digest: sha256:1c496432912a463292317bf84f68a82724545706dc90d8f824959c7f0c05f710
       candidate_head: fc9022ffd1b47a74a1b85580bca5dc4a504cef78
       candidate_remote_ref: refs/heads/scott/issue-781-dogfood-guide
+      candidate_pull_request: null
       acknowledged_candidate_head: null
       recorded_at: '2026-07-29T22:59:40.305852Z'
     - sequence: 2
@@ -68,6 +70,7 @@ claim:
       proposed_effect_digest: sha256:4eb25df0fe9ae2e9be2c274551e823581cf69db6bdf008a67f49dd8498742b4a
       candidate_head: fc9022ffd1b47a74a1b85580bca5dc4a504cef78
       candidate_remote_ref: refs/heads/scott/issue-781-dogfood-guide
+      candidate_pull_request: null
       acknowledged_candidate_head: null
       recorded_at: '2026-07-29T23:04:57.677972Z'
   candidate:
