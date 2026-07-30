@@ -10,6 +10,7 @@ import threading
 import unittest
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from contract_tests import test_mailbox as fixtures
@@ -18,6 +19,7 @@ from contract_tests.test_planning import (
     EVIDENCE,
     OBSERVED_AT,
     git,
+    issue_reference,
     observation,
     write_json,
 )
@@ -41,6 +43,7 @@ from skills.atelier.scripts.delegation import (
     RESULT_SCHEMA,
     DelegationCoordinator,
     DelegationError,
+    _additive_closed_blocker_drift,
     _require_tracker_transition,
 )
 from skills.atelier.scripts.git_mailbox import (
@@ -61,6 +64,7 @@ from skills.atelier.scripts.planning import (
     InitiativeDraft,
     Planner,
     PolicyTarget,
+    _ticket_material_digest,
 )
 
 APPROVED_EVIDENCE = EVIDENCE[:-1]
@@ -2616,6 +2620,11 @@ print(json.dumps(value, sort_keys=True))
         advanced_claim = self.claim(token="head-advance-token-0")
         advanced_delegation = self.delegation()
         advanced_invocation = self.delegated_invocation(advanced_claim)
+        invocation_observation_path = self.root / "advanced-invocation-observation.json"
+        write_json(
+            invocation_observation_path,
+            json.loads(self.observation_path.read_text(encoding="utf-8")),
+        )
         advanced_base = advanced_invocation["repository"]["base_sha"]
         self.assertNotEqual(advanced_base, candidate["base_sha"])
         candidate_tree = git(self.project_checkout, "rev-parse", "HEAD^{tree}").stdout.strip()
@@ -2701,6 +2710,20 @@ print(json.dumps(value, sort_keys=True))
         git(self.project_checkout, "push", "origin", "HEAD:main")
         current_base = git(self.project_checkout, "rev-parse", "HEAD").stdout.strip()
         self.assertNotEqual(current_base, advanced_invocation["repository"]["base_sha"])
+        closed_blocker_drift = json.loads(
+            invocation_observation_path.read_text(encoding="utf-8")
+        )
+        closed_blocker_drift["issue"]["blocked_by"].extend(
+            [
+                issue_reference(798, state="CLOSED"),
+                issue_reference(800, state="CLOSED"),
+            ]
+        )
+        current_ticket_digest = _ticket_material_digest(
+            closed_blocker_drift["issue"],
+            {"ticket": {"material_fields": ["body", "state", "relationships"]}},
+        )
+        write_json(self.observation_path, closed_blocker_drift)
         stale_checkpoint = self.delegated_request(
             advanced_invocation,
             advanced_push,
@@ -2759,6 +2782,7 @@ print(json.dumps(value, sort_keys=True))
             host_target=self.delegation_host_target(),
             observation_path=self.observation_path,
             observation_not_before=self.live_at,
+            invocation_observation_path=invocation_observation_path,
             ended_at=self.live_at + timedelta(minutes=3),
             now=self.live_at + timedelta(minutes=3),
         )
@@ -2806,6 +2830,11 @@ print(json.dumps(value, sort_keys=True))
                 "Delegated invocation base "
                 f"{advanced_invocation['repository']['base_sha']} is stale against "
                 f"current canonical base {current_base}.",
+                "Delegated ticket observation "
+                f"{advanced_invocation['ticket']['observation']} is stale against "
+                "current ticket observation "
+                f"{current_ticket_digest}; drift is limited "
+                "to additive closed blockers: #798 (issue-798), #800 (issue-800).",
             ],
         )
         self.assertEqual(prior_receipt["candidate"]["pull_request"], pull_request_url)
@@ -2909,6 +2938,7 @@ print(json.dumps(value, sort_keys=True))
         )
 
         live = observation(with_pull_request=True)
+        live["issue"] = json.loads(json.dumps(closed_blocker_drift["issue"]))
         live["observed_at"] = (
             (self.live_at + timedelta(minutes=9)).isoformat().replace("+00:00", "Z")
         )
@@ -3013,6 +3043,76 @@ print(json.dumps(value, sort_keys=True))
                 ("candidate_published", "repository.candidate.push"),
             ],
         )
+
+    def test_additive_closed_blocker_drift_is_exact_and_fail_closed(self) -> None:
+        prior = self.fresh_observation()
+        prior_path = self.root / "historical-ticket-observation.json"
+        write_json(prior_path, prior)
+        policy = {
+            "ticket": {
+                "material_fields": ["body", "state", "relationships"],
+            }
+        }
+        old_digest = _ticket_material_digest(prior["issue"], policy)
+        invocation = {
+            "repository": {
+                "identity": "github:example/project-1",
+            }
+        }
+        result = {"ticket": {"observation": old_digest}}
+
+        def drift_for(current: dict[str, Any], *, recoverable: bool = True):
+            state = SimpleNamespace(
+                observation=current,
+                effective_policy=policy,
+                ticket_digest=_ticket_material_digest(current["issue"], policy),
+            )
+            return _additive_closed_blocker_drift(
+                invocation,
+                result,
+                state,
+                invocation_observation_path=prior_path,
+                stale_base_recovery=recoverable,
+            )
+
+        current = json.loads(json.dumps(prior))
+        current["issue"]["blocked_by"].append(issue_reference(798, state="CLOSED"))
+        self.assertEqual(
+            drift_for(current),
+            (issue_reference(798, state="CLOSED"),),
+        )
+        self.assertIsNone(drift_for(current, recoverable=False))
+
+        invalid = json.loads(json.dumps(current))
+        invalid["issue"]["blocked_by"][-1]["state"] = "OPEN"
+        self.assertIsNone(drift_for(invalid))
+
+        invalid = json.loads(json.dumps(current))
+        invalid["issue"]["blocked_by"] = invalid["issue"]["blocked_by"][1:]
+        self.assertIsNone(drift_for(invalid))
+
+        invalid = json.loads(json.dumps(current))
+        invalid["issue"]["blocked_by"][0]["title"] = "Changed existing dependency"
+        self.assertIsNone(drift_for(invalid))
+
+        mutations = {
+            "title": lambda issue: issue.update(title="Changed title"),
+            "body": lambda issue: issue.update(body="Changed body"),
+            "state": lambda issue: issue.update(state="CLOSED"),
+            "updated_at": lambda issue: issue.update(updated_at="2026-07-28T05:00:00Z"),
+            "parent": lambda issue: issue.update(parent=issue_reference(900)),
+            "sub_issues": lambda issue: issue["sub_issues"].append(issue_reference(901)),
+            "blocking": lambda issue: issue["blocking"].append(issue_reference(902)),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(drift=label):
+                invalid = json.loads(json.dumps(current))
+                mutate(invalid["issue"])
+                self.assertIsNone(drift_for(invalid))
+
+        invalid = json.loads(json.dumps(current))
+        invalid["repository"]["name_with_owner"] = "example/other-project"
+        self.assertIsNone(drift_for(invalid))
 
     def test_delegation_delivers_one_exact_ready_pull_request(self) -> None:
         claimed = self.claim()

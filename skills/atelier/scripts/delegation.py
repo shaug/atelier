@@ -48,7 +48,11 @@ from skills.atelier.scripts.git_mailbox import (
 )
 from skills.atelier.scripts.host_boundary import HostBoundaryError, check_host, validate_observation
 from skills.atelier.scripts.identifiers import new_identifier
-from skills.atelier.scripts.planning import PolicyTarget, _render_document
+from skills.atelier.scripts.planning import (
+    PolicyTarget,
+    _render_document,
+    _ticket_material_digest,
+)
 
 CAPABILITY = "agent-scripts.implement-ticket/delegated-execution/v2"
 INVOCATION_SCHEMA = "agent-scripts.implement-ticket/delegated-invocation/v2"
@@ -344,6 +348,7 @@ class DelegationCoordinator:
         host_target: HostTarget,
         observation_path: Path,
         observation_not_before: datetime,
+        invocation_observation_path: Path | None = None,
         ended_at: datetime,
         now: datetime | None = None,
     ) -> WriteResult:
@@ -427,20 +432,43 @@ class DelegationCoordinator:
                 raise MailboxTransitionRejected(
                     "delegated invocation does not match its sealed digest"
                 )
+            ticket_drift = None
             if result["ticket"]["observation"] != state.ticket_digest:
-                raise MailboxTransitionRejected("terminal ticket observation is not current")
+                ticket_drift = _additive_closed_blocker_drift(
+                    invocation,
+                    result,
+                    state,
+                    invocation_observation_path=invocation_observation_path,
+                    stale_base_recovery=stale_base_recovery,
+                )
+                if ticket_drift is None:
+                    raise MailboxTransitionRejected(
+                        "terminal ticket observation is not current"
+                    )
             _require_tracker_transition(result, state.observation)
             evidence = _attempt_evidence(result)
-            if stale_base_recovery:
+            if stale_base_recovery or ticket_drift is not None:
+                obligations = list(evidence.unresolved_obligations)
+                if stale_base_recovery:
+                    obligations.append(
+                        "Delegated invocation base "
+                        f"{invocation['repository']['base_sha']} is stale against "
+                        f"current canonical base {state.current_policy.commit}."
+                    )
+                if ticket_drift is not None:
+                    blockers = ", ".join(
+                        f"#{item['number']} ({item['id']})" for item in ticket_drift
+                    )
+                    obligations.append(
+                        "Delegated ticket observation "
+                        f"{result['ticket']['observation']} is stale against current "
+                        f"ticket observation {state.ticket_digest}; drift is limited "
+                        f"to additive closed blockers: {blockers}."
+                    )
                 evidence = AttemptEvidence(
                     validation=evidence.validation,
                     reviews=evidence.reviews,
-                    unresolved_obligations=(
-                        *evidence.unresolved_obligations,
-                        "Delegated invocation base "
-                        f"{invocation['repository']['base_sha']} is stale against "
-                        f"current canonical base {state.current_policy.commit}.",
-                    ),
+                    unresolved_obligations=tuple(obligations),
                 )
             outcome = "delivered" if terminal == "ready_pr" else "blocked"
             body = (
@@ -948,6 +976,69 @@ def _stale_base_blocked_recovery(
     )
 
 
+def _additive_closed_blocker_drift(
+    invocation: Mapping[str, Any],
+    result: Mapping[str, Any],
+    state: Any,
+    *,
+    invocation_observation_path: Path | None,
+    stale_base_recovery: bool,
+) -> tuple[dict[str, Any], ...] | None:
+    if not stale_base_recovery or invocation_observation_path is None:
+        return None
+    prior_value = _read_json(invocation_observation_path)
+    observed_at = _parse_timestamp(prior_value["observed_at"])
+    prior = validate_observation(
+        invocation_observation_path,
+        not_before=observed_at,
+        now=observed_at,
+    )
+    if (
+        prior["repository"] != state.observation["repository"]
+        or prior["repository"]["name_with_owner"]
+        != invocation["repository"]["identity"].removeprefix("github:")
+    ):
+        return None
+    prior_issue = prior["issue"]
+    current_issue = state.observation["issue"]
+    if (
+        _ticket_material_digest(prior_issue, state.effective_policy)
+        != result["ticket"]["observation"]
+    ):
+        return None
+    unchanged_fields = (
+        "id",
+        "number",
+        "title",
+        "body",
+        "state",
+        "url",
+        "updated_at",
+        "parent",
+        "sub_issues",
+        "blocking",
+    )
+    if any(prior_issue[name] != current_issue[name] for name in unchanged_fields):
+        return None
+    prior_blockers = {item["id"]: item for item in prior_issue["blocked_by"]}
+    current_blockers = {item["id"]: item for item in current_issue["blocked_by"]}
+    if any(current_blockers.get(identifier) != item for identifier, item in prior_blockers.items()):
+        return None
+    added = tuple(
+        sorted(
+            (
+                item
+                for identifier, item in current_blockers.items()
+                if identifier not in prior_blockers
+            ),
+            key=lambda item: (item["number"], item["id"]),
+        )
+    )
+    if not added or any(item["state"] != "CLOSED" for item in added):
+        return None
+    return added
+
+
 def _require_current_invocation_contract(
     invocation: Mapping[str, Any],
     state: Any,
@@ -1251,6 +1342,11 @@ def execute_request(value: Mapping[str, Any]) -> dict[str, Any]:
             value["invocation"],
             value["result"],
             _fence(value["fence"]),
+            invocation_observation_path=(
+                Path(value["invocation_observation_path"])
+                if value.get("invocation_observation_path")
+                else None
+            ),
             ended_at=_parse_timestamp(value["ended_at"]),
             **common,
         )
