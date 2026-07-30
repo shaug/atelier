@@ -989,6 +989,17 @@ def _validate_claim(
         and ledger[-1]["candidate_head"] == candidate["head_revision"]
         and ledger[-1]["candidate_remote_ref"] == candidate["remote_ref"]
     )
+    latest_candidate_publication = next(
+        (entry for entry in reversed(ledger) if entry["phase"] == "candidate_published"),
+        None,
+    )
+    acknowledged_current_candidate = (
+        candidate is not None
+        and latest_candidate_publication is not None
+        and latest_candidate_publication["acknowledged_candidate_head"]
+        == candidate["head_revision"]
+        and latest_candidate_publication["candidate_remote_ref"] == candidate["remote_ref"]
+    )
 
     inherited_receipt_id = claim["inherited_receipt_id"]
     inherited_receipt = (
@@ -1012,6 +1023,10 @@ def _validate_claim(
                 not same_lineage(inherited_receipt["candidate"], candidate)
                 and not (
                     recovered_current_candidate
+                    and same_remote_lineage(inherited_receipt["candidate"], candidate)
+                )
+                and not (
+                    acknowledged_current_candidate
                     and same_remote_lineage(inherited_receipt["candidate"], candidate)
                 )
             )
@@ -1222,7 +1237,7 @@ def _validate_claim(
     acknowledged_same_lineage_advance = (
         inherited_candidate_source is not None
         and candidate is not None
-        and same_lineage(inherited_candidate_source, candidate)
+        and same_remote_lineage(inherited_candidate_source, candidate)
         and bool(publication_entries)
         and publication_entries[-1]["candidate_head"] == candidate["head_revision"]
         and publication_entries[-1]["candidate_remote_ref"] == candidate["remote_ref"]

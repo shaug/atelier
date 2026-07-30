@@ -2687,6 +2687,35 @@ print(json.dumps(value, sort_keys=True))
             "candidate pull request metadata lacks exact pre-mutation authority",
             denial["reason"],
         )
+        git(
+            self.project_checkout,
+            "-c",
+            "user.name=Atelier Test",
+            "-c",
+            "user.email=atelier-test@invalid",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "Advance canonical base after denied acknowledgement",
+        )
+        git(self.project_checkout, "push", "origin", "HEAD:main")
+        current_base = git(self.project_checkout, "rev-parse", "HEAD").stdout.strip()
+        self.assertNotEqual(current_base, advanced_invocation["repository"]["base_sha"])
+        stale_checkpoint = self.delegated_request(
+            advanced_invocation,
+            advanced_push,
+            action="repository.candidate.push",
+            candidate=recoverable_candidate,
+        )
+        stale_denial = self.assert_checkpoint_denied_without_mutation(
+            advanced_delegation,
+            advanced_invocation,
+            stale_checkpoint,
+        )
+        self.assertIn(
+            "delegated invocation base is stale against the current repository",
+            stale_denial["reason"],
+        )
         advanced_blocked_result = self.blocked_result(
             advanced_invocation,
             advanced_push,
@@ -2701,6 +2730,25 @@ print(json.dumps(value, sort_keys=True))
             "Release and reclaim the exact pushed candidate.",
             "Obtain fresh pull_request.update authority before restoring the existing PR.",
         ]
+        ordinary_blocked = json.loads(json.dumps(advanced_blocked_result))
+        ordinary_blocked["unresolved_obligations"] = []
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "delegated invocation base is stale against the current repository",
+        ):
+            advanced_delegation.finalize(
+                self.work_id,
+                advanced_invocation,
+                ordinary_blocked,
+                self.fence(advanced_push),
+                approved_commit=self.approved_commit,
+                policy_target=self.policy_target(),
+                host_target=self.delegation_host_target(),
+                observation_path=self.observation_path,
+                observation_not_before=self.live_at,
+                ended_at=self.live_at + timedelta(minutes=3),
+                now=self.live_at + timedelta(minutes=3),
+            )
         advanced_delegation.finalize(
             self.work_id,
             advanced_invocation,
@@ -2753,7 +2801,12 @@ print(json.dumps(value, sort_keys=True))
         self.assertIsNone(blocked_receipt["candidate"]["pull_request"])
         self.assertEqual(
             blocked_receipt["unresolved_obligations"],
-            advanced_blocked_result["unresolved_obligations"],
+            [
+                *advanced_blocked_result["unresolved_obligations"],
+                "Delegated invocation base "
+                f"{advanced_invocation['repository']['base_sha']} is stale against "
+                f"current canonical base {current_base}.",
+            ],
         )
         self.assertEqual(prior_receipt["candidate"]["pull_request"], pull_request_url)
 
@@ -2769,18 +2822,90 @@ print(json.dumps(value, sort_keys=True))
         final_claim = self.claim(token="ready-pr-token-0")
         final_delegation = self.delegation()
         final_invocation = self.delegated_invocation(final_claim)
+        self.assertEqual(final_invocation["repository"]["base_sha"], current_base)
         replacement_pull_request_url = pull_request_url
+        current_head = git(
+            self.project_checkout,
+            "-c",
+            "user.name=Atelier Test",
+            "-c",
+            "user.email=atelier-test@invalid",
+            "commit-tree",
+            candidate_tree,
+            "-p",
+            current_base,
+            "-m",
+            "Rebase denied acknowledgement candidate onto current main",
+        ).stdout.strip()
+        current_candidate = {
+            **advanced_candidate,
+            "base_sha": current_base,
+            "head_sha": current_head,
+        }
         replacement_terminal_candidate = json.loads(json.dumps(advanced_terminal_candidate))
+        replacement_terminal_candidate.update(current_candidate)
         replacement_pull_request = replacement_terminal_candidate["publication"]["pull_requests"][0]
         replacement_pull_request["id"] = "794"
         replacement_pull_request["url"] = replacement_pull_request_url
-        replacement_authorized = self.delegated_checkpoint(
+        replacement_pull_request["base_sha"] = current_base
+        replacement_pull_request["head_sha"] = current_head
+        current_push = self.delegated_checkpoint(
             final_delegation,
             final_invocation,
             final_claim,
-            action="pull_request.update",
+            action="repository.candidate.push",
             token="ready-pr-token-1",
-            candidate=advanced_candidate,
+            candidate=current_candidate,
+        )
+        git(
+            self.project_checkout,
+            "push",
+            "--force",
+            "origin",
+            f"{current_head}:{candidate_ref}",
+        )
+        current_acknowledged = self.delegated_checkpoint(
+            final_delegation,
+            final_invocation,
+            current_push,
+            action="repository.candidate.push",
+            phase="candidate_published",
+            token="ready-pr-token-2",
+            candidate={
+                **current_candidate,
+                "publication": {"kind": "ordinary", "pull_requests": []},
+            },
+        )
+        replacement_authorized = self.delegated_checkpoint(
+            final_delegation,
+            final_invocation,
+            current_acknowledged,
+            action="pull_request.update",
+            token="ready-pr-token-3",
+            candidate=current_candidate,
+        )
+        current_repush = self.delegated_checkpoint(
+            final_delegation,
+            final_invocation,
+            replacement_authorized,
+            action="repository.candidate.push",
+            token="ready-pr-token-4",
+            candidate=current_candidate,
+        )
+        git(
+            self.project_checkout,
+            "push",
+            "origin",
+            f"{current_head}:{candidate_ref}",
+        )
+        pr_acknowledged = self.delegated_checkpoint(
+            final_delegation,
+            final_invocation,
+            current_repush,
+            action="repository.candidate.push",
+            phase="candidate_published",
+            token="ready-pr-token-5",
+            candidate=replacement_terminal_candidate,
         )
 
         live = observation(with_pull_request=True)
@@ -2789,10 +2914,10 @@ print(json.dumps(value, sort_keys=True))
         )
         live["pull_request"]["url"] = replacement_pull_request_url
         live["pull_request"]["base"].update(
-            ref=final_invocation["repository"]["base_ref"], sha=advanced_candidate["base_sha"]
+            ref=final_invocation["repository"]["base_ref"], sha=current_base
         )
         live["pull_request"]["head"].update(
-            ref=advanced_candidate["remote_ref"], sha=advanced_head
+            ref=current_candidate["remote_ref"], sha=current_head
         )
         write_json(self.observation_path, live)
         ready_result = {
@@ -2817,14 +2942,14 @@ print(json.dumps(value, sort_keys=True))
             "candidate": replacement_terminal_candidate,
             "handoff": {"transferable": True, "reason": None},
             "checkpoint": {
-                "last_sequence": replacement_authorized.sequence,
-                "continuation_token": replacement_authorized.continuation_token,
+                "last_sequence": pr_acknowledged.sequence,
+                "continuation_token": pr_acknowledged.continuation_token,
             },
             "validation": [
                 {
                     "name": command,
                     "outcome": "passed",
-                    "candidate_sha": advanced_head,
+                    "candidate_sha": current_head,
                     "observed_at": fixtures.TIMESTAMP,
                 }
                 for command in final_invocation["validation"]
@@ -2833,17 +2958,17 @@ print(json.dumps(value, sort_keys=True))
                 {
                     "name": "review-code-change",
                     "outcome": "passed",
-                    "candidate_sha": advanced_head,
+                    "candidate_sha": current_head,
                     "observed_at": fixtures.TIMESTAMP,
                 }
             ],
             "feedback": {
                 "unresolved_material_count": 0,
-                "candidate_sha": advanced_head,
+                "candidate_sha": current_head,
                 "observed_at": fixtures.TIMESTAMP,
             },
-            "authority_used": ["pull_request.update"],
-            "acceptance_evidence": self.acceptance_records(final_invocation, advanced_head),
+            "authority_used": ["repository.candidate.push", "pull_request.update"],
+            "acceptance_evidence": self.acceptance_records(final_invocation, current_head),
             "unresolved_obligations": [],
             "blocking_reason": None,
             "next_action": "Atelier validates the inherited ready pull request.",
@@ -2852,7 +2977,7 @@ print(json.dumps(value, sort_keys=True))
             self.work_id,
             final_invocation,
             ready_result,
-            self.fence(replacement_authorized),
+            self.fence(pr_acknowledged),
             approved_commit=self.approved_commit,
             policy_target=self.policy_target(),
             host_target=self.delegation_host_target(),
@@ -2870,7 +2995,7 @@ print(json.dumps(value, sort_keys=True))
         )
         reconstruct_mailbox(delivered_checkout)
         self.assertEqual(delivered_work["status"], "delivered")
-        self.assertEqual(delivered_work["claim"]["candidate"]["head_revision"], advanced_head)
+        self.assertEqual(delivered_work["claim"]["candidate"]["head_revision"], current_head)
         self.assertEqual(
             delivered_work["claim"]["candidate"]["pull_request"],
             replacement_pull_request_url,
@@ -2880,7 +3005,13 @@ print(json.dumps(value, sort_keys=True))
                 (entry["phase"], entry["action"])
                 for entry in delivered_work["claim"]["checkpoint"]["authorizations"]
             ],
-            [("pre_external_mutation", "pull_request.update")],
+            [
+                ("pre_external_mutation", "repository.candidate.push"),
+                ("candidate_published", "repository.candidate.push"),
+                ("pre_external_mutation", "pull_request.update"),
+                ("pre_external_mutation", "repository.candidate.push"),
+                ("candidate_published", "repository.candidate.push"),
+            ],
         )
 
     def test_delegation_delivers_one_exact_ready_pull_request(self) -> None:
