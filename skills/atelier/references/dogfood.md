@@ -121,9 +121,13 @@ or continue an invocation whose material ticket observation has changed.
 
 After a delivered `ready_pr` receipt, start a separate audit task. Read
 `audit.md`, complete the host preflight, reconstruct the mailbox from its
-canonical branch, and capture one complete current GitHub observation. Normalize
-the exact aggregate `review-code-change` result and every live review/comment
-disposition, then run `scripts/audit.py audit`.
+canonical branch, and capture one complete current GitHub observation. Run a
+fresh `review-code-change` in that audit task against the receipt-bound delivered
+head and comparison base, using raw current evidence rather than a worker-local
+artifact. Normalize that exact aggregate result and every live review/comment
+disposition, then run `scripts/audit.py audit`. The delivery receipt contributes
+only the review identity and verdict; the normalized audit-evidence file remains
+a temporary host output unless explicit acceptance persists it.
 
 Present the complete report and its acceptance fence to the operator. Every
 predicate must remain visibly `satisfied`, `violated`, `unknown`, or `stale`;
