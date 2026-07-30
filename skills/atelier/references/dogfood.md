@@ -99,6 +99,16 @@ Start a new task with no earlier task transcript. It must:
      Use delivered `takeover` only after an independently authorized rework decision
      because it returns the transferred candidate to active work.
 
+When `takeover` or a fresh `claim` produces a new active claim, repeat the
+preconditions in `delegation.md` against that new fence: capture a fresh complete
+GitHub observation, use `scripts/delegation.py` `prepare` to seal a new immutable
+invocation into the claim, pass it unchanged to one fresh
+`agent-scripts:implement-ticket` worker, service every checkpoint, and finalize the
+terminal result with another fresh observation. Never reuse the prior claim's
+invocation after takeover or a fresh claim, even when the native ticket is unchanged.
+A recovery that remains blocked is truthful blocked evidence, not a delivered or
+completed end-to-end dogfood run.
+
 The recovery task must retain the prior fence and token as historical evidence.
 It must never mint a token, guess a candidate SHA, reuse a stale observation,
 or continue an invocation whose material ticket observation has changed.
