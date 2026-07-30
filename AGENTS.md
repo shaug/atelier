@@ -16,9 +16,10 @@ The [Atelier as a Skill], [Git Mailbox Contract], [Project Policy Contract], and
 ## Current state
 
 The repository is a reset scaffold. The `/atelier` skill implements one
-GitHub-backed planning assignment and one claimed, delegated `ready_pr` work
-path. Production `audit` is not implemented. The open native issue graph
-beginning at #772 defines implementation order.
+GitHub-backed planning assignment, one claimed, delegated `ready_pr` work path,
+and production audit plus explicit operator acceptance for one delivered or
+accepted assignment. The open native issue graph beginning at #772 defines
+implementation order.
 
 Do not claim unavailable behavior or emulate it with ad hoc orchestration.
 
