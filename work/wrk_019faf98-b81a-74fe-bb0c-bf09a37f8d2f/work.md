@@ -50,9 +50,19 @@ claim:
   claimed_at: '2026-07-30T09:38:32.299602Z'
   host: codex
   checkpoint:
-    sequence: 0
-    continuation_token: 4MSWAqyLfILbT4SYpiZnjpKeIig7tgM_Dgr6ucI1iao
-    authorizations: []
+    sequence: 1
+    continuation_token: Fbahp05-kTYNuvjU8oOGHrRyXDhjzZ8iPtHnKkLEXUY
+    authorizations:
+    - sequence: 1
+      invocation_id: run_019fb263-ca88-73b6-963b-f73028ff9269
+      phase: pre_external_mutation
+      action: repository.candidate.create
+      proposed_effect_digest: sha256:7965d29b5d109d4ccb932f3509d94ce936db13787036891f5f1ff940e6382819
+      candidate_head: null
+      candidate_remote_ref: null
+      candidate_pull_request: null
+      acknowledged_candidate_head: null
+      recorded_at: '2026-07-30T09:43:45.644165Z'
   candidate:
     repository: github:shaug/atelier
     remote: origin
