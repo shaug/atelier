@@ -113,6 +113,7 @@
         "proposed_effect_digest",
         "candidate_head",
         "candidate_remote_ref",
+        "candidate_pull_request",
         "acknowledged_candidate_head",
         "recorded_at"
       ],
@@ -146,6 +147,17 @@
             },
             {
               "$ref": "#/$defs/branch_ref"
+            }
+          ]
+        },
+        "candidate_pull_request": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^https://github\\.com/[^/]+/[^/]+/pull/[1-9][0-9]*$"
             }
           ]
         },
@@ -239,6 +251,7 @@
       "required": [
         "id",
         "worker_run_id",
+        "inherited_receipt_id",
         "work_revision",
         "approved_commit",
         "policy_commit",
@@ -252,6 +265,9 @@
       "properties": {
         "id": {
           "$ref": "#/$defs/claim_id"
+        },
+        "inherited_receipt_id": {
+          "$ref": "#/$defs/nullable_receipt_id"
         },
         "worker_run_id": {
           "$ref": "#/$defs/run_id"

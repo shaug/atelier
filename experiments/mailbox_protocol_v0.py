@@ -109,6 +109,7 @@ def claim(claim_id: str, run_id: str, candidate: dict[str, Any] | None = None) -
     return {
         "id": claim_id,
         "worker_run_id": run_id,
+        "inherited_receipt_id": None,
         "work_revision": 1,
         "approved_commit": SHA_ZERO,
         "policy_commit": SHA_ZERO,
@@ -313,6 +314,7 @@ def authorize_checkpoint(
             "proposed_effect_digest": ticket_digest({"action": action, "claim_id": claim_id}),
             "candidate_head": None,
             "candidate_remote_ref": None,
+            "candidate_pull_request": None,
             "acknowledged_candidate_head": None,
             "recorded_at": "2026-07-25T12:25:00Z",
         }

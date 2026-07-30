@@ -606,6 +606,7 @@ class GitMailboxWriter:
                 continue
             binding_fields = (
                 "worker_run_id",
+                "inherited_receipt_id",
                 "work_revision",
                 "approved_commit",
                 "policy_commit",
@@ -748,7 +749,7 @@ class GitMailboxWriter:
         current_claim: Mapping[str, Any],
         changes: tuple[FileChange, ...],
     ) -> bool:
-        """Allow delivery to bind the exact PR created under the last authorization."""
+        """Bind one fresh exact PR mutation into a newly written delivery receipt."""
 
         prior_candidate = prior_claim["candidate"]
         current_candidate = current_claim["candidate"]
@@ -757,8 +758,7 @@ class GitMailboxWriter:
         expected = dict(prior_candidate)
         expected["pull_request"] = current_candidate["pull_request"]
         if (
-            prior_candidate["pull_request"] is not None
-            or not isinstance(current_candidate["pull_request"], str)
+            not isinstance(current_candidate["pull_request"], str)
             or not current_candidate["pull_request"].startswith("https://github.com/")
             or current_candidate != expected
             or current_claim["checkpoint"] != prior_claim["checkpoint"]
@@ -767,14 +767,26 @@ class GitMailboxWriter:
         ):
             return False
         ledger = current_claim["checkpoint"]["authorizations"]
-        if (
-            not ledger
-            or ledger[-1]["phase"] != "pre_external_mutation"
-            or ledger[-1]["action"] != "pull_request.create"
-            or ledger[-1]["candidate_head"] != current_candidate["head_revision"]
+        prior_publication_sequence = max(
+            (
+                entry["sequence"]
+                for entry in ledger
+                if entry["phase"] == "candidate_published"
+            ),
+            default=0,
+        )
+        if not any(
+            entry["sequence"] > prior_publication_sequence
+            and entry["phase"] == "pre_external_mutation"
+            and entry["action"] in {"pull_request.create", "pull_request.update"}
+            and entry["candidate_head"] == current_candidate["head_revision"]
+            and entry["candidate_remote_ref"] == current_candidate["remote_ref"]
+            for entry in ledger
         ):
             return False
         receipt_id = document["delivery_receipt_id"]
+        if not isinstance(receipt_id, str):
+            return False
         receipt_path = f"work/{PurePosixPath(path).parts[1]}/receipts/{receipt_id}.md"
         if not any(
             change.path == receipt_path and change.content is not None for change in changes
