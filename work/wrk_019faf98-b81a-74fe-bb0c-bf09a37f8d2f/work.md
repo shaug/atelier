@@ -4,7 +4,7 @@ id: wrk_019faf98-b81a-74fe-bb0c-bf09a37f8d2f
 title: Document the production dogfood lifecycle
 project_id: prj_019faf81-a727-7f87-b3bf-ee92b37450eb
 initiative_id: ini_019faf98-b7e3-7f60-818b-d34bc08bf3a4
-status: approved
+status: active
 revision: 2
 dependencies: []
 replaces: []
@@ -38,7 +38,31 @@ approval:
     - required-validation-reported
     - independent-review-current
     - unresolved-feedback-zero
-claim: null
+claim:
+  id: clm_019fb1d1-d31e-717c-a9da-8d3d1de0da96
+  worker_run_id: run_019fb1d1-d376-78d1-991d-fe1065d13eb4
+  inherited_receipt_id: rcp_019fb1d1-4fc2-78e7-bd9d-455915812202
+  work_revision: 2
+  approved_commit: 8e4e96e7e50888412fcf11fb7a64e74fedc88950
+  policy_commit: b072158d739952d687673bfdd9c371f2115597b3
+  ticket_observation_digest: sha256:c8ab154a17b92c7f380e89830c0ef7be3475500a6a1cee94656d6d361f98eb5f
+  invocation_digest: null
+  claimed_at: '2026-07-30T06:59:57.568610Z'
+  host: codex
+  checkpoint:
+    sequence: 0
+    continuation_token: YmlgEeIL9DtR2fggremR21Lbf83G2l_DAabdU5xZsGk
+    authorizations: []
+  candidate:
+    repository: github:shaug/atelier
+    remote: origin
+    remote_url: https://github.com/shaug/atelier.git
+    remote_ref: refs/heads/scott/issue-781-dogfood-guide
+    base_revision: b072158d739952d687673bfdd9c371f2115597b3
+    head_revision: 904314c835a870fe9dd0a0d75f4ff1e23e78cad8
+    pull_request: null
+    workspace_id: null
+    published_at: '2026-07-30T06:57:26.442429Z'
 blocking_message_id: null
 attempt_receipt_id: rcp_019fb1d1-4fc2-78e7-bd9d-455915812202
 delivery_receipt_id: null
