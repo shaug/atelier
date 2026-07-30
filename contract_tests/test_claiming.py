@@ -50,7 +50,11 @@ from skills.atelier.scripts.git_mailbox import (
     TransitionPlan,
     run_git,
 )
-from skills.atelier.scripts.mailbox import _read_yaml, reconstruct_mailbox
+from skills.atelier.scripts.mailbox import (
+    MailboxValidationError,
+    _read_yaml,
+    reconstruct_mailbox,
+)
 from skills.atelier.scripts.planning import (
     ApprovalEnvelope,
     AssignmentDraft,
@@ -1010,6 +1014,188 @@ print(json.dumps(value, sort_keys=True))
         self.assertEqual(
             [entry["phase"] for entry in work["claim"]["checkpoint"]["authorizations"]],
             ["pre_external_mutation", "candidate_published"],
+        )
+
+    def _authorize_initial_pull_request(self):
+        claimed = self.claim()
+        initial_push = self.checkpoint(
+            claimed,
+            action="repository.candidate.push",
+            token="token-1",
+            candidate_head=HEAD,
+        )
+        initial_publication = self.checkpoint(
+            initial_push,
+            action="repository.candidate.push",
+            token="token-2",
+            candidate_head=HEAD,
+            phase="candidate_published",
+            candidate=self.candidate(),
+        )
+        authority = self.checkpoint(
+            initial_publication,
+            action="pull_request.create",
+            token="token-3",
+            candidate_head=HEAD,
+        )
+        candidate = self.candidate()
+        candidate["pull_request"] = "https://github.com/example/project-1/pull/1"
+        return authority, candidate
+
+    def test_candidate_publication_retains_pr_across_same_lineage_head_advance(self) -> None:
+        self.coordinator.candidate_verifier = lambda candidate: True
+        pull_request_authority, candidate_with_pull_request = (
+            self._authorize_initial_pull_request()
+        )
+        repush = self.checkpoint(
+            pull_request_authority,
+            action="repository.candidate.push",
+            token="token-4",
+            candidate_head=HEAD,
+        )
+        published_pull_request = self.checkpoint(
+            repush,
+            action="repository.candidate.push",
+            token="token-5",
+            candidate_head=HEAD,
+            phase="candidate_published",
+            candidate=candidate_with_pull_request,
+        )
+        next_head = "d" * 40
+        next_push = self.checkpoint(
+            published_pull_request,
+            action="repository.candidate.push",
+            token="token-6",
+            candidate_head=next_head,
+        )
+        next_candidate = candidate_with_pull_request.copy()
+        next_candidate["head_revision"] = next_head
+
+        published_next_head = self.checkpoint(
+            next_push,
+            action="repository.candidate.push",
+            token="token-7",
+            candidate_head=next_head,
+            phase="candidate_published",
+            candidate=next_candidate,
+        )
+
+        self.assertEqual(published_next_head.sequence, 7)
+        checkout = self.mailbox_clone("retained-pr-read")
+        work, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="work",
+        )
+        self.assertEqual(work["claim"]["candidate"]["head_revision"], next_head)
+        self.assertEqual(
+            work["claim"]["candidate"]["pull_request"],
+            candidate_with_pull_request["pull_request"],
+        )
+
+    def test_candidate_publication_rejects_pr_introduced_with_prior_head_authority(
+        self,
+    ) -> None:
+        self.coordinator.candidate_verifier = lambda candidate: True
+        pull_request_authority, candidate_with_pull_request = (
+            self._authorize_initial_pull_request()
+        )
+        next_head = "d" * 40
+        next_push = self.checkpoint(
+            pull_request_authority,
+            action="repository.candidate.push",
+            token="token-4",
+            candidate_head=next_head,
+        )
+        next_candidate = candidate_with_pull_request.copy()
+        next_candidate["head_revision"] = next_head
+
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "candidate pull request metadata lacks exact pre-mutation authority",
+        ):
+            self.checkpoint(
+                next_push,
+                action="repository.candidate.push",
+                token="token-5",
+                candidate_head=next_head,
+                phase="candidate_published",
+                candidate=next_candidate,
+            )
+
+    def test_pull_request_url_change_consumes_fresh_mutation_authority(self) -> None:
+        pull_request_authority, first_candidate = self._authorize_initial_pull_request()
+        repush = self.checkpoint(
+            pull_request_authority,
+            action="repository.candidate.push",
+            token="token-4",
+            candidate_head=HEAD,
+        )
+        first_publication = self.checkpoint(
+            repush,
+            action="repository.candidate.push",
+            token="token-5",
+            candidate_head=HEAD,
+            phase="candidate_published",
+            candidate=first_candidate,
+        )
+        stale_push = self.checkpoint(
+            first_publication,
+            action="repository.candidate.push",
+            token="token-6",
+            candidate_head=HEAD,
+        )
+        replacement_candidate = first_candidate.copy()
+        replacement_candidate["pull_request"] = "https://github.com/example/project-1/pull/999"
+
+        with self.assertRaisesRegex(
+            MailboxTransitionRejected,
+            "candidate pull request metadata lacks exact pre-mutation authority",
+        ):
+            self.checkpoint(
+                stale_push,
+                action="repository.candidate.push",
+                token="stale-token-7",
+                candidate_head=HEAD,
+                phase="candidate_published",
+                candidate=replacement_candidate,
+            )
+
+        fresh_authority = self.checkpoint(
+            stale_push,
+            action="pull_request.update",
+            token="token-7",
+            candidate_head=HEAD,
+        )
+        replacement_push = self.checkpoint(
+            fresh_authority,
+            action="repository.candidate.push",
+            token="token-8",
+            candidate_head=HEAD,
+        )
+        replacement_publication = self.checkpoint(
+            replacement_push,
+            action="repository.candidate.push",
+            token="token-9",
+            candidate_head=HEAD,
+            phase="candidate_published",
+            candidate=replacement_candidate,
+        )
+
+        self.assertEqual(replacement_publication.sequence, 9)
+        checkout = self.mailbox_clone("replacement-pr-read")
+        work, _ = _read_yaml(
+            checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="work",
+        )
+        self.assertEqual(
+            [
+                entry["candidate_pull_request"]
+                for entry in work["claim"]["checkpoint"]["authorizations"]
+                if entry["phase"] == "candidate_published"
+            ],
+            [None, first_candidate["pull_request"], replacement_candidate["pull_request"]],
         )
 
     def test_default_policy_remote_verifier_binds_github_repository_identity(self) -> None:
@@ -2231,6 +2417,422 @@ print(json.dumps(value, sort_keys=True))
         )
         self.assertEqual(work["claim"]["candidate"]["head_revision"], latest_head)
         reconstruct_mailbox(checkout)
+
+    def test_inherited_candidate_survives_pr_block_release_reclaim_and_delivery(self) -> None:
+        def fresh_coordinator() -> ClaimCoordinator:
+            return ClaimCoordinator(
+                str(self.mailbox_remote),
+                "main",
+                candidate_verifier=lambda value: _candidate_remote_reachable(
+                    {**value, "remote_url": str(self.project_remote)}
+                ),
+                capability_verifier=lambda target: True,
+                policy_remote_verifier=self.policy_remote_matches,
+            )
+
+        initial_claim = self.claim()
+        self.coordinator = fresh_coordinator()
+        initial_delegation = self.delegation()
+        initial_invocation = self.delegated_invocation(initial_claim)
+        candidate_head = git(self.project_checkout, "rev-parse", "HEAD").stdout.strip()
+        candidate_ref = "refs/heads/scott/pr-recovery-candidate"
+        git(self.project_checkout, "push", "origin", f"{candidate_head}:{candidate_ref}")
+        candidate = {
+            "repository": initial_invocation["repository"]["identity"],
+            "remote_url": initial_invocation["repository"]["remote_url"],
+            "remote_ref": candidate_ref,
+            "base_sha": initial_invocation["repository"]["base_sha"],
+            "head_sha": candidate_head,
+        }
+        initial_push = self.delegated_checkpoint(
+            initial_delegation,
+            initial_invocation,
+            initial_claim,
+            action="repository.candidate.push",
+            token="initial-token-1",
+            candidate=candidate,
+        )
+        published = self.delegated_checkpoint(
+            initial_delegation,
+            initial_invocation,
+            initial_push,
+            action="repository.candidate.push",
+            token="initial-token-2",
+            phase="candidate_published",
+            candidate=candidate,
+        )
+        old_pull_request_url = "https://github.com/example/project-1/pull/793"
+        old_terminal_candidate = {
+            **candidate,
+            "publication": {
+                "kind": "ordinary",
+                "pull_requests": [
+                    {
+                        "id": "793",
+                        "url": old_pull_request_url,
+                        "base_ref": initial_invocation["repository"]["base_ref"],
+                        "base_sha": candidate["base_sha"],
+                        "head_ref": candidate["remote_ref"],
+                        "head_sha": candidate["head_sha"],
+                        "state": "open",
+                    }
+                ],
+            },
+        }
+        initial_pr_authorized = self.delegated_checkpoint(
+            initial_delegation,
+            initial_invocation,
+            published,
+            action="pull_request.create",
+            token="initial-token-3",
+            candidate=candidate,
+        )
+        initial_repush = self.delegated_checkpoint(
+            initial_delegation,
+            initial_invocation,
+            initial_pr_authorized,
+            action="repository.candidate.push",
+            token="initial-token-4",
+            candidate=candidate,
+        )
+        initial_pr_published = self.delegated_checkpoint(
+            initial_delegation,
+            initial_invocation,
+            initial_repush,
+            action="repository.candidate.push",
+            token="initial-token-5",
+            phase="candidate_published",
+            candidate=old_terminal_candidate,
+        )
+        first_release_id = new_identifier("rcp")
+        self.coordinator.release(
+            self.work_id,
+            self.fence(initial_pr_published),
+            receipt_id=first_release_id,
+            reason="Transfer the first PR-bearing candidate to a fresh worker.",
+            ended_at=OBSERVED_AT + timedelta(minutes=6),
+        )
+
+        self.coordinator = fresh_coordinator()
+        reclaimed = self.claim(token="pr-recovery-token-0")
+        delegation = self.delegation()
+        invocation = self.delegated_invocation(reclaimed)
+        self.assertEqual(invocation["repository"]["base_sha"], candidate["base_sha"])
+        pull_request_url = "https://github.com/example/project-1/pull/794"
+        terminal_candidate = {
+            **candidate,
+            "publication": {
+                "kind": "ordinary",
+                "pull_requests": [
+                    {
+                        "id": "794",
+                        "url": pull_request_url,
+                        "base_ref": invocation["repository"]["base_ref"],
+                        "base_sha": candidate["base_sha"],
+                        "head_ref": candidate["remote_ref"],
+                        "head_sha": candidate["head_sha"],
+                        "state": "open",
+                    }
+                ],
+            },
+        }
+        pr_authorized = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            reclaimed,
+            action="pull_request.update",
+            token="pr-recovery-token-1",
+            candidate=candidate,
+        )
+        push_authorized = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            pr_authorized,
+            action="repository.candidate.push",
+            token="pr-recovery-token-2",
+            candidate=candidate,
+        )
+        pr_acknowledged = self.delegated_checkpoint(
+            delegation,
+            invocation,
+            push_authorized,
+            action="repository.candidate.push",
+            token="pr-recovery-token-3",
+            phase="candidate_published",
+            candidate=terminal_candidate,
+        )
+        blocked_result = self.blocked_result(
+            invocation,
+            pr_acknowledged,
+            candidate=terminal_candidate,
+            authority_used=["pull_request.update", "repository.candidate.push"],
+        )
+        blocked_result["blocking_reason"] = "A later planner decision is still required."
+        delegation.finalize(
+            self.work_id,
+            invocation,
+            blocked_result,
+            self.fence(pr_acknowledged),
+            approved_commit=self.approved_commit,
+            policy_target=self.policy_target(),
+            host_target=self.delegation_host_target(),
+            observation_path=self.observation_path,
+            observation_not_before=self.live_at,
+            ended_at=self.live_at + timedelta(minutes=3),
+            now=self.live_at + timedelta(minutes=3),
+        )
+
+        blocked_checkout = self.mailbox_clone("pr-recovery-blocked-read")
+        blocked_work, _ = _read_yaml(
+            blocked_checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="PR-bearing blocked work",
+        )
+        reconstruct_mailbox(blocked_checkout)
+        self.assertEqual(blocked_work["claim"]["candidate"]["pull_request"], pull_request_url)
+
+        release_id = new_identifier("rcp")
+        self.coordinator.release(
+            self.work_id,
+            self.fence(pr_acknowledged),
+            receipt_id=release_id,
+            reason="Transfer the blocked PR-bearing candidate before a head advance.",
+            ended_at=OBSERVED_AT + timedelta(minutes=6),
+        )
+
+        self.coordinator = fresh_coordinator()
+        advanced_claim = self.claim(token="head-advance-token-0")
+        advanced_delegation = self.delegation()
+        advanced_invocation = self.delegated_invocation(advanced_claim)
+        git(
+            self.project_checkout,
+            "-c",
+            "user.name=Atelier Test",
+            "-c",
+            "user.email=atelier-test@invalid",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "Advance inherited candidate",
+        )
+        advanced_head = git(self.project_checkout, "rev-parse", "HEAD").stdout.strip()
+        git(self.project_checkout, "push", "origin", f"{advanced_head}:{candidate_ref}")
+        advanced_candidate = {**candidate, "head_sha": advanced_head}
+        advanced_terminal_candidate = {
+            **advanced_candidate,
+            "publication": {
+                "kind": "ordinary",
+                "pull_requests": [
+                    {
+                        "id": "794",
+                        "url": pull_request_url,
+                        "base_ref": advanced_invocation["repository"]["base_ref"],
+                        "base_sha": advanced_candidate["base_sha"],
+                        "head_ref": advanced_candidate["remote_ref"],
+                        "head_sha": advanced_head,
+                        "state": "open",
+                    }
+                ],
+            },
+        }
+        advanced_push = self.delegated_checkpoint(
+            advanced_delegation,
+            advanced_invocation,
+            advanced_claim,
+            action="repository.candidate.push",
+            token="head-advance-token-1",
+            candidate=advanced_candidate,
+        )
+        advanced_published = self.delegated_checkpoint(
+            advanced_delegation,
+            advanced_invocation,
+            advanced_push,
+            action="repository.candidate.push",
+            token="head-advance-token-2",
+            phase="candidate_published",
+            candidate=advanced_terminal_candidate,
+        )
+        advanced_blocked_result = self.blocked_result(
+            advanced_invocation,
+            advanced_published,
+            candidate=advanced_terminal_candidate,
+            authority_used=["repository.candidate.push"],
+        )
+        advanced_blocked_result["blocking_reason"] = (
+            "The same pull request remains blocked after its candidate head advanced."
+        )
+        advanced_delegation.finalize(
+            self.work_id,
+            advanced_invocation,
+            advanced_blocked_result,
+            self.fence(advanced_published),
+            approved_commit=self.approved_commit,
+            policy_target=self.policy_target(),
+            host_target=self.delegation_host_target(),
+            observation_path=self.observation_path,
+            observation_not_before=self.live_at,
+            ended_at=self.live_at + timedelta(minutes=3),
+            now=self.live_at + timedelta(minutes=3),
+        )
+
+        advanced_checkout = self.mailbox_clone("same-pr-advanced-head-blocked-read")
+        advanced_work, _ = _read_yaml(
+            advanced_checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="same-PR advanced-head blocked work",
+        )
+        reconstruct_mailbox(advanced_checkout)
+        self.assertEqual(
+            advanced_work["claim"]["candidate"],
+            {
+                "repository": candidate["repository"],
+                "remote": "origin",
+                "remote_url": candidate["remote_url"],
+                "remote_ref": candidate_ref,
+                "base_revision": candidate["base_sha"],
+                "head_revision": advanced_head,
+                "pull_request": pull_request_url,
+                "workspace_id": None,
+                "published_at": (self.live_at + timedelta(minutes=2))
+                .isoformat()
+                .replace("+00:00", "Z"),
+            },
+        )
+        self.assertEqual(advanced_work["claim"]["inherited_receipt_id"], release_id)
+
+        advanced_work["claim"]["inherited_receipt_id"] = first_release_id
+        fixtures.write_markdown(
+            advanced_checkout / f"work/{self.work_id}/work.md",
+            advanced_work,
+        )
+        with self.assertRaisesRegex(MailboxValidationError, "checkpoint-pr-authority"):
+            reconstruct_mailbox(advanced_checkout)
+
+        advanced_release_id = new_identifier("rcp")
+        self.coordinator.release(
+            self.work_id,
+            self.fence(advanced_published),
+            receipt_id=advanced_release_id,
+            reason="Transfer the same-PR advanced candidate to a final worker.",
+            ended_at=OBSERVED_AT + timedelta(minutes=8),
+        )
+        self.coordinator = fresh_coordinator()
+        final_claim = self.claim(token="ready-pr-token-0")
+        final_delegation = self.delegation()
+        final_invocation = self.delegated_invocation(final_claim)
+        replacement_pull_request_url = "https://github.com/example/project-1/pull/795"
+        replacement_terminal_candidate = json.loads(json.dumps(advanced_terminal_candidate))
+        replacement_pull_request = replacement_terminal_candidate["publication"]["pull_requests"][0]
+        replacement_pull_request["id"] = "795"
+        replacement_pull_request["url"] = replacement_pull_request_url
+        replacement_authorized = self.delegated_checkpoint(
+            final_delegation,
+            final_invocation,
+            final_claim,
+            action="pull_request.update",
+            token="ready-pr-token-1",
+            candidate=advanced_candidate,
+        )
+
+        live = observation(with_pull_request=True)
+        live["observed_at"] = (
+            (self.live_at + timedelta(minutes=9)).isoformat().replace("+00:00", "Z")
+        )
+        live["pull_request"]["url"] = replacement_pull_request_url
+        live["pull_request"]["base"].update(
+            ref=final_invocation["repository"]["base_ref"], sha=advanced_candidate["base_sha"]
+        )
+        live["pull_request"]["head"].update(
+            ref=advanced_candidate["remote_ref"], sha=advanced_head
+        )
+        write_json(self.observation_path, live)
+        ready_result = {
+            "schema": RESULT_SCHEMA,
+            "capability": CAPABILITY,
+            "invocation_id": final_invocation["invocation_id"],
+            "terminal_state": "ready_pr",
+            "ticket": final_invocation["ticket"],
+            "repository": {
+                "identity": final_invocation["repository"]["identity"],
+                "base_ref": final_invocation["repository"]["base_ref"],
+                "base_sha": final_invocation["repository"]["base_sha"],
+            },
+            "tracker_transition": {
+                "provider": final_invocation["ticket"]["provider"],
+                "ticket_id": final_invocation["ticket"]["id"],
+                "mode": "none",
+                "state": "open",
+                "observed_at": fixtures.TIMESTAMP,
+            },
+            "implementation_state": "published",
+            "candidate": replacement_terminal_candidate,
+            "handoff": {"transferable": True, "reason": None},
+            "checkpoint": {
+                "last_sequence": replacement_authorized.sequence,
+                "continuation_token": replacement_authorized.continuation_token,
+            },
+            "validation": [
+                {
+                    "name": command,
+                    "outcome": "passed",
+                    "candidate_sha": advanced_head,
+                    "observed_at": fixtures.TIMESTAMP,
+                }
+                for command in final_invocation["validation"]
+            ],
+            "reviews": [
+                {
+                    "name": "review-code-change",
+                    "outcome": "passed",
+                    "candidate_sha": advanced_head,
+                    "observed_at": fixtures.TIMESTAMP,
+                }
+            ],
+            "feedback": {
+                "unresolved_material_count": 0,
+                "candidate_sha": advanced_head,
+                "observed_at": fixtures.TIMESTAMP,
+            },
+            "authority_used": ["pull_request.update"],
+            "acceptance_evidence": self.acceptance_records(final_invocation, advanced_head),
+            "unresolved_obligations": [],
+            "blocking_reason": None,
+            "next_action": "Atelier validates the inherited ready pull request.",
+        }
+        final_delegation.finalize(
+            self.work_id,
+            final_invocation,
+            ready_result,
+            self.fence(replacement_authorized),
+            approved_commit=self.approved_commit,
+            policy_target=self.policy_target(),
+            host_target=self.delegation_host_target(),
+            observation_path=self.observation_path,
+            observation_not_before=self.live_at + timedelta(minutes=9),
+            ended_at=self.live_at + timedelta(minutes=10),
+            now=self.live_at + timedelta(minutes=10),
+        )
+
+        delivered_checkout = self.mailbox_clone("pr-recovery-delivered-read")
+        delivered_work, _ = _read_yaml(
+            delivered_checkout / f"work/{self.work_id}/work.md",
+            frontmatter=True,
+            label="reclaimed delivered work",
+        )
+        reconstruct_mailbox(delivered_checkout)
+        self.assertEqual(delivered_work["status"], "delivered")
+        self.assertEqual(delivered_work["claim"]["candidate"]["head_revision"], advanced_head)
+        self.assertEqual(
+            delivered_work["claim"]["candidate"]["pull_request"],
+            replacement_pull_request_url,
+        )
+        self.assertEqual(
+            [
+                (entry["phase"], entry["action"])
+                for entry in delivered_work["claim"]["checkpoint"]["authorizations"]
+            ],
+            [("pre_external_mutation", "pull_request.update")],
+        )
 
     def test_delegation_delivers_one_exact_ready_pull_request(self) -> None:
         claimed = self.claim()

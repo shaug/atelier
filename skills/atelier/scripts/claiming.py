@@ -247,13 +247,14 @@ class ClaimCoordinator:
                 raise MailboxTransitionRejected(
                     f"{work_id}: project already has active work: {', '.join(active)}"
                 )
-            candidate = self._released_candidate(context, work)
+            candidate, inherited_receipt_id = self._released_candidate(context, work)
             planned.clear()
             planned.update(
                 state=state,
                 claim={
                     "id": claim_id,
                     "worker_run_id": worker_run_id,
+                    "inherited_receipt_id": inherited_receipt_id,
                     "work_revision": work["revision"],
                     "approved_commit": approved_commit,
                     "policy_commit": state.current_policy.commit,
@@ -546,6 +547,7 @@ class ClaimCoordinator:
             new_claim = {
                 "id": claim_id,
                 "worker_run_id": worker_run_id,
+                "inherited_receipt_id": None,
                 "work_revision": state.work["revision"],
                 "approved_commit": approved_commit,
                 "policy_commit": state.current_policy.commit,
@@ -577,6 +579,17 @@ class ClaimCoordinator:
                     ended_at=taken_over_at,
                     evidence=AttemptEvidence(),
                 )
+            if prior_claim["candidate"] is not None:
+                inherited_receipt_id = (
+                    takeover_receipt_id
+                    if current_status == "active"
+                    else state.work["attempt_receipt_id"]
+                )
+                if inherited_receipt_id is None:
+                    raise MailboxTransitionRejected(
+                        f"{work_id}: takeover candidate lacks a predecessor receipt"
+                    )
+                new_claim["inherited_receipt_id"] = inherited_receipt_id
             current_blocker = state.work["blocking_message_id"]
             takeover_message = {
                 "schema": "atelier.message/v1",
@@ -758,10 +771,10 @@ class ClaimCoordinator:
         self,
         context: TransitionContext,
         work: Mapping[str, Any],
-    ) -> dict[str, Any] | None:
+    ) -> tuple[dict[str, Any] | None, str | None]:
         receipt_id = work["attempt_receipt_id"]
         if receipt_id is None:
-            return None
+            return None, None
         receipt, _ = _read_document(context.checkout / _receipt_path(work["id"], receipt_id))
         if receipt["outcome"] != "released":
             raise MailboxTransitionRejected(
@@ -769,7 +782,7 @@ class ClaimCoordinator:
             )
         candidate = receipt["candidate"] if receipt["handoff"] == "transferable" else None
         self._verify_candidate(candidate)
-        return copy.deepcopy(candidate)
+        return copy.deepcopy(candidate), receipt_id if candidate is not None else None
 
     def _apply_checkpoint(
         self,
@@ -805,6 +818,40 @@ class ClaimCoordinator:
             ):
                 raise MailboxTransitionRejected(
                     "candidate publication does not match the preceding push authorization"
+                )
+            current_candidate = claim["candidate"]
+            current_pull_request = (
+                current_candidate["pull_request"] if current_candidate is not None else None
+            )
+            same_candidate_lineage = current_candidate is not None and (
+                candidate["repository"],
+                candidate["remote"],
+                candidate["remote_url"],
+                candidate["remote_ref"],
+                candidate["base_revision"],
+            ) == (
+                current_candidate["repository"],
+                current_candidate["remote"],
+                current_candidate["remote_url"],
+                current_candidate["remote_ref"],
+                current_candidate["base_revision"],
+            )
+            retained_pull_request = (
+                candidate["pull_request"] is not None
+                and candidate["pull_request"] == current_pull_request
+                and same_candidate_lineage
+            )
+            pull_request_requires_authority = (
+                candidate["pull_request"] != current_pull_request
+                or (candidate["pull_request"] is not None and not retained_pull_request)
+            )
+            if pull_request_requires_authority and not _pull_request_mutation_authorized(
+                claim,
+                candidate_head=request.candidate_head,
+                candidate_remote_ref=request.candidate_remote_ref,
+            ):
+                raise MailboxTransitionRejected(
+                    "candidate pull request metadata lacks exact pre-mutation authority"
                 )
             self._verify_candidate(candidate)
             claim["candidate"] = candidate
@@ -848,6 +895,9 @@ class ClaimCoordinator:
                 "proposed_effect_digest": request.proposed_effect_digest,
                 "candidate_head": request.candidate_head,
                 "candidate_remote_ref": request.candidate_remote_ref,
+                "candidate_pull_request": (
+                    candidate["pull_request"] if request.phase == "candidate_published" else None
+                ),
                 "acknowledged_candidate_head": request.acknowledged_candidate_head,
                 "recorded_at": _timestamp(request.recorded_at),
             }
@@ -864,6 +914,34 @@ class ClaimCoordinator:
             raise MailboxTransitionRejected(
                 "candidate is not reachable at its exact declared remote ref and head"
             )
+
+
+
+def _pull_request_mutation_authorized(
+    claim: Mapping[str, Any],
+    *,
+    candidate_head: str | None,
+    candidate_remote_ref: str | None,
+) -> bool:
+    if candidate_head is None or candidate_remote_ref is None:
+        return False
+    ledger = claim["checkpoint"]["authorizations"]
+    prior_publication_sequence = max(
+        (
+            entry["sequence"]
+            for entry in ledger
+            if entry["phase"] == "candidate_published"
+        ),
+        default=0,
+    )
+    return any(
+        entry["sequence"] > prior_publication_sequence
+        and entry["phase"] == "pre_external_mutation"
+        and entry["action"] in {"pull_request.create", "pull_request.update"}
+        and entry["candidate_head"] == candidate_head
+        and entry["candidate_remote_ref"] == candidate_remote_ref
+        for entry in ledger
+    )
 
 
 def _effective_policy(

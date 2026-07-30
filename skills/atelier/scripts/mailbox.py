@@ -888,6 +888,7 @@ def _validate_claim(
     work_id: str,
     work: dict[str, Any],
     attempt_receipt: dict[str, Any] | None,
+    work_receipts: dict[str, dict[str, Any]],
 ) -> list[Diagnostic]:
     claim = work["claim"]
     if claim is None:
@@ -915,40 +916,129 @@ def _validate_claim(
             Diagnostic(path, "checkpoint-invocation", "authorization names another worker run")
         )
     authority_ceiling = set(approval["authority_ceiling"]) if approval is not None else set()
+    candidate = claim["candidate"]
+
+    def same_identity(left: dict[str, Any] | None, right: dict[str, Any] | None) -> bool:
+        return left is not None and right is not None and (
+            left["repository"],
+            left["remote"],
+            left["remote_url"],
+            left["remote_ref"],
+            left["base_revision"],
+            left["head_revision"],
+        ) == (
+            right["repository"],
+            right["remote"],
+            right["remote_url"],
+            right["remote_ref"],
+            right["base_revision"],
+            right["head_revision"],
+        )
+
+    def differs_only_by_pull_request(
+        left: dict[str, Any] | None,
+        right: dict[str, Any] | None,
+    ) -> bool:
+        if left is None or right is None:
+            return False
+        expected = dict(left)
+        expected["pull_request"] = right["pull_request"]
+        return expected == right
+
+    def same_lineage(left: dict[str, Any] | None, right: dict[str, Any] | None) -> bool:
+        return left is not None and right is not None and (
+            left["repository"],
+            left["remote"],
+            left["remote_url"],
+            left["remote_ref"],
+            left["base_revision"],
+        ) == (
+            right["repository"],
+            right["remote"],
+            right["remote_url"],
+            right["remote_ref"],
+            right["base_revision"],
+        )
+
+    inherited_receipt_id = claim["inherited_receipt_id"]
+    inherited_receipt = (
+        work_receipts.get(inherited_receipt_id) if inherited_receipt_id is not None else None
+    )
+    inherited_candidate_source = None
+    if inherited_receipt_id is not None:
+        if inherited_receipt is None:
+            diagnostics.append(
+                Diagnostic(
+                    path,
+                    "claim-inherited-receipt",
+                    "claim names a missing inherited attempt receipt",
+                )
+            )
+        elif (
+            inherited_receipt["claim_id"] == claim["id"]
+            or inherited_receipt["handoff"] != "transferable"
+            or inherited_receipt["candidate"] is None
+            or not same_lineage(inherited_receipt["candidate"], candidate)
+        ):
+            diagnostics.append(
+                Diagnostic(
+                    path,
+                    "claim-inherited-receipt",
+                    "claim does not preserve its exact transferable predecessor receipt",
+                )
+            )
+        else:
+            inherited_candidate_source = inherited_receipt["candidate"]
     transferable_handoff = (
         attempt_receipt is not None
         and attempt_receipt["handoff"] == "transferable"
         and attempt_receipt["claim_id"] != claim["id"]
     )
+    if transferable_handoff and inherited_receipt_id != work["attempt_receipt_id"]:
+        diagnostics.append(
+            Diagnostic(
+                path,
+                "claim-inherited-receipt",
+                "claim does not bind the current transferable predecessor receipt",
+            )
+        )
     recovered_current_candidate = (
         attempt_receipt is not None
         and attempt_receipt["outcome"] == "blocked"
         and attempt_receipt["handoff"] == "transferable"
         and attempt_receipt["claim_id"] == claim["id"]
-        and attempt_receipt["candidate"] == claim["candidate"]
+        and attempt_receipt["candidate"] == candidate
         and bool(ledger)
         and ledger[-1]["phase"] == "pre_external_mutation"
         and ledger[-1]["action"] == "repository.candidate.push"
-        and claim["candidate"] is not None
-        and ledger[-1]["candidate_head"] == claim["candidate"]["head_revision"]
-        and ledger[-1]["candidate_remote_ref"] == claim["candidate"]["remote_ref"]
+        and candidate is not None
+        and ledger[-1]["candidate_head"] == candidate["head_revision"]
+        and ledger[-1]["candidate_remote_ref"] == candidate["remote_ref"]
+    )
+    acknowledged_source = (
+        inherited_candidate_source
+        if same_identity(inherited_candidate_source, candidate)
+        else None
     )
     latest_acknowledged_head = (
-        attempt_receipt["candidate"]["head_revision"]
-        if transferable_handoff and attempt_receipt["candidate"] is not None
-        else None
+        acknowledged_source["head_revision"] if acknowledged_source is not None else None
     )
     latest_acknowledged_ref = (
-        attempt_receipt["candidate"]["remote_ref"]
-        if transferable_handoff and attempt_receipt["candidate"] is not None
+        acknowledged_source["remote_ref"] if acknowledged_source is not None else None
+    )
+    latest_published_pull_request = (
+        inherited_candidate_source["pull_request"]
+        if inherited_candidate_source is not None
         else None
     )
+    prior_publication_sequence = 0
     previous_entry: dict[str, Any] | None = None
     for entry in ledger:
         action = entry["action"]
         phase = entry["phase"]
         candidate_head = entry["candidate_head"]
         candidate_remote_ref = entry["candidate_remote_ref"]
+        candidate_pull_request = entry["candidate_pull_request"]
         acknowledged_head = entry["acknowledged_candidate_head"]
         if action not in authority_ceiling:
             diagnostics.append(
@@ -991,7 +1081,35 @@ def _validate_claim(
             elif paired_push:
                 latest_acknowledged_head = candidate_head
                 latest_acknowledged_ref = candidate_remote_ref
+            if candidate_pull_request != latest_published_pull_request:
+                pull_request_mutation_authorized = any(
+                    prior["sequence"] > prior_publication_sequence
+                    and prior["sequence"] < entry["sequence"]
+                    and prior["phase"] == "pre_external_mutation"
+                    and prior["action"] in {"pull_request.create", "pull_request.update"}
+                    and prior["candidate_head"] == candidate_head
+                    and prior["candidate_remote_ref"] == candidate_remote_ref
+                    for prior in ledger
+                )
+                if not pull_request_mutation_authorized:
+                    diagnostics.append(
+                        Diagnostic(
+                            path,
+                            "checkpoint-pr-authority",
+                            "PR candidate metadata lacks fresh exact pre-mutation authority",
+                        )
+                    )
+            latest_published_pull_request = candidate_pull_request
+            prior_publication_sequence = entry["sequence"]
         else:
+            if candidate_pull_request is not None:
+                diagnostics.append(
+                    Diagnostic(
+                        path,
+                        "checkpoint-phase",
+                        "pre_external_mutation must not publish pull request metadata",
+                    )
+                )
             if acknowledged_head is not None:
                 diagnostics.append(
                     Diagnostic(
@@ -1027,7 +1145,6 @@ def _validate_claim(
                     )
                 )
         previous_entry = entry
-    candidate = claim["candidate"]
     publication_entries = [entry for entry in ledger if entry["phase"] == "candidate_published"]
     internally_invalid = any(
         entry["candidate_head"] is None
@@ -1038,21 +1155,53 @@ def _validate_claim(
     inherited_candidate = (
         candidate is not None
         and not publication_entries
-        and (transferable_handoff or recovered_current_candidate)
+        and (
+            recovered_current_candidate
+            or inherited_candidate_source == candidate
+        )
+    )
+    terminal_pull_request_normalization = (
+        candidate is not None
+        and attempt_receipt is not None
+        and attempt_receipt["outcome"] in {"blocked", "delivered"}
         and attempt_receipt["candidate"] == candidate
+        and any(
+            entry["sequence"] > prior_publication_sequence
+            and entry["phase"] == "pre_external_mutation"
+            and entry["action"] in {"pull_request.create", "pull_request.update"}
+            and entry["candidate_head"] == candidate["head_revision"]
+            and entry["candidate_remote_ref"] == candidate["remote_ref"]
+            for entry in ledger
+        )
     )
     current_unacknowledged = (
         candidate is not None
         and not inherited_candidate
         and not recovered_current_candidate
+        and not (
+            terminal_pull_request_normalization
+            and differs_only_by_pull_request(inherited_candidate_source, candidate)
+        )
         and (
             not publication_entries
             or publication_entries[-1]["candidate_head"] != candidate["head_revision"]
             or publication_entries[-1]["candidate_remote_ref"] != candidate["remote_ref"]
         )
     )
+    acknowledged_same_lineage_advance = (
+        inherited_candidate_source is not None
+        and candidate is not None
+        and same_lineage(inherited_candidate_source, candidate)
+        and bool(publication_entries)
+        and publication_entries[-1]["candidate_head"] == candidate["head_revision"]
+        and publication_entries[-1]["candidate_remote_ref"] == candidate["remote_ref"]
+    )
     discarded_handoff = transferable_handoff and (
-        candidate is None or attempt_receipt["candidate"] != candidate
+        candidate is None
+        or (
+            not same_identity(attempt_receipt["candidate"], candidate)
+            and not acknowledged_same_lineage_advance
+        )
     )
     if (
         internally_invalid
@@ -1068,20 +1217,15 @@ def _validate_claim(
             )
         )
     if (
-        work["status"] == "delivered"
-        and candidate is not None
-        and candidate["pull_request"] is not None
-        and not any(
-            entry["phase"] == "pre_external_mutation"
-            and entry["action"] in {"pull_request.create", "pull_request.update"}
-            for entry in ledger
-        )
+        candidate is not None
+        and candidate["pull_request"] != latest_published_pull_request
+        and not terminal_pull_request_normalization
     ):
         diagnostics.append(
             Diagnostic(
                 path,
                 "checkpoint-pr-authority",
-                "delivered PR candidate lacks recorded pre-mutation authority",
+                "PR candidate metadata lacks fresh exact publication provenance",
             )
         )
     return diagnostics
@@ -1183,7 +1327,7 @@ def _validate_lifecycle(
         diagnostics.append(
             Diagnostic(path, "approval-revision", "approval does not name the current revision")
         )
-    diagnostics.extend(_validate_claim(work_id, work, attempt_receipt))
+    diagnostics.extend(_validate_claim(work_id, work, attempt_receipt, work_receipts))
     if claim is not None and any(
         receipt["outcome"] == "released"
         and (

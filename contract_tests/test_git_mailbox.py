@@ -50,6 +50,26 @@ def read_markdown(path: Path) -> dict[str, Any]:
     return value
 
 
+def claim_with_published_pull_request(
+    repository: str,
+    number: int,
+) -> dict[str, Any]:
+    claim_value = fixtures.claim(repository, number, with_candidate=True)
+    candidate = claim_value["candidate"]
+    if candidate is None:
+        raise AssertionError("published PR fixture requires a candidate")
+    authorizations = claim_value["checkpoint"]["authorizations"]
+    push_after_pr = copy.deepcopy(authorizations[0])
+    push_after_pr["sequence"] = 4
+    publish_after_pr = copy.deepcopy(authorizations[1])
+    publish_after_pr["sequence"] = 5
+    publish_after_pr["candidate_pull_request"] = candidate["pull_request"]
+    authorizations.extend((push_after_pr, publish_after_pr))
+    claim_value["checkpoint"]["sequence"] = 5
+    claim_value["checkpoint"]["continuation_token"] = f"token-{number}-5"
+    return claim_value
+
+
 def planner_message(work_id: str, number: int) -> tuple[str, str]:
     message_id = fixtures.identifier("msg", number)
     value = {
@@ -768,6 +788,7 @@ class GitMailboxWriteContract(unittest.TestCase):
                     "proposed_effect_digest": fixtures.DIGEST,
                     "candidate_head": None,
                     "candidate_remote_ref": None,
+                    "candidate_pull_request": None,
                     "acknowledged_candidate_head": None,
                     "recorded_at": fixtures.TIMESTAMP,
                 }
@@ -828,6 +849,7 @@ class GitMailboxWriteContract(unittest.TestCase):
 
         adopted_claim = fixtures.claim(self.repository, 2, with_candidate=False)
         adopted_claim["candidate"] = copy.deepcopy(candidate)
+        adopted_claim["inherited_receipt_id"] = receipt_id
 
         def adopt(context: TransitionContext) -> TransitionPlan:
             work = read_markdown(context.checkout / work_path)
@@ -849,15 +871,52 @@ class GitMailboxWriteContract(unittest.TestCase):
             plan=adopt,
         )
 
+        takeover_receipt_id = fixtures.identifier("rcp", 2)
+        takeover_message_id = fixtures.identifier("msg", 2)
         takeover_claim = fixtures.claim(self.repository, 3, with_candidate=False)
         takeover_claim["candidate"] = copy.deepcopy(candidate)
+        takeover_claim["inherited_receipt_id"] = takeover_receipt_id
 
         def take_over(context: TransitionContext) -> TransitionPlan:
             work = read_markdown(context.checkout / work_path)
+            taken_over = fixtures.receipt(
+                work,
+                self.repository,
+                2,
+                outcome="released",
+                with_candidate=True,
+            )
+            taken_over["candidate"] = copy.deepcopy(candidate)
+            taken_over["mutation_ownership"] = "relinquished"
+            takeover_message = {
+                "schema": "atelier.message/v1",
+                "id": takeover_message_id,
+                "work_id": self.work_id,
+                "kind": "notification",
+                "author_role": "planner",
+                "worker_run_id": None,
+                "audience": "worker",
+                "in_reply_to": None,
+                "resolves": None,
+                "blocks": None,
+                "created_at": fixtures.TIMESTAMP,
+                "subject": "Claim taken over",
+            }
+            work["attempt_receipt_id"] = takeover_receipt_id
             work["claim"] = copy.deepcopy(takeover_claim)
             return TransitionPlan(
                 "take over candidate handoff",
-                (FileChange(work_path, markdown(work)),),
+                (
+                    FileChange(work_path, markdown(work)),
+                    FileChange(
+                        f"work/{self.work_id}/receipts/{takeover_receipt_id}.md",
+                        markdown(taken_over),
+                    ),
+                    FileChange(
+                        f"work/{self.work_id}/messages/{takeover_message_id}.md",
+                        markdown(takeover_message),
+                    ),
+                ),
             )
 
         self.writer().publish(
@@ -871,7 +930,8 @@ class GitMailboxWriteContract(unittest.TestCase):
         current = read_markdown(fresh / work_path)
         released = read_markdown(fresh / f"work/{self.work_id}/receipts/{receipt_id}.md")
         self.assertEqual(released["candidate"], candidate)
-        self.assertEqual(current["attempt_receipt_id"], receipt_id)
+        self.assertEqual(current["attempt_receipt_id"], takeover_receipt_id)
+        self.assertEqual(current["claim"]["inherited_receipt_id"], takeover_receipt_id)
         self.assertEqual(current["claim"]["candidate"], candidate)
         self.assertEqual(current["claim"]["id"], takeover_claim["id"])
         fixtures.MAILBOX.reconstruct_mailbox(fresh)
@@ -882,6 +942,7 @@ class GitMailboxWriteContract(unittest.TestCase):
         replacement_claim["candidate"] = copy.deepcopy(original_claim["candidate"])
         work_path = f"work/{self.work_id}/work.md"
         receipt_id = fixtures.identifier("rcp", 1)
+        replacement_claim["inherited_receipt_id"] = receipt_id
         before = self.remote_head()
 
         def compound_release_and_claim(context: TransitionContext) -> TransitionPlan:
@@ -1298,6 +1359,7 @@ class GitMailboxWriteContract(unittest.TestCase):
             if mutation == "truncate":
                 checkpoint["authorizations"] = checkpoint["authorizations"][:-1]
                 checkpoint["sequence"] -= 1
+                work["claim"]["candidate"]["pull_request"] = None
             else:
                 checkpoint["authorizations"][-1]["proposed_effect_digest"] = "sha256:" + ("f" * 64)
             return TransitionPlan(
@@ -1323,7 +1385,7 @@ class GitMailboxWriteContract(unittest.TestCase):
 
     def test_same_claim_cannot_rebind_authority_or_batch_checkpoints(self) -> None:
         self._claim(with_candidate=False)
-        batched_claim = fixtures.claim(self.repository, 1, with_candidate=True)
+        batched_claim = claim_with_published_pull_request(self.repository, 1)
         before = self.remote_head()
 
         def mutate_claim(
@@ -1415,7 +1477,7 @@ class GitMailboxWriteContract(unittest.TestCase):
 
     def test_new_claim_requires_empty_checkpoint_and_fresh_identities(self) -> None:
         path = f"work/{self.work_id}/work.md"
-        prepopulated = fixtures.claim(self.repository, 1, with_candidate=True)
+        prepopulated = claim_with_published_pull_request(self.repository, 1)
         before = self.remote_head()
 
         def install_prepopulated(context: TransitionContext) -> TransitionPlan:
@@ -1577,6 +1639,119 @@ class GitMailboxWriteContract(unittest.TestCase):
             )
         self.assertEqual(self.remote_head(), before)
 
+    def test_delivery_pr_binding_requires_fresh_exact_authorization_and_receipt(self) -> None:
+        published_claim = self._claim(with_candidate=True)
+        checkout = self.root / "delivery-pr-binding"
+        git(None, "clone", str(self.remote), str(checkout))
+        work_path = f"work/{self.work_id}/work.md"
+        work = read_markdown(checkout / work_path)
+        published_candidate = copy.deepcopy(published_claim["candidate"])
+        replacement_candidate = copy.deepcopy(published_candidate)
+        replacement_candidate["pull_request"] = (
+            f"https://github.com/{self.repository.removeprefix('github:')}/pull/2"
+        )
+
+        authorized_claim = copy.deepcopy(published_claim)
+        authorization = copy.deepcopy(authorized_claim["checkpoint"]["authorizations"][2])
+        authorization.update(
+            sequence=authorized_claim["checkpoint"]["sequence"] + 1,
+            action="pull_request.update",
+            candidate_head=replacement_candidate["head_revision"],
+            candidate_remote_ref=replacement_candidate["remote_ref"],
+        )
+        authorized_claim["checkpoint"]["authorizations"].append(authorization)
+        authorized_claim["checkpoint"]["sequence"] = authorization["sequence"]
+        authorized_claim["checkpoint"]["continuation_token"] = "delivery-pr-binding-token"
+        delivered_claim = copy.deepcopy(authorized_claim)
+        delivered_claim["candidate"] = replacement_candidate
+
+        receipt_id = fixtures.identifier("rcp", 1)
+        receipt_path = f"work/{self.work_id}/receipts/{receipt_id}.md"
+        delivered_work = copy.deepcopy(work)
+        delivered_work["status"] = "delivered"
+        delivered_work["claim"] = delivered_claim
+        delivered_work["attempt_receipt_id"] = receipt_id
+        delivered_work["delivery_receipt_id"] = receipt_id
+        delivered_receipt = fixtures.receipt(
+            delivered_work,
+            self.repository,
+            1,
+            outcome="delivered",
+            with_candidate=True,
+        )
+        delivered_receipt["candidate"] = copy.deepcopy(replacement_candidate)
+        fixtures.write_markdown(checkout / receipt_path, delivered_receipt)
+        receipt_change = (FileChange(receipt_path, markdown(delivered_receipt)),)
+        writer = self.writer()
+
+        self.assertTrue(
+            writer._delivery_binds_pull_request(
+                checkout,
+                work_path,
+                delivered_work,
+                authorized_claim,
+                delivered_claim,
+                receipt_change,
+            )
+        )
+
+        stale_claim = copy.deepcopy(published_claim)
+        stale_delivered_claim = copy.deepcopy(stale_claim)
+        stale_delivered_claim["candidate"] = replacement_candidate
+        self.assertFalse(
+            writer._delivery_binds_pull_request(
+                checkout,
+                work_path,
+                delivered_work,
+                stale_claim,
+                stale_delivered_claim,
+                receipt_change,
+            )
+        )
+
+        for field, wrong_value in (
+            ("candidate_head", "c" * 40),
+            ("candidate_remote_ref", "refs/heads/scott/other-candidate"),
+        ):
+            wrong_authorized = copy.deepcopy(authorized_claim)
+            wrong_authorized["checkpoint"]["authorizations"][-1][field] = wrong_value
+            wrong_delivered = copy.deepcopy(wrong_authorized)
+            wrong_delivered["candidate"] = replacement_candidate
+            with self.subTest(field=field):
+                self.assertFalse(
+                    writer._delivery_binds_pull_request(
+                        checkout,
+                        work_path,
+                        delivered_work,
+                        wrong_authorized,
+                        wrong_delivered,
+                        receipt_change,
+                    )
+                )
+
+        self.assertFalse(
+            writer._delivery_binds_pull_request(
+                checkout,
+                work_path,
+                delivered_work,
+                authorized_claim,
+                delivered_claim,
+                (),
+            )
+        )
+        delivered_receipt["candidate"] = published_candidate
+        fixtures.write_markdown(checkout / receipt_path, delivered_receipt)
+        self.assertFalse(
+            writer._delivery_binds_pull_request(
+                checkout,
+                work_path,
+                delivered_work,
+                authorized_claim,
+                delivered_claim,
+                receipt_change,
+            )
+        )
+
     def test_option_looking_remote_is_rejected_before_git_runs(self) -> None:
         calls: list[tuple[str, ...]] = []
 
@@ -1631,12 +1806,21 @@ class GitMailboxWriteContract(unittest.TestCase):
             return claim_value
 
         published_claim = fixtures.claim(self.repository, 1, with_candidate=True)
-        for authorization in published_claim["checkpoint"]["authorizations"]:
+        authorizations = copy.deepcopy(published_claim["checkpoint"]["authorizations"])
+        push_after_pr = copy.deepcopy(authorizations[0])
+        push_after_pr["sequence"] = 4
+        publish_after_pr = copy.deepcopy(authorizations[1])
+        publish_after_pr["sequence"] = 5
+        publish_after_pr["candidate_pull_request"] = published_claim["candidate"]["pull_request"]
+        authorizations.extend((push_after_pr, publish_after_pr))
+        for authorization in authorizations:
             claim_value["checkpoint"]["authorizations"].append(copy.deepcopy(authorization))
             claim_value["checkpoint"]["sequence"] = authorization["sequence"]
             claim_value["checkpoint"]["continuation_token"] = f"token-1-{authorization['sequence']}"
             if authorization["phase"] == "candidate_published":
                 claim_value["candidate"] = copy.deepcopy(published_claim["candidate"])
+                if authorization["sequence"] != 5:
+                    claim_value["candidate"]["pull_request"] = None
 
             checkpoint_claim = copy.deepcopy(claim_value)
             checkpoint_number = authorization["sequence"]

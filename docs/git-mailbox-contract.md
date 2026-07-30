@@ -412,6 +412,7 @@ Its normative shape inside `work.md` is:
 claim:
   id: clm_019f9a9e-0000-7000-8000-000000000001
   worker_run_id: run_019f9a9e-0000-7000-8000-000000000001
+  inherited_receipt_id: null
   work_revision: 1
   approved_commit: 0123456789abcdef0123456789abcdef01234567
   policy_commit: 0123456789abcdef0123456789abcdef01234567
@@ -425,6 +426,14 @@ claim:
     authorizations: []
   candidate: null
 ```
+
+`inherited_receipt_id` is required and immutable. It is `null` when the claim
+did not adopt a transferable predecessor candidate. Claim or takeover sets it to
+the exact receipt whose transferable candidate is copied into the new claim, in
+the same atomic transition. Static reconstruction resolves only that named
+receipt; timestamps, filename order, and other same-lineage receipts never infer
+predecessor provenance. A missing, non-transferable, self-owned, or mismatched
+receipt fails closed.
 
 Delegation preparation changes `invocation_digest` exactly once from `null` to
 the SHA-256 digest of the complete canonical delegated invocation. The digest is
@@ -441,14 +450,18 @@ action: repository.candidate.create
 proposed_effect_digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 candidate_head: null
 candidate_remote_ref: null
+candidate_pull_request: null
 acknowledged_candidate_head: null
 recorded_at: 2026-07-25T12:06:00Z
 ```
 
 `phase` is `pre_external_mutation` or `candidate_published`; `action` uses the
 Agent Scripts v2 vocabulary. SHA fields are exact candidate revisions or `null`
-when the action has no candidate. All other fields are required. Entries are in
-strictly increasing sequence order and are append-only. When transferable
+when the action has no candidate. `candidate_pull_request` is required on every
+entry. It is `null` for every `pre_external_mutation` entry and is the exact
+GitHub pull-request URL or `null` on `candidate_published`. All fields are
+required. Entries are in strictly increasing sequence order and are append-only.
+When transferable
 implementation state first exists, the worker updates the claim only after
 publishing and verifying it:
 
@@ -464,6 +477,14 @@ candidate:
   workspace_id: null
   published_at: 2026-07-25T12:20:00Z
 ```
+
+The transferable candidate identity is the exact tuple (`repository`, `remote`,
+`remote_url`, `remote_ref`, `base_revision`, `head_revision`). `pull_request` is
+publication metadata, not part of that identity; `workspace_id` and
+`published_at` are also not identity fields. Candidate lineage is the same tuple
+without `head_revision`. A head advance therefore changes candidate identity but
+remains on the same lineage when repository, remote, remote URL, remote ref, and
+base revision are unchanged.
 
 `workspace_id` may name a durable host workspace or task but must not contain a
 machine-local path. The candidate is valid only when `head_revision` is
@@ -499,6 +520,25 @@ remote reachability is reverified, and the blocked receipt binds the candidate i
 same atomic mailbox transition. That receipt becomes the verified transferable
 handoff for a later claim.
 
+A `candidate_published` entry is also the append-only provenance for current PR
+metadata. The first introduction of a PR URL, and every replacement with a
+different URL, requires a fresh `pull_request.create` or `pull_request.update`
+`pre_external_mutation` entry after the preceding `candidate_published` entry
+and before the new publication. That authority must name the publication's exact
+candidate head and remote ref. The new `candidate_published` entry binds the
+authorized URL in `candidate_pull_request`. A previously published, unchanged PR
+URL may be retained across a head advance without another PR mutation only when
+the candidate remains on the same lineage. A push by itself never authorizes PR
+introduction or replacement.
+
+A delivered terminal transition may normalize an introduced or replaced PR URL
+directly into the claim candidate and its newly written matching delivery receipt,
+without an intermediate `candidate_published` checkpoint, only under that same fresh
+exact-head-and-ref rule. The exact `pull_request.create` or `pull_request.update`
+authorization must follow the preceding publication and is consumed by that terminal
+receipt. Otherwise terminal candidate PR metadata must equal the latest published or
+inherited value.
+
 Before accepting any terminal result, Atelier requires its sequence and
 continuation token to equal the current claim-ledger tail. It also requires the
 terminal `authority_used` set to equal the allowed `pre_external_mutation`
@@ -515,7 +555,17 @@ new claim when the replaced claim has one. A takeover never silently discards a
 candidate: when no transferable handoff exists it preserves and references the
 current attempt receipt explaining that fact. A takeover creates a new claim
 identifier and worker-run identifier; it never edits the old identifiers in
-history.
+history. Blocked and released transferable receipts preserve the complete exact
+candidate, including its PR metadata. A reclaimed claim adopts that complete
+candidate and records the exact causal receipt in `inherited_receipt_id`; its
+checkpoint replay begins with only that receipt's inherited PR value. Merely
+preserving that URL through a blocked, released, reclaimed, or later same-lineage
+candidate state consumes no new PR mutation authority. After reclaim, the bound
+transferable receipt remains PR provenance for a changed head only when the new
+candidate is on that same lineage and an exact-head-and-ref push is followed by
+its `candidate_published` acknowledgement. Cross-lineage or unacknowledged state
+cannot inherit PR provenance. Stale, introduced, replaced, or otherwise changed
+PR metadata must satisfy the fresh-authority fences above or fail closed.
 
 Two workers may race to claim the same approved work locally. Only the worker
 whose commit first advances the canonical remote branch owns the claim. Every
@@ -752,11 +802,14 @@ preconditions:
 - **Claim.** A worker requires approved work whose readiness and capability
   gates pass. The commit publishes active work and its claim. If
   `attempt_receipt_id` identifies a verified transferable handoff, the new claim
-  adopts that exact candidate. A losing claim stops.
+  atomically adopts that exact candidate and records the same receipt as
+  `inherited_receipt_id`; otherwise the binding is `null`. A losing claim stops.
 - **Register or update candidate.** The claiming worker requires its exact
   active claim and unconsumed checkpoint and publishes the exact candidate while
-  advancing the checkpoint. Retry is valid only for the same candidate
-  transition.
+  advancing the checkpoint. The publication records required PR metadata
+  provenance; PR introduction or replacement requires the fresh exact authority
+  described above, while an unchanged URL may follow a same-lineage head advance.
+  Retry is valid only for the same candidate transition.
 - **Authorize external mutation.** The claiming worker requires its exact active
   claim and unconsumed checkpoint. The commit advances the checkpoint only after
   current revision, policy, ticket, candidate, and authority pass. The returned

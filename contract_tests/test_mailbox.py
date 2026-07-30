@@ -171,6 +171,7 @@ def claim(repository: str, number: int, *, with_candidate: bool) -> dict[str, An
                 "proposed_effect_digest": DIGEST,
                 "candidate_head": SHA_B,
                 "candidate_remote_ref": f"refs/heads/scott/work-{number}",
+                "candidate_pull_request": None,
                 "acknowledged_candidate_head": None,
                 "recorded_at": TIMESTAMP,
             },
@@ -182,6 +183,7 @@ def claim(repository: str, number: int, *, with_candidate: bool) -> dict[str, An
                 "proposed_effect_digest": DIGEST,
                 "candidate_head": SHA_B,
                 "candidate_remote_ref": f"refs/heads/scott/work-{number}",
+                "candidate_pull_request": None,
                 "acknowledged_candidate_head": SHA_B,
                 "recorded_at": TIMESTAMP,
             },
@@ -193,6 +195,7 @@ def claim(repository: str, number: int, *, with_candidate: bool) -> dict[str, An
                 "proposed_effect_digest": DIGEST,
                 "candidate_head": SHA_B,
                 "candidate_remote_ref": f"refs/heads/scott/work-{number}",
+                "candidate_pull_request": None,
                 "acknowledged_candidate_head": None,
                 "recorded_at": TIMESTAMP,
             },
@@ -203,6 +206,7 @@ def claim(repository: str, number: int, *, with_candidate: bool) -> dict[str, An
     return {
         "id": identifier("clm", number),
         "worker_run_id": worker_run_id,
+        "inherited_receipt_id": None,
         "work_revision": 1,
         "approved_commit": SHA_A,
         "policy_commit": SHA_A,
@@ -922,6 +926,7 @@ class MailboxContract(unittest.TestCase):
                 "proposed_effect_digest": DIGEST,
                 "candidate_head": "d" * 40,
                 "candidate_remote_ref": work["claim"]["candidate"]["remote_ref"],
+                "candidate_pull_request": None,
                 "acknowledged_candidate_head": None,
                 "recorded_at": TIMESTAMP,
             }
@@ -964,7 +969,7 @@ class MailboxContract(unittest.TestCase):
         work = self.fixture.works[work_id]
         next_head = "d" * 40
         checkpoint = work["claim"]["checkpoint"]
-        checkpoint["sequence"] = 5
+        checkpoint["sequence"] = 7
         checkpoint["continuation_token"] = "token-1-next"
         checkpoint["authorizations"].extend(
             [
@@ -974,8 +979,9 @@ class MailboxContract(unittest.TestCase):
                     "phase": "pre_external_mutation",
                     "action": "repository.candidate.push",
                     "proposed_effect_digest": DIGEST,
-                    "candidate_head": next_head,
+                    "candidate_head": SHA_B,
                     "candidate_remote_ref": work["claim"]["candidate"]["remote_ref"],
+                    "candidate_pull_request": None,
                     "acknowledged_candidate_head": None,
                     "recorded_at": TIMESTAMP,
                 },
@@ -985,8 +991,33 @@ class MailboxContract(unittest.TestCase):
                     "phase": "candidate_published",
                     "action": "repository.candidate.push",
                     "proposed_effect_digest": DIGEST,
+                    "candidate_head": SHA_B,
+                    "candidate_remote_ref": work["claim"]["candidate"]["remote_ref"],
+                    "candidate_pull_request": work["claim"]["candidate"]["pull_request"],
+                    "acknowledged_candidate_head": SHA_B,
+                    "recorded_at": TIMESTAMP,
+                },
+                {
+                    "sequence": 6,
+                    "invocation_id": work["claim"]["worker_run_id"],
+                    "phase": "pre_external_mutation",
+                    "action": "repository.candidate.push",
+                    "proposed_effect_digest": DIGEST,
                     "candidate_head": next_head,
                     "candidate_remote_ref": work["claim"]["candidate"]["remote_ref"],
+                    "candidate_pull_request": None,
+                    "acknowledged_candidate_head": None,
+                    "recorded_at": TIMESTAMP,
+                },
+                {
+                    "sequence": 7,
+                    "invocation_id": work["claim"]["worker_run_id"],
+                    "phase": "candidate_published",
+                    "action": "repository.candidate.push",
+                    "proposed_effect_digest": DIGEST,
+                    "candidate_head": next_head,
+                    "candidate_remote_ref": work["claim"]["candidate"]["remote_ref"],
+                    "candidate_pull_request": work["claim"]["candidate"]["pull_request"],
                     "acknowledged_candidate_head": next_head,
                     "recorded_at": TIMESTAMP,
                 },
@@ -1003,6 +1034,13 @@ class MailboxContract(unittest.TestCase):
         snapshot = MAILBOX.reconstruct_mailbox(self.root)
 
         self.assertEqual(snapshot["views"]["delivered"], [work_id])
+
+    def test_claim_requires_causal_inherited_receipt_binding(self) -> None:
+        work_id = self.fixture.add_work(1, "active")
+        del self.fixture.works[work_id]["claim"]["inherited_receipt_id"]
+        self.fixture.write_work(work_id)
+
+        self.assert_invalid("schema-one-of")
 
     def test_transferable_candidate_can_be_adopted_by_a_fresh_claim(self) -> None:
         work_id = self.fixture.add_work(1, "active")
@@ -1022,6 +1060,7 @@ class MailboxContract(unittest.TestCase):
         self.fixture.receipts[work_id][released["id"]] = released
         adopted_claim = claim(repository, 2, with_candidate=False)
         adopted_claim["candidate"] = copy.deepcopy(prior_claim["candidate"])
+        adopted_claim["inherited_receipt_id"] = released["id"]
         work["claim"] = adopted_claim
         self.fixture.write_work(work_id)
 
