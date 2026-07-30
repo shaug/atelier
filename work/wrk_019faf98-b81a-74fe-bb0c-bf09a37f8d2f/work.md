@@ -4,7 +4,7 @@ id: wrk_019faf98-b81a-74fe-bb0c-bf09a37f8d2f
 title: Document the production dogfood lifecycle
 project_id: prj_019faf81-a727-7f87-b3bf-ee92b37450eb
 initiative_id: ini_019faf98-b7e3-7f60-818b-d34bc08bf3a4
-status: delivered
+status: active
 revision: 2
 dependencies: []
 replaces: []
@@ -39,70 +39,20 @@ approval:
     - independent-review-current
     - unresolved-feedback-zero
 claim:
-  id: clm_019fb1d1-d31e-717c-a9da-8d3d1de0da96
-  worker_run_id: run_019fb1d1-d376-78d1-991d-fe1065d13eb4
-  inherited_receipt_id: rcp_019fb1d1-4fc2-78e7-bd9d-455915812202
+  id: clm_019fb207-d29f-78f8-832c-7aca86e4db06
+  worker_run_id: run_019fb207-d2e4-728b-9630-e3f755fed50f
+  inherited_receipt_id: rcp_019fb1f0-d83e-7b62-9cd0-91a8c2de5d66
   work_revision: 2
   approved_commit: 8e4e96e7e50888412fcf11fb7a64e74fedc88950
   policy_commit: b072158d739952d687673bfdd9c371f2115597b3
   ticket_observation_digest: sha256:c8ab154a17b92c7f380e89830c0ef7be3475500a6a1cee94656d6d361f98eb5f
-  invocation_digest: sha256:baa635388c0c203334da2800eea5125f7db5905af7ffe1497b23a9969a4c9e8d
-  claimed_at: '2026-07-30T06:59:57.568610Z'
+  invocation_digest: null
+  claimed_at: '2026-07-30T07:58:33.955580Z'
   host: codex
   checkpoint:
-    sequence: 5
-    continuation_token: xkV3iqRfKWaQmjdufureI19nJuy-8nTk41r15NF5y2w
-    authorizations:
-    - sequence: 1
-      invocation_id: run_019fb1d1-d376-78d1-991d-fe1065d13eb4
-      phase: pre_external_mutation
-      action: repository.candidate.push
-      proposed_effect_digest: sha256:a6784393df7df1e3c5a7e221aabc2aa213387b710589e95671c6f64bd73fd72b
-      candidate_head: c1ff7f433d52826f5bed4c45d5bbd86bbf78781d
-      candidate_remote_ref: refs/heads/scott/issue-781-dogfood-guide
-      candidate_pull_request: null
-      acknowledged_candidate_head: null
-      recorded_at: '2026-07-30T07:23:39.933908Z'
-    - sequence: 2
-      invocation_id: run_019fb1d1-d376-78d1-991d-fe1065d13eb4
-      phase: pre_external_mutation
-      action: repository.candidate.push
-      proposed_effect_digest: sha256:a6784393df7df1e3c5a7e221aabc2aa213387b710589e95671c6f64bd73fd72b
-      candidate_head: c1ff7f433d52826f5bed4c45d5bbd86bbf78781d
-      candidate_remote_ref: refs/heads/scott/issue-781-dogfood-guide
-      candidate_pull_request: null
-      acknowledged_candidate_head: null
-      recorded_at: '2026-07-30T07:24:40.290124Z'
-    - sequence: 3
-      invocation_id: run_019fb1d1-d376-78d1-991d-fe1065d13eb4
-      phase: pre_external_mutation
-      action: repository.candidate.push
-      proposed_effect_digest: sha256:5afbc557a379f7a3e2f057ce4434ef9cf0fe1f151df33ed17d746cc1e20c58c4
-      candidate_head: c1ff7f433d52826f5bed4c45d5bbd86bbf78781d
-      candidate_remote_ref: refs/heads/scott/issue-781-dogfood-guide
-      candidate_pull_request: null
-      acknowledged_candidate_head: null
-      recorded_at: '2026-07-30T07:26:05.342856Z'
-    - sequence: 4
-      invocation_id: run_019fb1d1-d376-78d1-991d-fe1065d13eb4
-      phase: candidate_published
-      action: repository.candidate.push
-      proposed_effect_digest: sha256:5afbc557a379f7a3e2f057ce4434ef9cf0fe1f151df33ed17d746cc1e20c58c4
-      candidate_head: c1ff7f433d52826f5bed4c45d5bbd86bbf78781d
-      candidate_remote_ref: refs/heads/scott/issue-781-dogfood-guide
-      candidate_pull_request: null
-      acknowledged_candidate_head: c1ff7f433d52826f5bed4c45d5bbd86bbf78781d
-      recorded_at: '2026-07-30T07:27:02.772360Z'
-    - sequence: 5
-      invocation_id: run_019fb1d1-d376-78d1-991d-fe1065d13eb4
-      phase: pre_external_mutation
-      action: pull_request.update
-      proposed_effect_digest: sha256:0a633a7d754ed5b122a2b4be8c73ff2ab0df881cfcc18c76ea96f0d56d437178
-      candidate_head: c1ff7f433d52826f5bed4c45d5bbd86bbf78781d
-      candidate_remote_ref: refs/heads/scott/issue-781-dogfood-guide
-      candidate_pull_request: null
-      acknowledged_candidate_head: null
-      recorded_at: '2026-07-30T07:30:33.365828Z'
+    sequence: 0
+    continuation_token: _iewWIs0_-1gNQkrwFZ8iSPQMnjSXc2B-_i8wXLb670
+    authorizations: []
   candidate:
     repository: github:shaug/atelier
     remote: origin
@@ -115,7 +65,7 @@ claim:
     published_at: '2026-07-30T07:27:02.772360Z'
 blocking_message_id: null
 attempt_receipt_id: rcp_019fb1f0-d83e-7b62-9cd0-91a8c2de5d66
-delivery_receipt_id: rcp_019fb1f0-d83e-7b62-9cd0-91a8c2de5d66
+delivery_receipt_id: null
 acceptance: null
 ---
 ## Intent
