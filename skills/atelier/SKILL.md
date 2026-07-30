@@ -75,6 +75,13 @@ be supplied to `scripts/audit.py accept` for the one acceptance commit. Reusing
 report evidence is rejected. Acceptance never implies merge, deployment,
 native-ticket mutation, or issue closure.
 
+## Dogfood one accountable changeset
+
+Use `references/dogfood.md` to run the first end-to-end Atelier exercise. It
+keeps the planner, worker, fresh recovery task, audit task, and operator as
+separate actors; records their durable handoffs; and does not treat a ready pull
+request as acceptance, merge, deployment, or ticket completion.
+
 ## Mailbox boundary
 
 The strict v1 mailbox schema and fresh-clone reconstruction helper are
