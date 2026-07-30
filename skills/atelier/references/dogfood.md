@@ -96,14 +96,20 @@ Start a new task with no earlier task transcript. It must:
    - for active work whose worker is being replaced, use `takeover` with the exact
      replaced fence;
    - for blocked work whose worker is being replaced, use `takeover` and preserve
-     the unresolved blocker and blocked state;
+     the unresolved blocker and blocked state. Takeover does not resolve the
+     decision or make the replacement claim active. Present the blocker for an
+     explicit planner or operator decision; when that decision authorizes another
+     attempt, use `release` with the replacement claim's exact blocked fence to
+     return the work to approved while preserving its receipt and transferable
+     candidate. Start a separate fresh `claim` with new claim, run, and token
+     identities before preparing another invocation;
    - for released, approved work, use a fresh `claim`; verify and inherit any exact
      transferable candidate, and do not combine release with reacquisition; or
    - for delivered work, leave the delivery intact for the separate audit task.
      Use delivered `takeover` only after an independently authorized rework decision
      because it returns the transferred candidate to active work.
 
-When `takeover` or a fresh `claim` produces a new active claim, repeat the
+When an active `takeover` or a fresh `claim` produces a new active claim, repeat the
 preconditions in `delegation.md` against that new fence: capture a fresh complete
 GitHub observation, use `scripts/delegation.py` `prepare` to seal a new immutable
 invocation into the claim, pass it unchanged to one fresh
