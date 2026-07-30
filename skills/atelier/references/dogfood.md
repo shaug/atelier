@@ -84,12 +84,20 @@ Start a new task with no earlier task transcript. It must:
 
 1. repeat the host preflight and reread the native ticket, current policy, and
    canonical mailbox;
-2. reconstruct the active work, claim fence, checkpoint ledger, receipts, and
+2. reconstruct the work lifecycle, claim fence, checkpoint ledger, receipts, and
    any exact remote candidate using `mailbox-validation.md`;
 3. verify a declared candidate against its full remote ref and head before
    treating it as transferable; and
-4. use the explicit `block`, `release`, or `takeover` transition in
-   `claiming.md` when its preconditions pass.
+4. choose the production transition from the reconstructed lifecycle:
+   - for active work whose worker is being replaced, use `takeover` with the exact
+     replaced fence;
+   - for blocked work whose worker is being replaced, use `takeover` and preserve
+     the unresolved blocker and blocked state;
+   - for released, approved work, use a fresh `claim`; verify and inherit any exact
+     transferable candidate, and do not combine release with reacquisition; or
+   - for delivered work, leave the delivery intact for the separate audit task.
+     Use delivered `takeover` only after an independently authorized rework decision
+     because it returns the transferred candidate to active work.
 
 The recovery task must retain the prior fence and token as historical evidence.
 It must never mint a token, guess a candidate SHA, reuse a stale observation,
