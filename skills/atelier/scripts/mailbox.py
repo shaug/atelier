@@ -960,6 +960,36 @@ def _validate_claim(
             right["base_revision"],
         )
 
+    def same_remote_lineage(
+        left: dict[str, Any] | None,
+        right: dict[str, Any] | None,
+    ) -> bool:
+        return left is not None and right is not None and (
+            left["repository"],
+            left["remote"],
+            left["remote_url"],
+            left["remote_ref"],
+        ) == (
+            right["repository"],
+            right["remote"],
+            right["remote_url"],
+            right["remote_ref"],
+        )
+
+    recovered_current_candidate = (
+        attempt_receipt is not None
+        and attempt_receipt["outcome"] == "blocked"
+        and attempt_receipt["handoff"] == "transferable"
+        and attempt_receipt["claim_id"] == claim["id"]
+        and attempt_receipt["candidate"] == candidate
+        and bool(ledger)
+        and ledger[-1]["phase"] == "pre_external_mutation"
+        and ledger[-1]["action"] == "repository.candidate.push"
+        and candidate is not None
+        and ledger[-1]["candidate_head"] == candidate["head_revision"]
+        and ledger[-1]["candidate_remote_ref"] == candidate["remote_ref"]
+    )
+
     inherited_receipt_id = claim["inherited_receipt_id"]
     inherited_receipt = (
         work_receipts.get(inherited_receipt_id) if inherited_receipt_id is not None else None
@@ -978,7 +1008,13 @@ def _validate_claim(
             inherited_receipt["claim_id"] == claim["id"]
             or inherited_receipt["handoff"] != "transferable"
             or inherited_receipt["candidate"] is None
-            or not same_lineage(inherited_receipt["candidate"], candidate)
+            or (
+                not same_lineage(inherited_receipt["candidate"], candidate)
+                and not (
+                    recovered_current_candidate
+                    and same_remote_lineage(inherited_receipt["candidate"], candidate)
+                )
+            )
         ):
             diagnostics.append(
                 Diagnostic(
@@ -1002,19 +1038,6 @@ def _validate_claim(
                 "claim does not bind the current transferable predecessor receipt",
             )
         )
-    recovered_current_candidate = (
-        attempt_receipt is not None
-        and attempt_receipt["outcome"] == "blocked"
-        and attempt_receipt["handoff"] == "transferable"
-        and attempt_receipt["claim_id"] == claim["id"]
-        and attempt_receipt["candidate"] == candidate
-        and bool(ledger)
-        and ledger[-1]["phase"] == "pre_external_mutation"
-        and ledger[-1]["action"] == "repository.candidate.push"
-        and candidate is not None
-        and ledger[-1]["candidate_head"] == candidate["head_revision"]
-        and ledger[-1]["candidate_remote_ref"] == candidate["remote_ref"]
-    )
     acknowledged_source = (
         inherited_candidate_source
         if same_identity(inherited_candidate_source, candidate)
@@ -1174,6 +1197,14 @@ def _validate_claim(
             for entry in ledger
         )
     )
+    blocked_push_drops_inherited_pull_request = (
+        recovered_current_candidate
+        and inherited_candidate_source is not None
+        and candidate is not None
+        and not same_identity(inherited_candidate_source, candidate)
+        and inherited_candidate_source["pull_request"] is not None
+        and candidate["pull_request"] is None
+    )
     current_unacknowledged = (
         candidate is not None
         and not inherited_candidate
@@ -1220,6 +1251,7 @@ def _validate_claim(
         candidate is not None
         and candidate["pull_request"] != latest_published_pull_request
         and not terminal_pull_request_normalization
+        and not blocked_push_drops_inherited_pull_request
     ):
         diagnostics.append(
             Diagnostic(

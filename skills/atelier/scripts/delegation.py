@@ -798,14 +798,6 @@ def _blocked_candidate(
         return None
     pull_request = _publication_pull_request(candidate)
     current_pull_request = current["pull_request"] if current is not None else None
-    if pull_request != current_pull_request and not _pull_request_mutation_authorized(
-        claim,
-        candidate_head=candidate["head_sha"],
-        candidate_remote_ref=candidate["remote_ref"],
-    ):
-        raise MailboxTransitionRejected(
-            "blocked pull request metadata lacks fresh exact pre-mutation authority"
-        )
     candidate_identity = (
         candidate["repository"],
         candidate["remote_url"],
@@ -813,26 +805,50 @@ def _blocked_candidate(
         candidate["base_sha"],
         candidate["head_sha"],
     )
-    if current is not None and candidate_identity == (
-        current["repository"],
-        current["remote_url"],
-        current["remote_ref"],
-        current["base_revision"],
-        current["head_revision"],
+    current_identity = (
+        (
+            current["repository"],
+            current["remote_url"],
+            current["remote_ref"],
+            current["base_revision"],
+            current["head_revision"],
+        )
+        if current is not None
+        else None
+    )
+    ledger = claim["checkpoint"]["authorizations"]
+    recovers_exact_push = (
+        result["implementation_state"] == "published"
+        and bool(ledger)
+        and ledger[-1]["phase"] == "pre_external_mutation"
+        and ledger[-1]["action"] == "repository.candidate.push"
+        and ledger[-1]["candidate_head"] == candidate["head_sha"]
+        and ledger[-1]["candidate_remote_ref"] == candidate["remote_ref"]
+    )
+    drops_prior_pull_request_for_recovery = (
+        current_pull_request is not None
+        and pull_request is None
+        and candidate_identity != current_identity
+        and recovers_exact_push
+    )
+    if (
+        pull_request != current_pull_request
+        and not drops_prior_pull_request_for_recovery
+        and not _pull_request_mutation_authorized(
+            claim,
+            candidate_head=candidate["head_sha"],
+            candidate_remote_ref=candidate["remote_ref"],
+        )
     ):
+        raise MailboxTransitionRejected(
+            "blocked pull request metadata lacks fresh exact pre-mutation authority"
+        )
+    if current is not None and candidate_identity == current_identity:
         value = copy.deepcopy(current)
         if pull_request is not None:
             value["pull_request"] = pull_request
         return value
-    ledger = claim["checkpoint"]["authorizations"]
-    if (
-        result["implementation_state"] != "published"
-        or not ledger
-        or ledger[-1]["phase"] != "pre_external_mutation"
-        or ledger[-1]["action"] != "repository.candidate.push"
-        or ledger[-1]["candidate_head"] != candidate["head_sha"]
-        or ledger[-1]["candidate_remote_ref"] != candidate["remote_ref"]
-    ):
+    if not recovers_exact_push:
         raise MailboxTransitionRejected(
             "blocked published candidate lacks its exact push authorization"
         )
