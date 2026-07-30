@@ -4,7 +4,7 @@ id: wrk_019faf98-b81a-74fe-bb0c-bf09a37f8d2f
 title: Document the production dogfood lifecycle
 project_id: prj_019faf81-a727-7f87-b3bf-ee92b37450eb
 initiative_id: ini_019faf98-b7e3-7f60-818b-d34bc08bf3a4
-status: blocked
+status: approved
 revision: 2
 dependencies: []
 replaces: []
@@ -38,63 +38,9 @@ approval:
     - required-validation-reported
     - independent-review-current
     - unresolved-feedback-zero
-claim:
-  id: clm_019fb165-c28f-7762-a122-b7666a334fe8
-  worker_run_id: run_019fb165-c2d7-783e-95bc-240690aaf69b
-  inherited_receipt_id: null
-  work_revision: 2
-  approved_commit: 8e4e96e7e50888412fcf11fb7a64e74fedc88950
-  policy_commit: b072158d739952d687673bfdd9c371f2115597b3
-  ticket_observation_digest: sha256:c8ab154a17b92c7f380e89830c0ef7be3475500a6a1cee94656d6d361f98eb5f
-  invocation_digest: sha256:45cfa2f8b4bfeb8b298599906e405d00eeaab71d1df569c36c6287ad29e9f12f
-  claimed_at: '2026-07-30T05:01:03.277764Z'
-  host: codex
-  checkpoint:
-    sequence: 3
-    continuation_token: aqJpQp06t848Fbct4Szj7Gpfl4vgy68lV0K6yUzIsA4
-    authorizations:
-    - sequence: 1
-      invocation_id: run_019fb165-c2d7-783e-95bc-240690aaf69b
-      phase: pre_external_mutation
-      action: repository.candidate.push
-      proposed_effect_digest: sha256:129109c21bd54778bddf2e177dd454a23549e1256553adda89b59022996ec5a4
-      candidate_head: 5b84aad8a4df688f2e3c8de6267e3e4e957d4701
-      candidate_remote_ref: refs/heads/scott/issue-781-dogfood-guide
-      candidate_pull_request: null
-      acknowledged_candidate_head: null
-      recorded_at: '2026-07-30T05:14:21.241801Z'
-    - sequence: 2
-      invocation_id: run_019fb165-c2d7-783e-95bc-240690aaf69b
-      phase: pre_external_mutation
-      action: repository.candidate.push
-      proposed_effect_digest: sha256:f68bd3f03f5d111674dc5dfeb79d6b3ebbfc84d5bf587c5f4fa8ff6aa321ea1a
-      candidate_head: 5b84aad8a4df688f2e3c8de6267e3e4e957d4701
-      candidate_remote_ref: refs/heads/scott/issue-781-dogfood-guide
-      candidate_pull_request: null
-      acknowledged_candidate_head: null
-      recorded_at: '2026-07-30T05:20:42.359472Z'
-    - sequence: 3
-      invocation_id: run_019fb165-c2d7-783e-95bc-240690aaf69b
-      phase: pre_external_mutation
-      action: repository.candidate.push
-      proposed_effect_digest: sha256:745cc8aa540a749137939ce9d484ff3f733e2250e9b0ae01c9cb8bc8b5682b0a
-      candidate_head: 904314c835a870fe9dd0a0d75f4ff1e23e78cad8
-      candidate_remote_ref: refs/heads/scott/issue-781-dogfood-guide
-      candidate_pull_request: null
-      acknowledged_candidate_head: null
-      recorded_at: '2026-07-30T06:42:35.442261Z'
-  candidate:
-    repository: github:shaug/atelier
-    remote: origin
-    remote_url: https://github.com/shaug/atelier.git
-    remote_ref: refs/heads/scott/issue-781-dogfood-guide
-    base_revision: b072158d739952d687673bfdd9c371f2115597b3
-    head_revision: 904314c835a870fe9dd0a0d75f4ff1e23e78cad8
-    pull_request: null
-    workspace_id: null
-    published_at: '2026-07-30T06:57:26.442429Z'
-blocking_message_id: msg_019fb1d0-56e1-7dfd-86b8-299674717254
-attempt_receipt_id: rcp_019fb1d0-56e1-755b-9d8e-7d6fdaad0164
+claim: null
+blocking_message_id: null
+attempt_receipt_id: rcp_019fb1d1-4fc2-78e7-bd9d-455915812202
 delivery_receipt_id: null
 acceptance: null
 ---
