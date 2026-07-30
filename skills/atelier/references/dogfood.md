@@ -139,17 +139,26 @@ decision.
 
 ## Preserve the evidence packet
 
-Keep the following identifiers and artifacts available through native GitHub
-state or the canonical mailbox:
+Use only native GitHub state and canonical-mailbox records for cross-task
+reconstruction:
 
-| Transition | Required durable evidence |
+| Transition | Durable production record |
 | --- | --- |
-| Approval | Work ID and revision, rendered preview digest, approver/timestamp, policy commit, authority ceiling, and required evidence. |
+| Approval | Work ID and approved revision, approver/timestamp, policy commit, authority ceiling, and required evidence. |
 | Claim and delegation | Claim ID, worker run ID, full checkpoint ledger, immutable invocation digest, and exact Agent Scripts capability identity. |
 | Candidate and delivery | Remote URL, full ref, head SHA, candidate acknowledgement, required validation results, independent review identity/verdict, and pull-request topology. |
 | Recovery | Previous fence, checkpoint tail, block/release/takeover receipt, rationale, and verified transferable candidate or explicit absence. |
-| Audit and acceptance | Complete provider observations, normalized review and feedback dispositions, audit report/fence, and the acceptance commit when explicitly accepted. A declined fence remains delivered; v0 records no rejection transition. |
+| Audit and acceptance | Persisted predicate verdicts, normalized review and feedback evidence, and the acceptance commit when explicitly accepted. A declined fence remains delivered; v0 records no rejection transition. |
 
-If any item cannot be reread, is stale, or conflicts with current native or
-mailbox state, report that condition. Do not replace it with a narrative claim
-that the dogfood run passed.
+The rendered preview and digest, complete provider-observation files, and audit
+report and fence are temporary operator or host outputs. Use them only at their
+live decision boundaries; production v0 does not persist them as shared Atelier
+state. A fresh task captures a new provider observation and reconstructs the
+durable records above instead of expecting those files to survive.
+
+If a dogfood acceptance criterion requires retaining one of those raw temporary
+artifacts, report the run blocked: v0 has no authorized durable production path
+for it. Do not invent another mailbox document, commit host-local output, or
+replace the missing artifact with a narrative claim that the run passed. Also
+report any durable item that cannot be reread, is stale, or conflicts with
+current native or mailbox state.
