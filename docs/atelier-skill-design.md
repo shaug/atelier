@@ -462,24 +462,12 @@ Receipts summarize evidence; they do not replace live verification.
 
 ## Human-shaped changesets
 
-Atelier retains the existing planning doctrine but not its fixed implementation
-or all of its numeric heuristics.
-
-Planning should continue to:
-
-- keep an initiative executable as one assignment when it is already reviewable,
-- avoid one-child decomposition without a real reason,
-- separate unrelated concern domains,
-- prefer additive foundations before disruptive transitions,
-- separate mechanical restructuring from behavioral changes when that helps
-  review,
-- keep validation with the behavior it proves,
-- identify re-split triggers before implementation,
-- and create follow-up work when implementation or review reveals new scope.
-
-Line counts may inform judgment but are not universal correctness gates. The
-test is whether a reviewer can construct an accurate mental model of the change
-and evaluate it independently.
+Cognitive-shaping doctrine — the mental-model standard, its calibrating scale,
+and the eight breakdown rules — is owned by compris, not Atelier. Atelier does
+not maintain a competing copy; planning judgment for shaping an initiative into
+reviewable assignments defers to the [Compris Cognitive Shaping Doctrine],
+published at compris commit `5c45cd2b9b9137f985b9e5e9d343894553efc1cd`
+(shaug/compris#208).
 
 ## Project policy and authority
 
@@ -733,6 +721,7 @@ These decisions do not require a storage abstraction or server design.
 [atelier north star]: ./north-star.md
 [atelier project policy contract]: ./project-policy-contract.md
 [atelier skill implementation plan]: ./implementation-plan.md
+[compris cognitive shaping doctrine]: https://github.com/shaug/compris/blob/5c45cd2b9b9137f985b9e5e9d343894553efc1cd/docs/cognitive-shaping-doctrine.md
 [git mailbox contract]: ./git-mailbox-contract.md
 [mailbox protocol validation]: ./mailbox-protocol-validation.md
 [why atelier?]: ./atelier-name.md
