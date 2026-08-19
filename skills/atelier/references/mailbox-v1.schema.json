@@ -790,7 +790,7 @@
           ],
           "properties": {
             "capability": {
-                "const": "agent-scripts.implement-ticket/delegated-execution/v2"
+                "const": "compris.implement-ticket/delegated-execution/v2"
             },
             "delivery_outcome": {
               "const": "ready_pr"

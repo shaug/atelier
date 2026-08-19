@@ -19,7 +19,7 @@ ticket mutation, or a later evaluation.
 Keep these roles in separate tasks:
 
 - The planner discusses and promotes the assignment.
-- The worker claims it and delegates its implementation to Agent Scripts.
+- The worker claims it and delegates its implementation to Compris.
 - A fresh recovery task reconstructs state after a deliberate interruption.
 - The auditor reads the delivered state and presents predicate verdicts.
 - The operator alone may accept the audited delivery.
@@ -56,13 +56,13 @@ asking to continue does not grant worker authority.
    `scripts/claiming.py claim`. Retain the returned claim ID, worker run ID,
    continuation token, canonical claim-transition `commit`, and `base_revision`.
 3. Read `delegation.md`. Use `scripts/delegation.py` with `operation: prepare`
-   to write one immutable Agent Scripts v2 invocation to the current task's
+   to write one immutable Compris v2 invocation to the current task's
    host-local path. Preparation seals only the invocation digest into the claim;
    the invocation and its host-owned fresh observation command are not shared
    mailbox state and are not reusable by a recovery task.
 4. Give that unchanged invocation to one fresh
-   `agent-scripts:implement-ticket` worker. The implementation worker follows
-   Agent Scripts' own workflow, uses every checkpoint before an allowed
+   `compris:implement-ticket` worker. The implementation worker follows
+   Compris' own workflow, uses every checkpoint before an allowed
    external mutation, and sends `candidate_published` immediately after every
    remote candidate advancement.
 5. Finalize only the returned terminal result with a fresh GitHub observation.
@@ -113,7 +113,7 @@ When an active `takeover` or a fresh `claim` produces a new active claim, repeat
 preconditions in `delegation.md` against that new fence: capture a fresh complete
 GitHub observation, use `scripts/delegation.py` `prepare` to seal a new immutable
 invocation into the claim, pass it unchanged to one fresh
-`agent-scripts:implement-ticket` worker, service every checkpoint, and finalize the
+`compris:implement-ticket` worker, service every checkpoint, and finalize the
 terminal result with another fresh observation. Never reuse the prior claim's
 invocation after takeover or a fresh claim, even when the native ticket is unchanged.
 A recovery that remains blocked is truthful blocked evidence, not a delivered or
@@ -159,7 +159,7 @@ reconstruction:
 | Transition | Durable production record |
 | --- | --- |
 | Approval | Work ID and approved revision, approver/timestamp, policy commit, authority ceiling, and required evidence. |
-| Claim and delegation | Claim ID, worker run ID, full checkpoint ledger, immutable invocation digest, and exact Agent Scripts capability identity. |
+| Claim and delegation | Claim ID, worker run ID, full checkpoint ledger, immutable invocation digest, and exact Compris capability identity. |
 | Candidate and delivery | Remote URL, full ref, head SHA, candidate acknowledgement, required validation results, independent review identity/verdict, and pull-request topology. |
 | Recovery | Previous fence, checkpoint tail, block/release/takeover receipt, rationale, and verified transferable candidate or explicit absence. |
 | Audit and acceptance | Persisted predicate verdicts, normalized review and feedback evidence, and the acceptance commit when explicitly accepted. A declined fence remains delivered; v0 records no rejection transition. |

@@ -28,8 +28,8 @@ Do not claim unavailable behavior or emulate it with ad hoc orchestration.
 - Codex is the v0 reference host.
 - The Git mailbox is Atelier's only shared state.
 - Native tickets describe project work.
-- Agent Scripts is an independently installed platform dependency.
-- Agent Scripts owns ticket implementation and its transitive workflow.
+- Compris is an independently installed platform dependency.
+- Compris owns ticket implementation and its transitive workflow.
 - Atelier owns approved intent, project policy, authority fencing, durable
   coordination, terminal validation, audit, and operator acceptance.
 - Delivery, acceptance, merge, deployment, and native-ticket completion are

@@ -456,7 +456,7 @@ recorded_at: 2026-07-25T12:06:00Z
 ```
 
 `phase` is `pre_external_mutation` or `candidate_published`; `action` uses the
-Agent Scripts v2 vocabulary. SHA fields are exact candidate revisions or `null`
+Compris v2 vocabulary. SHA fields are exact candidate revisions or `null`
 when the action has no candidate. `candidate_pull_request` is required on every
 entry. It is `null` for every `pre_external_mutation` entry and is the exact
 GitHub pull-request URL or `null` on `candidate_published`. All fields are

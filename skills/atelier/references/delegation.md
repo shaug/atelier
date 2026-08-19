@@ -1,8 +1,8 @@
 # Delegated implementation
 
 Atelier delegates exactly one active, approved, claimed assignment to the
-independently installed `agent-scripts:implement-ticket` skill. Agent Scripts
-owns implementation and its transitive workflow. Atelier owns the approved
+independently installed `compris:implement-ticket` skill. Compris owns
+implementation and its transitive workflow. Atelier owns the approved
 intent, invocation boundary, authority checkpoints, terminal validation, and
 durable receipt.
 

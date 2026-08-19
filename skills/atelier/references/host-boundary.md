@@ -2,14 +2,14 @@
 
 Atelier's v0 host adapter is instruction-led. Codex supplies installed-skill
 identity and live provider observations; the deterministic helper validates
-them. Atelier does not scan for a convenient substitute, copy Agent Scripts, or
+them. Atelier does not scan for a convenient substitute, copy Compris, or
 perform provider mutations through this boundary.
 
 ## Startup preflight
 
 Before native-state inspection or future work delegation:
 
-1. Resolve `agent-scripts:implement-ticket` from the current Codex skill catalog.
+1. Resolve `compris:implement-ticket` from the current Codex skill catalog.
    Use the exact installed skill root supplied by Codex. A same-named repository
    skill, source checkout, copied directory, or guessed cache path is not an
    installed identity.
@@ -28,7 +28,7 @@ Before native-state inspection or future work delegation:
 
    ```text
    python3 scripts/host_boundary.py check \
-     --skill-name agent-scripts:implement-ticket \
+     --skill-name compris:implement-ticket \
      --skill-root <exact-installed-skill-root> \
      --connector github@openai-curated \
      --operation github.issue.read \
@@ -89,4 +89,4 @@ In particular, fail closed when:
 
 The boundary proves compatibility and typed read access only. It does not
 implement `plan`, `work`, `audit`, mailbox writes, delegation, acceptance, or
-any Agent Scripts transitive workflow.
+any Compris transitive workflow.

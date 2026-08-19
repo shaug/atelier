@@ -36,7 +36,7 @@ Atelier will own:
 - and producing evidence that an accountable operator can accept.
 
 Atelier will delegate implementation, review, and pull-request handling to the
-independently useful [Agent Scripts] skills. The initial version does not
+independently useful [Compris] skills. The initial version does not
 delegate merge, deployment, or ticket-state mutation.
 
 A dedicated Git repository will serve as Atelier's passive planning record and
@@ -105,7 +105,7 @@ The next version should:
    automation policy.
 1. Use native project tickets where useful or required without making them the
    only possible Atelier coordination channel.
-1. Delegate implementation mechanics to Agent Scripts rather than rebuilding
+1. Delegate implementation mechanics to Compris rather than rebuilding
    them.
 1. Make every shared transition inspectable through ordinary Git and text tools.
 1. Fail closed when authority, persistence, or current state cannot be
@@ -145,7 +145,7 @@ Atelier skill
    +--> Git mailbox repository
    |      durable intent, assignments, messages, claims, receipts
    |
-   +--> Agent Scripts
+   +--> Compris
    |      implementation, review, changeset carving, PR lifecycle
    |
    +--> Native project systems
@@ -161,7 +161,7 @@ permission surfaces define the first tested adapter. This is a delivery
 constraint, not a product claim that Atelier concepts belong to Codex.
 
 A future Claude Code adapter should preserve the same Atelier documents,
-transitions, authority vocabulary, Agent Scripts contract, and mailbox history.
+transitions, authority vocabulary, Compris contract, and mailbox history.
 Only host integration may differ: command discovery, skill invocation, subagent
 launch, permission prompts, and connector access. If a supposedly portable
 Atelier rule must branch on host identity, the rule belongs above the host
@@ -171,12 +171,12 @@ until the Codex reference path works; it must not distort v0.
 ## Distribution and dependency model
 
 Atelier should remain its own repository and plugin. It is an application built
-on Agent Scripts, not a peer skill collection inside Agent Scripts.
+on Compris, not a peer skill collection inside Compris.
 
-Agent Scripts remains independently installable and useful. It must not depend
+Compris remains independently installable and useful. It must not depend
 on or contain Atelier-specific behavior.
 
-The initial worker mode depends directly on one named Agent Scripts capability:
+The initial worker mode depends directly on one named Compris capability:
 `implement-ticket`. That capability owns its own implementation, changeset
 carving, review, pull-request, and babysitting workflow. Atelier must not
 re-orchestrate its transitive skills.
@@ -191,14 +191,14 @@ versioned dependency. Where it does not, Atelier should perform a startup
 capability check and fail with exact installation guidance. It must not silently
 fall back to a bespoke implementation workflow.
 
-The initial version will not vendor Agent Scripts. A copied dependency would
+The initial version will not vendor Compris. A copied dependency would
 create release lag and pressure for Atelier-specific patches. Explicit
 prerequisites preserve the platform/application boundary more honestly.
 
-### Agent Scripts capability contract
+### Compris capability contract
 
 Before claiming work, Atelier must establish that the host can invoke a
-  compatible `agent-scripts.implement-ticket/delegated-execution/v2` capability
+  compatible `compris.implement-ticket/delegated-execution/v2` capability
 and validate its `capability.json` discovery manifest plus versioned invocation,
 checkpoint, and result schemas. Finding a skill with the expected name is not
 sufficient.
@@ -247,11 +247,11 @@ sequence and opaque continuation token in its authoritative Git transition. On
 allowance, the same transition appends the invocation, phase, action, proposed
 effect, candidate, and acknowledgement to the claim's authorization ledger. A
 denial preserves the prior sequence and token. Before consuming any terminal
-result, Atelier uses the Agent Scripts validator to require the reported
+result, Atelier uses the Compris validator to require the reported
 terminal sequence and token to equal the current claim-ledger tail. It then
 requires the terminal `authority_used` set to equal the allowed pre-mutation
 actions in that ledger; missing or extra actions block the result. A consumed
-request cannot be replayed. Agent Scripts validates each exchange, but Atelier
+request cannot be replayed. Compris validates each exchange, but Atelier
 owns durable compare-and-swap semantics and the ledger.
 
 If capability compatibility is missing before claim, the work remains approved.
@@ -363,7 +363,7 @@ It should:
 1. Fetch the Git mailbox and check work-threaded messages.
 1. Identify approved work whose dependencies and project-specific gates are
    satisfied.
-1. Verify that the required Agent Scripts capability and native ticket are
+1. Verify that the required Compris capability and native ticket are
    available.
 1. Refuse a claim while another assignment for the project is active.
 1. Claim exactly one assignment through a verified Git transition.
@@ -525,7 +525,7 @@ capability.
 
 An operator or the project's external triage process must supply that ticket;
 initial plan mode never publishes one. Atelier-only execution and read-only
-external-ticket execution remain unsupported until Agent Scripts offers a
+external-ticket execution remain unsupported until Compris offers a
 generally useful ticket-independent implementation contract.
 
 Atelier links these records; it does not synchronize mutable ticket fields or
@@ -627,7 +627,7 @@ CLI rather than coexisting with it.
 
 The tag, legacy-ticket disposition, and implementation removal are a deliberate
 reset gate. Before crossing it, the composition spike must prove that an
-independently installed Agent Scripts capability can be discovered, validated,
+independently installed Compris capability can be discovered, validated,
 invoked with allowed and denied checkpoints, acknowledge a published candidate,
 and return a valid terminal result without Atelier copying its workflow. The
 operator reviews that evidence and explicitly confirms the reset a second time.
@@ -717,7 +717,7 @@ These decisions do not require a storage abstraction or server design.
 
 <!-- inline reference link definitions. please keep alphabetized -->
 
-[agent scripts]: https://github.com/shaug/agent-scripts
+[compris]: https://github.com/shaug/compris
 [atelier north star]: ./north-star.md
 [atelier project policy contract]: ./project-policy-contract.md
 [atelier skill implementation plan]: ./implementation-plan.md
