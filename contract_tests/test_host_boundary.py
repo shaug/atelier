@@ -227,12 +227,12 @@ class HostBoundaryContract(unittest.TestCase):
             "import json, sys\n"
             "value = json.load(open(sys.argv[2], encoding='utf-8'))\n"
             "raise SystemExit(0 if value.get('id') == "
-            "'agent-scripts.implement-ticket/delegated-execution/v2' else 1)\n",
+            "'compris.implement-ticket/delegated-execution/v2' else 1)\n",
             encoding="utf-8",
         )
         manifest = {
-            "schema": "agent-scripts.implement-ticket/capability-manifest/v2",
-            "id": "agent-scripts.implement-ticket/delegated-execution/v2",
+            "schema": "compris.implement-ticket/capability-manifest/v2",
+            "id": "compris.implement-ticket/delegated-execution/v2",
             "contract": "CONTRACT.md",
             "invocation_schema": "invocation.schema.json",
             "checkpoint_request_schema": "checkpoint-request.schema.json",
@@ -257,11 +257,11 @@ class HostBoundaryContract(unittest.TestCase):
         descriptor = {
             "schema": "atelier.host-capability/v1",
             "reference_host": "codex",
-            "delegated_capability": ("agent-scripts.implement-ticket/delegated-execution/v2"),
+            "delegated_capability": ("compris.implement-ticket/delegated-execution/v2"),
             "delegated_authority_actions": AUTHORITY_ACTIONS,
             "accepted_terminal_states": ["ready_pr", "blocked", "requires_epic"],
             "delegated_skill": {
-                "stable_name": "agent-scripts:implement-ticket",
+                "stable_name": "compris:implement-ticket",
                 "frontmatter_name": "implement-ticket",
                 "skill_sha256": sha256(self.skill_file),
                 "capability_manifest": ("references/delegated-execution/capability.json"),
@@ -288,7 +288,7 @@ class HostBoundaryContract(unittest.TestCase):
         """Run the fixture host check."""
         return HOST_BOUNDARY.check_host(
             descriptor_path=self.descriptor_path,
-            skill_name="agent-scripts:implement-ticket",
+            skill_name="compris:implement-ticket",
             skill_root=self.skill_root,
             connector="github@openai-curated",
             operations=REQUIRED_OPERATIONS if operations is None else operations,
@@ -331,13 +331,13 @@ class HostBoundaryContract(unittest.TestCase):
         self.assertEqual(payload["reference_host"], "codex")
         self.assertEqual(
             payload["delegated_capability"],
-            "agent-scripts.implement-ticket/delegated-execution/v2",
+            "compris.implement-ticket/delegated-execution/v2",
         )
         self.assertEqual(payload["native_state_access"], "read-only")
         self.assertFalse(payload["fallback_to_copied_workflows"])
         self.assertEqual(
             payload["delegated_skill"]["stable_name"],
-            "agent-scripts:implement-ticket",
+            "compris:implement-ticket",
         )
         self.assertEqual(payload["delegated_authority_actions"], AUTHORITY_ACTIONS)
         self.assertEqual(
@@ -354,6 +354,7 @@ class HostBoundaryContract(unittest.TestCase):
         result = self.check_host()
         self.assertEqual(result["status"], "compatible")
         self.assertEqual(result["native_state_access"], "read-only")
+        self.assertEqual(result["content_drift_warnings"], [])
 
     def test_missing_read_operation_fails_closed(self) -> None:
         """Reject a host that cannot provide one required observation category."""
@@ -363,17 +364,23 @@ class HostBoundaryContract(unittest.TestCase):
         ):
             self.check_host(operations=REQUIRED_OPERATIONS[:-1])
 
-    def test_changed_installed_skill_fails_closed(self) -> None:
-        """Reject a same-named but content-mismatched installed skill."""
+    def test_changed_installed_skill_warns_but_stays_compatible(self) -> None:
+        """Accept a same-named installed skill whose prose has drifted, with a warning.
+
+        The installed skill's SKILL.md is expected to evolve as the delegated
+        project ships routine improvements. Only the delegated-execution
+        protocol surface (the capability manifest and its bundled
+        contract/schemas/validator, covered by the tests below) stays
+        exact-hash pinned and fail-closed.
+        """
         self.skill_file.write_text(
             self.skill_file.read_text(encoding="utf-8") + "\nchanged\n",
             encoding="utf-8",
         )
-        with self.assertRaisesRegex(
-            HOST_BOUNDARY.HostBoundaryError,
-            "installed skill hash mismatch",
-        ):
-            self.check_host()
+        result = self.check_host()
+        self.assertEqual(result["status"], "compatible")
+        self.assertEqual(len(result["content_drift_warnings"]), 1)
+        self.assertIn("installed skill content has drifted", result["content_drift_warnings"][0])
 
     def test_missing_capability_schema_fails_closed(self) -> None:
         """Reject a manifest whose versioned protocol is incomplete."""

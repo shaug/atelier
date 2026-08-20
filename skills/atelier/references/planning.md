@@ -9,7 +9,7 @@ Issue #777 implements only planning for one GitHub-backed assignment:
 - wait for explicit operator approval; and
 - promote only that previewed revision to `approved`.
 
-It does not claim work, choose a worker, invoke Agent Scripts, create or update a
+It does not claim work, choose a worker, invoke Compris, create or update a
 pull request, accept delivery, mutate a native ticket, merge, deploy, or clean up.
 
 ## Required live inputs

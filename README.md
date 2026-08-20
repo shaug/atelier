@@ -16,8 +16,8 @@ repository, ticket, pull request, or acceptance record.
 
 ## Product boundary
 
-- Atelier is an application built on independently installed Agent Scripts.
-- Agent Scripts owns native-ticket implementation and its transitive workflow.
+- Atelier is an application built on independently installed Compris.
+- Compris owns native-ticket implementation and its transitive workflow.
 - Atelier owns durable planning, approval, authority fencing, coordination,
   delegated-result validation, live audit, and operator acceptance.
 - A passive Git repository is the only Atelier mailbox.

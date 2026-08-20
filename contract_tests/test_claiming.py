@@ -270,7 +270,7 @@ print(json.dumps(value, sort_keys=True))
                     "material_fields": ["body", "state", "relationships"],
                 },
                 "execution": {
-                    "capability": "agent-scripts.implement-ticket/delegated-execution/v2",
+                    "capability": "compris.implement-ticket/delegated-execution/v2",
                     "delivery_outcome": "ready_pr",
                     "parallel_assignments": False,
                 },
@@ -317,8 +317,8 @@ print(json.dumps(value, sort_keys=True))
     def host_target(self) -> HostTarget:
         return HostTarget(
             descriptor_path=self.root / "host-capability.json",
-            skill_name="agent-scripts:implement-ticket",
-            skill_root=self.root / "agent-scripts",
+            skill_name="compris:implement-ticket",
+            skill_root=self.root / "compris",
             connector="github@openai-curated",
             operations=("read_issue",),
         )
@@ -326,8 +326,8 @@ print(json.dumps(value, sort_keys=True))
     def delegation_host_target(self) -> HostTarget:
         return HostTarget(
             descriptor_path=self.root / "host-capability.json",
-            skill_name="agent-scripts:implement-ticket",
-            skill_root=self.root / "agent-scripts",
+            skill_name="compris:implement-ticket",
+            skill_root=self.root / "compris",
             connector="github@openai-curated",
             operations=("read_issue",),
         )
@@ -335,7 +335,7 @@ print(json.dumps(value, sort_keys=True))
     def installed_host_target(self) -> HostTarget:
         return HostTarget(
             descriptor_path=HOST_CAPABILITY,
-            skill_name="agent-scripts:implement-ticket",
+            skill_name="compris:implement-ticket",
             skill_root=INSTALLED_TICKET_SKILL,
             connector="github@openai-curated",
             operations=REQUIRED_HOST_OPERATIONS,
@@ -2157,7 +2157,7 @@ print(json.dumps(value, sort_keys=True))
 
     @unittest.skipUnless(
         (INSTALLED_TICKET_SKILL / "references/delegated-execution/validate.py").is_file(),
-        "exact installed Agent Scripts v2 bundle is unavailable",
+        "exact installed Compris v2 bundle is unavailable",
     )
     def test_checkpoint_command_services_one_request_with_installed_v2_bundle(self) -> None:
         claimed = self.claim()

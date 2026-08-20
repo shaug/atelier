@@ -19,13 +19,13 @@ gate.
 ## Governing constraints
 
 - Atelier remains its own repository and installable plugin.
-- Agent Scripts remains an independently installed platform dependency.
+- Compris remains an independently installed platform dependency.
 - The Git mailbox is the only shared Atelier state.
 - There is no database, daemon, server, background lease, or persistent
   projection.
 - Native tickets describe project work. The mailbox carries Atelier planning,
   approval, claim, coordination, receipt, and acceptance state.
-- Agent Scripts owns ticket implementation and its transitive workflow. Atelier
+- Compris owns ticket implementation and its transitive workflow. Atelier
   supplies policy, authority fences, and terminal validation; it does not copy
   or re-orchestrate that workflow.
 - The v0 delivery outcome is one ready pull request. Merge, deployment, native
@@ -39,7 +39,7 @@ gate.
 
 ### Work
 
-1. Land the coordinator-neutral delegated-execution capability in Agent Scripts.
+1. Land the coordinator-neutral delegated-execution capability in Compris.
 1. Record Codex as the v0 reference host and define the portable host-adapter
    boundary.
 1. Reconcile the design with the 16-scenario [Mailbox Protocol Validation].
@@ -47,8 +47,8 @@ gate.
 
 ### Exit criteria
 
-- Agent Scripts publishes and validates
-    `agent-scripts.implement-ticket/delegated-execution/v2`.
+- Compris publishes and validates
+    `compris.implement-ticket/delegated-execution/v2`.
 - The design, [Git Mailbox Contract], [Atelier Project Policy Contract], and
   implementation plan agree on lifecycle, authority, delivery, and acceptance.
 - No legacy ticket, tag, or implementation has been mutated as part of this
@@ -64,9 +64,9 @@ implementation.
 
 The experiment must:
 
-1. install Agent Scripts independently from its published repository state;
+1. install Compris independently from its published repository state;
 1. discover the delegated `implement-ticket` capability by its manifest;
-1. validate the manifest and a structured invocation with Agent Scripts' own
+1. validate the manifest and a structured invocation with Compris' own
    validator;
 1. let a fresh Codex worker task invoke the installed skill by stable name;
 1. exercise an allowed pre-mutation checkpoint;
@@ -79,7 +79,7 @@ The experiment must:
    `implement-ticket`, review, changeset, or pull-request workflow.
 
 Fixtures may replace live GitHub mutation in this phase, but the process must
-use real Codex skill discovery and a separately installed Agent Scripts skill. A
+use real Codex skill discovery and a separately installed Compris skill. A
 Python-only simulation does not satisfy the proof.
 
 ### Evaluation
@@ -108,7 +108,7 @@ normal operation. Include at least:
 
 After Phase 1, stop and present the operator with:
 
-- the merged Agent Scripts prerequisite and exact version;
+- the merged Compris prerequisite and exact version;
 - composition and forward-evaluation evidence;
 - adversarial-review findings and dispositions;
 - the proposed new implementation issue graph;
@@ -174,7 +174,7 @@ coherent state:
    sequence and token transitions, takeover, and append-only authorization
    evidence.
 1. **Work delegation** — construct the versioned invocation, call the separately
-   installed Agent Scripts skill, validate checkpoints and terminal results, and
+   installed Compris skill, validate checkpoints and terminal results, and
    record blocked or delivered receipts.
 1. **Audit and acceptance** — reread native state, evaluate the finite evidence
    predicates, report uncertainty, and record explicit operator acceptance.
@@ -231,7 +231,7 @@ The cross-project evaluation must prove that:
 
 The constrained evaluation must prove useful planner-worker communication
 without native-ticket writes. If either evaluation requires a server,
-projection, or copied Agent Scripts workflow, stop and revisit the product
+projection, or copied Compris workflow, stop and revisit the product
 boundary rather than expanding the architecture.
 
 ## Decision points after v0
@@ -243,7 +243,7 @@ Only validated demand may justify:
 - multiple active assignments in one project;
 - `ready_prs`, merge, or deployment outcomes;
 - richer derived views rebuilt from Git on demand; or
-- additional Agent Scripts capability contracts.
+- additional Compris capability contracts.
 
 None of these decisions justify a server-backed mailbox. If Git alone becomes
 insufficient, treat that as evidence that the product shape should change, not

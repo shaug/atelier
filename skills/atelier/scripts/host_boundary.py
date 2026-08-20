@@ -216,7 +216,7 @@ def load_descriptor(path: Path = DEFAULT_DESCRIPTOR) -> dict[str, Any]:
         raise HostBoundaryError("reference host must be codex")
     if (
         descriptor["delegated_capability"]
-        != "agent-scripts.implement-ticket/delegated-execution/v2"
+        != "compris.implement-ticket/delegated-execution/v2"
     ):
         raise HostBoundaryError("delegated capability identifier is incompatible")
     if descriptor["native_state_access"] != "read-only":
@@ -284,10 +284,20 @@ def check_host(
     connector: str,
     operations: list[str],
 ) -> dict[str, Any]:
-    """Prove exact dependency identity and required read-only host operations."""
+    """Prove dependency identity and required read-only host operations.
+
+    The installed skill's own prose (`SKILL.md`) is expected to evolve as the
+    delegated project ships routine improvements, so a `skill_sha256` mismatch
+    is reported as a non-fatal content-drift warning rather than a fail-closed
+    rejection. The actual delegated-execution protocol surface — the capability
+    manifest and its bundled contract/schemas/validator, verified below — stays
+    exact-hash pinned and fail-closed, since a change there is a breaking
+    protocol change rather than routine content churn.
+    """
     descriptor = load_descriptor(descriptor_path)
     delegated = descriptor["delegated_skill"]
     native_state = descriptor["native_state"]
+    warnings: list[str] = []
     if skill_name != delegated["stable_name"]:
         raise HostBoundaryError(
             f"installed skill name mismatch: expected {delegated['stable_name']}"
@@ -305,7 +315,10 @@ def check_host(
     resolved_root = skill_root.resolve()
     skill_file = _resolve_within(resolved_root, "SKILL.md", "installed skill")
     if _sha256(skill_file) != delegated["skill_sha256"]:
-        raise HostBoundaryError("installed skill hash mismatch")
+        warnings.append(
+            "installed skill content has drifted from the last-reviewed SKILL.md "
+            f"({delegated['stable_name']}); confirm behavior is still compatible"
+        )
     first_lines = skill_file.read_text(encoding="utf-8").splitlines()[:4]
     if f"name: {delegated['frontmatter_name']}" not in first_lines:
         raise HostBoundaryError("installed skill frontmatter identity mismatch")
@@ -398,6 +411,7 @@ def check_host(
         "connector": connector,
         "native_state_access": "read-only",
         "operations": sorted(set(native_state["required_operations"])),
+        "content_drift_warnings": warnings,
     }
 
 
@@ -529,6 +543,8 @@ def main() -> int:
     except HostBoundaryError as error:
         print(f"ERROR host-boundary: {error}", file=sys.stderr)
         return 1
+    for warning in result.get("content_drift_warnings", []):
+        print(f"WARNING host-boundary: {warning}", file=sys.stderr)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 

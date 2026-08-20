@@ -45,7 +45,7 @@ ticket:
     - relationships
 
 execution:
-    capability: agent-scripts.implement-ticket/delegated-execution/v2
+    capability: compris.implement-ticket/delegated-execution/v2
   delivery_outcome: ready_pr
   parallel_assignments: false
 
@@ -146,7 +146,7 @@ sorted by stable provider identifier before encoding.
 ### Execution
 
 `execution.capability` is exactly
-  `agent-scripts.implement-ticket/delegated-execution/v2`.
+  `compris.implement-ticket/delegated-execution/v2`.
 
 `execution.delivery_outcome` is exactly `ready_pr`.
 
@@ -195,7 +195,7 @@ inherited by a later session.
 `validation.required_commands` is an ordered sequence of nonempty command
 strings. It may be empty only when the project has no local validation command.
 
-Agent Scripts reports each command, result, exact candidate revision, and
+Compris reports each command, result, exact candidate revision, and
 observation time. These are recorded observations, not independently proven
 facts. An operator may accept them under the `required-validation-reported`
 predicate.

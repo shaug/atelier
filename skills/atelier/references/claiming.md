@@ -20,7 +20,7 @@ Before `claim`, `checkpoint`, or `takeover`:
    ref, and `.atelier/policy.yaml` path.
 4. Supply the exact canonical mailbox commit that first contains the approved
    work revision.
-5. Supply the exact installed Agent Scripts skill root, stable name, connector
+5. Supply the exact installed Compris skill root, stable name, connector
    identity, and complete read-only operation set required by the host descriptor.
 
 The script binds the policy remote's canonical GitHub URL to the managed project
@@ -71,7 +71,7 @@ Execution-state operations additionally contain:
   "approved_commit": "0123456789abcdef0123456789abcdef01234567",
   "host": {
     "descriptor_path": "/absolute/path/to/atelier/references/host-capability.json",
-    "skill_name": "agent-scripts:implement-ticket",
+    "skill_name": "compris:implement-ticket",
     "skill_root": "/absolute/path/to/installed/implement-ticket",
     "connector": "github@openai-curated",
     "operations": ["read_issue", "read_issue_relationships"]

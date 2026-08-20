@@ -140,7 +140,7 @@ numbers.
 - `RESET` — Push the archive tag, disposition legacy issues, and replace the CLI
   with a minimal plugin skeleton. Depends on reset confirmation.
 - `HOST` — Discover `/atelier` in Codex, establish the read-only native-state
-  connector boundary, and fail closed unless the exact Agent Scripts capability
+  connector boundary, and fail closed unless the exact Compris capability
   is available. Depends on `RESET`.
 - `MAILBOX` — Validate mailbox root, project, initiative, work, message,
   receipt, acceptance, and policy documents. Depends on `RESET`.
@@ -150,7 +150,7 @@ numbers.
   GitHub ticket. Depends on `HOST` and `GIT-WRITES`.
 - `CLAIM` — Derive project-serial eligibility and maintain fenced claims and
   checkpoint ledgers. Depends on `PLAN` and `GIT-WRITES`.
-- `DELEGATE` — Invoke the installed Agent Scripts capability and record a
+- `DELEGATE` — Invoke the installed Compris capability and record a
   validated blocked or delivered receipt. Depends on `HOST` and `CLAIM`.
 - `AUDIT` — Re-read native ticket, PR, review, and check state through the host
   connector and record explicit operator acceptance only when every evidence
@@ -323,7 +323,7 @@ Retain unchanged unless a concrete new-tooling need says otherwise:
 - `experiments/codex-composition-eval/**`.
 
 The reset must not leave a dormant legacy package, compatibility command,
-migration reader, copied Agent Scripts workflow, Beads adapter, Dolt helper,
+migration reader, copied Compris workflow, Beads adapter, Dolt helper,
 SQLite projection, server stub, or alternate runtime path.
 
 ## Destructive preflight

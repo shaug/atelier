@@ -22,8 +22,8 @@ fail-closed startup preflight.
 
 The preflight must prove:
 
-- the exact plugin-qualified `agent-scripts:implement-ticket` skill identity;
-- the compatible `agent-scripts.implement-ticket/delegated-execution/v2`
+- the exact plugin-qualified `compris:implement-ticket` skill identity;
+- the compatible `compris.implement-ticket/delegated-execution/v2`
   manifest, schemas, and dependency-owned validator;
 - the six v0 candidate, pull-request, and review authority actions declared by
   the host capability descriptor;
@@ -57,7 +57,7 @@ assignment. Before delegation, read `references/delegation.md`, repeat the
 fail-closed host preflight, and use `scripts/delegation.py` to prepare the exact
 v2 invocation, service fresh-observation checkpoints, and validate one terminal
 result. Launch one fresh worker through the host with the installed
-`agent-scripts:implement-ticket` skill. Do not copy its workflow, spawn a
+`compris:implement-ticket` skill. Do not copy its workflow, spawn a
 substitute CLI process, cache provider observations, or widen Atelier's v0
 authority ceiling.
 
@@ -104,7 +104,7 @@ Preserve these boundaries in every future mode:
 
 - The Git mailbox is Atelier's only shared state.
 - Native tickets describe project work.
-- Agent Scripts remains an independently installed dependency and owns ticket
+- Compris remains an independently installed dependency and owns ticket
   implementation and its transitive workflow.
 - Atelier owns approved intent, project policy, authority fencing, durable
   coordination, terminal validation, audit, and operator acceptance.

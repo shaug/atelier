@@ -220,7 +220,7 @@ class PlanningContract(unittest.TestCase):
                 "material_fields": ["body", "state", "relationships"],
             },
             "execution": {
-                "capability": "agent-scripts.implement-ticket/delegated-execution/v2",
+                "capability": "compris.implement-ticket/delegated-execution/v2",
                 "delivery_outcome": "ready_pr",
                 "parallel_assignments": False,
             },

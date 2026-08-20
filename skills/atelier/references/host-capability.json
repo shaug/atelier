@@ -1,7 +1,7 @@
 {
   "schema": "atelier.host-capability/v1",
   "reference_host": "codex",
-  "delegated_capability": "agent-scripts.implement-ticket/delegated-execution/v2",
+  "delegated_capability": "compris.implement-ticket/delegated-execution/v2",
   "delegated_authority_actions": [
     "repository.candidate.create",
     "repository.candidate.push",
@@ -16,18 +16,18 @@
     "requires_epic"
   ],
   "delegated_skill": {
-    "stable_name": "agent-scripts:implement-ticket",
+    "stable_name": "compris:implement-ticket",
     "frontmatter_name": "implement-ticket",
-    "skill_sha256": "3fabc1d030bd936c6a40caf10aa92ecbe1b32295825940e58342c7f99ea6acc4",
+    "skill_sha256": "f32831d0232f249afef326c91a3caca80575c55fd03824bd291830d667b3aa13",
     "capability_manifest": "references/delegated-execution/capability.json",
-    "capability_manifest_sha256": "60f259e7d4fba7cd4f7ad0b91dee8fd809ea81b7d4e9faa7e7e4867c8c2a3150",
+    "capability_manifest_sha256": "d1cda0d362c174809d56aeaf34885e1c19215d9bbf6f7a7a990bb32a4a26bfc3",
     "bundle_sha256": {
-      "CONTRACT.md": "8c94c1c4bc7a379602bd802a987492fa1c5cd7a9c9c05788fe52f27be1fe9a6a",
-      "capability.schema.json": "586038f1cedce0b282ab5f291a319efbe5a7ffa78edd6670f46f7ff00e06f833",
-      "invocation.schema.json": "43416a186655623a9f35a83d739319ff1f83c5a6b0084e00db8470f45d4d0e3c",
-      "checkpoint-request.schema.json": "c0018468879ef356295695ba4e25c676cd77f8bed563a880c018874890a8157f",
-      "checkpoint-response.schema.json": "29e9e9c50fcf583532d9f88dc862c5f06422823056ef3ebf8682434c3e9b5a83",
-      "result.schema.json": "0128e54180cea4b9334c5dd87559ab5c2826a12355f7bbbaa485b80bc599daa1",
+      "CONTRACT.md": "06c611a3971b5905a77ebc167e6ad61f25a24581c8de291292294a6f36bc4058",
+      "capability.schema.json": "df6a157b9638773f3b993141d8856e3fb9aee8893f1d2005af395c237b4903a4",
+      "invocation.schema.json": "c8cf0a3ac6f6c7b448ad3fdfe57565b53b0708caf7a5316e32cdfd0cdedb1db8",
+      "checkpoint-request.schema.json": "3196ec73d88d2c970b890d0b66c3b44f639d427151d727535a694ce1eebd72e3",
+      "checkpoint-response.schema.json": "1ef68eb048a0103a3f8c9c18097c125d646d2279db6f79bf0ad36695b18f22d0",
+      "result.schema.json": "c318bde1e5662179996fdcea50864f0eb79f67df29ca8be044a191330cf6b77a",
       "validate.py": "01e017b8b6349d43a71ab5145f6bf9126b8811b64a13898d1aa16b65b3b48bde"
     }
   },

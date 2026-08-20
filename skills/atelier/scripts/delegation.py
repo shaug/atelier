@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare, checkpoint, and finalize one delegated Agent Scripts execution."""
+"""Prepare, checkpoint, and finalize one delegated Compris execution."""
 
 from __future__ import annotations
 
@@ -54,11 +54,11 @@ from skills.atelier.scripts.planning import (
     _ticket_material_digest,
 )
 
-CAPABILITY = "agent-scripts.implement-ticket/delegated-execution/v2"
-INVOCATION_SCHEMA = "agent-scripts.implement-ticket/delegated-invocation/v2"
-REQUEST_SCHEMA = "agent-scripts.implement-ticket/checkpoint-request/v2"
-RESPONSE_SCHEMA = "agent-scripts.implement-ticket/checkpoint-response/v2"
-RESULT_SCHEMA = "agent-scripts.implement-ticket/delegated-result/v2"
+CAPABILITY = "compris.implement-ticket/delegated-execution/v2"
+INVOCATION_SCHEMA = "compris.implement-ticket/delegated-invocation/v2"
+REQUEST_SCHEMA = "compris.implement-ticket/checkpoint-request/v2"
+RESPONSE_SCHEMA = "compris.implement-ticket/checkpoint-response/v2"
+RESULT_SCHEMA = "compris.implement-ticket/delegated-result/v2"
 ACCEPTED_TERMINALS = ("ready_pr", "blocked", "requires_epic")
 SECTION_PATTERN = re.compile(
     r"^## (?P<title>[^\n]+)\n\n(?P<body>.*?)(?=^## |\Z)",

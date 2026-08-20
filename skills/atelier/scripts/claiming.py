@@ -1019,7 +1019,7 @@ def _require_policy_identity(
     if policy["repository"]["identity"] != expected_repository:
         raise MailboxTransitionRejected("project policy repository identity is incompatible")
     if policy["execution"] != {
-        "capability": "agent-scripts.implement-ticket/delegated-execution/v2",
+        "capability": "compris.implement-ticket/delegated-execution/v2",
         "delivery_outcome": "ready_pr",
         "parallel_assignments": False,
     }:
@@ -1110,7 +1110,7 @@ def _capability_compatible(target: HostTarget) -> bool:
     return (
         result["status"] == "compatible"
         and result["delegated_capability"]
-        == "agent-scripts.implement-ticket/delegated-execution/v2"
+        == "compris.implement-ticket/delegated-execution/v2"
     )
 
 
